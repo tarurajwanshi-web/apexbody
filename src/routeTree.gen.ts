@@ -9,19 +9,37 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WorkoutsRouteImport } from './routes/workouts'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as NutritionRouteImport } from './routes/nutrition'
 import { Route as MeetCoachRouteImport } from './routes/meet-coach'
+import { Route as HomeRouteImport } from './routes/home'
 import { Route as DisclaimerRouteImport } from './routes/disclaimer'
 import { Route as IndexRouteImport } from './routes/index'
 
+const WorkoutsRoute = WorkoutsRouteImport.update({
+  id: '/workouts',
+  path: '/workouts',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OnboardingRoute = OnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NutritionRoute = NutritionRouteImport.update({
+  id: '/nutrition',
+  path: '/nutrition',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MeetCoachRoute = MeetCoachRouteImport.update({
   id: '/meet-coach',
   path: '/meet-coach',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HomeRoute = HomeRouteImport.update({
+  id: '/home',
+  path: '/home',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DisclaimerRoute = DisclaimerRouteImport.update({
@@ -38,39 +56,80 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/disclaimer': typeof DisclaimerRoute
+  '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
+  '/nutrition': typeof NutritionRoute
   '/onboarding': typeof OnboardingRoute
+  '/workouts': typeof WorkoutsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/disclaimer': typeof DisclaimerRoute
+  '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
+  '/nutrition': typeof NutritionRoute
   '/onboarding': typeof OnboardingRoute
+  '/workouts': typeof WorkoutsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/disclaimer': typeof DisclaimerRoute
+  '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
+  '/nutrition': typeof NutritionRoute
   '/onboarding': typeof OnboardingRoute
+  '/workouts': typeof WorkoutsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/disclaimer' | '/meet-coach' | '/onboarding'
+  fullPaths:
+    | '/'
+    | '/disclaimer'
+    | '/home'
+    | '/meet-coach'
+    | '/nutrition'
+    | '/onboarding'
+    | '/workouts'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/disclaimer' | '/meet-coach' | '/onboarding'
-  id: '__root__' | '/' | '/disclaimer' | '/meet-coach' | '/onboarding'
+  to:
+    | '/'
+    | '/disclaimer'
+    | '/home'
+    | '/meet-coach'
+    | '/nutrition'
+    | '/onboarding'
+    | '/workouts'
+  id:
+    | '__root__'
+    | '/'
+    | '/disclaimer'
+    | '/home'
+    | '/meet-coach'
+    | '/nutrition'
+    | '/onboarding'
+    | '/workouts'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DisclaimerRoute: typeof DisclaimerRoute
+  HomeRoute: typeof HomeRoute
   MeetCoachRoute: typeof MeetCoachRoute
+  NutritionRoute: typeof NutritionRoute
   OnboardingRoute: typeof OnboardingRoute
+  WorkoutsRoute: typeof WorkoutsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/workouts': {
+      id: '/workouts'
+      path: '/workouts'
+      fullPath: '/workouts'
+      preLoaderRoute: typeof WorkoutsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/onboarding': {
       id: '/onboarding'
       path: '/onboarding'
@@ -78,11 +137,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/nutrition': {
+      id: '/nutrition'
+      path: '/nutrition'
+      fullPath: '/nutrition'
+      preLoaderRoute: typeof NutritionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/meet-coach': {
       id: '/meet-coach'
       path: '/meet-coach'
       fullPath: '/meet-coach'
       preLoaderRoute: typeof MeetCoachRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/home': {
+      id: '/home'
+      path: '/home'
+      fullPath: '/home'
+      preLoaderRoute: typeof HomeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/disclaimer': {
@@ -105,8 +178,11 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DisclaimerRoute: DisclaimerRoute,
+  HomeRoute: HomeRoute,
   MeetCoachRoute: MeetCoachRoute,
+  NutritionRoute: NutritionRoute,
   OnboardingRoute: OnboardingRoute,
+  WorkoutsRoute: WorkoutsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
