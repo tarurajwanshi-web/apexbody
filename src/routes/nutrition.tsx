@@ -1,10 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, Plus, Camera, Barcode, Search, Mic } from "lucide-react";
-import { useState } from "react";
+import { ChevronLeft, Plus, Camera, Barcode, Search, Mic, Sparkles, X } from "lucide-react";
+import { useRef, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { todayMeals, macroTargets, macroToday } from "@/lib/mock";
 import { AICard } from "@/components/AIOrb";
 import { RingChart } from "@/components/RingChart";
 import { BottomNav } from "@/components/BottomNav";
+import { analyzePhoto } from "@/lib/coach.functions";
 
 export const Route = createFileRoute("/nutrition")({
   head: () => ({ meta: [{ title: "Nutrition — APEX" }] }),
@@ -13,7 +15,43 @@ export const Route = createFileRoute("/nutrition")({
 
 function Nutrition() {
   const [sheet, setSheet] = useState(false);
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const fn = useServerFn(analyzePhoto);
+
   const pct = (a: number, b: number) => Math.round((a / b) * 100);
+
+  const onPhoto = async (file: File) => {
+    setSheet(false);
+    setError(null);
+    setAnalysis(null);
+    setAnalyzing(true);
+    try {
+      const reader = new FileReader();
+      const dataUrl: string = await new Promise((res, rej) => {
+        reader.onload = () => res(reader.result as string);
+        reader.onerror = () => rej(reader.error);
+        reader.readAsDataURL(file);
+      });
+      setPreview(dataUrl);
+      const r = await fn({
+        data: {
+          base64Image: dataUrl,
+          mediaType: file.type || "image/jpeg",
+          prompt:
+            "Identify the food in this image. Estimate portion size and macros (calories, protein, carbs, fat). Format: short food name, then 'Est: XXX kcal · Pg / Cg / Fg', then a 1-sentence note. Be concise.",
+        },
+      });
+      setAnalysis(r.content);
+    } catch (e: any) {
+      setError(e?.message ?? "Could not analyze photo.");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-bg-1 pb-32">
@@ -49,6 +87,25 @@ function Nutrition() {
         </AICard>
       </div>
 
+      {(analyzing || analysis || error) && (
+        <section className="mx-5 mt-4 rounded-2xl border border-ai/30 bg-gradient-to-br from-ai/10 to-sleep/5 p-4 animate-fade-up">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Sparkles size={14} className={`text-ai ${analyzing ? "animate-pulse" : ""}`} />
+              <p className="text-[10px] uppercase tracking-wider text-text-accent font-semibold">
+                {analyzing ? "Analyzing photo…" : "Photo analysis"}
+              </p>
+            </div>
+            <button onClick={() => { setAnalysis(null); setPreview(null); setError(null); }} className="text-text-tertiary">
+              <X size={14} />
+            </button>
+          </div>
+          {preview && <img src={preview} alt="meal" className="mt-3 max-h-44 w-full object-cover rounded-xl" />}
+          {error && <p className="mt-3 text-sm text-danger">{error}</p>}
+          {analysis && <p className="mt-3 text-sm leading-relaxed whitespace-pre-wrap">{analysis}</p>}
+        </section>
+      )}
+
       <section className="mx-5 mt-5 space-y-2">
         <p className="text-xs uppercase tracking-wider text-text-tertiary mb-1">Meals today</p>
         {todayMeals.map((m, i) => (
@@ -68,6 +125,19 @@ function Nutrition() {
         ))}
       </section>
 
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onPhoto(f);
+          e.target.value = "";
+        }}
+      />
+
       <button
         onClick={() => setSheet(true)}
         className="fixed bottom-28 right-6 z-40 h-14 w-14 rounded-full gradient-brand ai-glow flex items-center justify-center text-white"
@@ -81,12 +151,12 @@ function Nutrition() {
             <div className="h-1 w-12 rounded-full bg-white/20 mx-auto mb-4" />
             <h3 className="text-xl font-bold">Log your meal</h3>
             <div className="mt-4 grid grid-cols-2 gap-3">
-              <LogOpt icon={Camera} title="Take a photo" sub="Fastest, AI identifies" />
+              <LogOpt icon={Camera} title="Take a photo" sub="AI identifies macros" onClick={() => fileRef.current?.click()} />
               <LogOpt icon={Barcode} title="Scan barcode" sub="Product database" />
               <LogOpt icon={Search} title="Search foods" sub="Manual entry" />
               <LogOpt icon={Mic} title="Describe it" sub="Voice input" />
             </div>
-            <p className="mt-4 text-[11px] text-text-accent text-center">AI identifies food, portion, and macros from photos</p>
+            <p className="mt-4 text-[11px] text-text-accent text-center">Powered by Claude vision</p>
           </div>
         </div>
       )}
@@ -107,9 +177,9 @@ function Macro({ label, v, t, color }: { label: string; v: number; t: number; co
   );
 }
 
-function LogOpt({ icon: Icon, title, sub }: any) {
+function LogOpt({ icon: Icon, title, sub, onClick }: any) {
   return (
-    <button className="rounded-2xl bg-bg-3 p-4 text-left">
+    <button onClick={onClick} className="rounded-2xl bg-bg-3 p-4 text-left active:scale-[0.98] transition">
       <Icon size={28} className="text-text-accent" />
       <p className="mt-3 text-sm font-semibold">{title}</p>
       <p className="text-[11px] text-text-tertiary mt-0.5">{sub}</p>
