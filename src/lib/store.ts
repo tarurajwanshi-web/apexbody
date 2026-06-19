@@ -6,12 +6,16 @@ export type Profile = {
   age: number;
   weightKg: number;
   heightCm: number;
+  weightUnit: "kg" | "lbs";
+  heightUnit: "cm" | "ft";
   goal: "recomp" | "fatloss" | "strength" | "performance" | null;
   experience: "beginner" | "intermediate" | "advanced" | null;
   frequency: number;
   days: string[];
   bodyFat: number;
   targetBodyFat: number;
+  photos: { front?: string; side?: string; back?: string };
+  recoveryDevice: "whoop" | "screenshots" | "apple" | "manual" | null;
   coachName: string;
   onboarded: boolean;
   agreedTerms: boolean;
@@ -19,24 +23,29 @@ export type Profile = {
 };
 
 export const DEFAULT_PROFILE: Profile = {
-  name: "Tarun",
+  name: "",
   gender: null,
   age: 28,
   weightKg: 78,
   heightCm: 177,
+  weightUnit: "kg",
+  heightUnit: "cm",
   goal: null,
   experience: null,
   frequency: 4,
   days: ["Mon", "Tue", "Thu", "Fri"],
   bodyFat: 18,
   targetBodyFat: 13,
+  photos: {},
+  recoveryDevice: null,
   coachName: "APEX",
   onboarded: false,
   agreedTerms: false,
   streak: 12,
 };
 
-const KEY = "apex.profile.v1";
+
+const KEY = "apex_user_profile";
 
 export function loadProfile(): Profile {
   if (typeof window === "undefined") return DEFAULT_PROFILE;
