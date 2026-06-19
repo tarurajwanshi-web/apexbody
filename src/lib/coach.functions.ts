@@ -110,8 +110,9 @@ export const analyzePhoto = createServerFn({ method: "POST" })
       : `data:${data.mediaType};base64,${data.base64Image}`;
 
     const content = await callGateway({
-      model: "anthropic/claude-sonnet-4-5",
+      model: "google/gemini-2.5-flash-image",
       max_tokens: 500,
+
       messages: [
         {
           role: "user",
