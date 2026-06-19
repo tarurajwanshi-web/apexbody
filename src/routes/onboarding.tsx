@@ -442,7 +442,7 @@ function StepPhotos({ draft, patch }: { draft: Profile; patch: (p: Partial<Profi
 
 /* STEP 7 */
 function RecoveryCard({
-  active, title, sub, badge, badgeTone, disabled, onClick,
+  active, title, sub, badge, badgeTone, disabled, accentLeft, onClick,
 }: {
   active: boolean;
   title: string;
@@ -450,6 +450,7 @@ function RecoveryCard({
   badge?: string;
   badgeTone?: "green" | "gray";
   disabled?: boolean;
+  accentLeft?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -459,11 +460,14 @@ function RecoveryCard({
       className={`w-full text-left rounded-2xl px-4 py-4 transition disabled:opacity-50 ${
         active
           ? "bg-ai/10 border-l-4 border-ai pl-3"
+          : accentLeft
+          ? "bg-[#0F1524] border border-white/10 border-l-[3px]"
           : "bg-[#171F33] border border-white/10"
       }`}
+      style={accentLeft && !active ? { borderLeftColor: "#7C3AED", borderLeftWidth: 3 } : undefined}
     >
       <div className="flex items-center gap-2">
-        <span className="font-semibold text-white text-[15px]">{title}</span>
+        <span className={`font-semibold text-[15px] ${disabled ? "text-text-tertiary" : "text-white"}`}>{title}</span>
         {badge && (
           <span
             className={`text-[10px] uppercase font-bold tracking-wide px-2 py-0.5 rounded-full ${
