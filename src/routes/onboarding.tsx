@@ -361,45 +361,56 @@ function StepBodyFat({ draft, patch }: { draft: Profile; patch: (p: Partial<Prof
 
 /* STEP 6 */
 function PhotoButton({
-  label, value, onChange,
-}: { label: string; value?: string; onChange: (data: string) => void }) {
+  label, sub, value, onChange,
+}: { label: string; sub: string; value?: string; onChange: (data: string) => void }) {
   const ref = useRef<HTMLInputElement>(null);
   return (
-    <button
-      type="button"
-      onClick={() => ref.current?.click()}
-      className="relative flex-1 aspect-[3/4] rounded-2xl bg-[#171F33] border border-white/10 flex flex-col items-center justify-center gap-2 overflow-hidden"
-    >
-      {value ? (
-        <>
-          <img src={value} alt={label} className="absolute inset-0 h-full w-full object-cover" />
-          <div className="absolute inset-0 bg-black/40" />
-          <div className="relative h-8 w-8 rounded-full bg-success flex items-center justify-center">
-            <Check size={18} className="text-white" strokeWidth={3} />
-          </div>
-          <span className="relative text-xs font-semibold text-white">{label}</span>
-        </>
-      ) : (
-        <>
-          <Camera size={28} className="text-text-secondary" />
-          <span className="text-xs text-text-secondary font-medium">{label}</span>
-        </>
-      )}
-      <input
-        ref={ref}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (!f) return;
-          const reader = new FileReader();
-          reader.onload = () => onChange(String(reader.result));
-          reader.readAsDataURL(f);
+    <div className="flex flex-col items-center gap-2">
+      <button
+        type="button"
+        onClick={() => ref.current?.click()}
+        className="relative flex flex-col items-center justify-center gap-2 overflow-hidden active:scale-[0.98] transition"
+        style={{
+          width: 140,
+          height: 160,
+          borderRadius: 16,
+          backgroundColor: "#0F1524",
+          border: value ? "1px solid rgba(16,185,129,0.4)" : "1px dashed rgba(124,58,237,0.30)",
         }}
-      />
-    </button>
+      >
+        {value ? (
+          <>
+            <img src={value} alt={label} className="absolute inset-0 h-full w-full object-cover" />
+            <div
+              className="absolute top-2 right-2 h-6 w-6 rounded-full flex items-center justify-center"
+              style={{ backgroundColor: "#10B981" }}
+            >
+              <Check size={14} className="text-white" strokeWidth={3} />
+            </div>
+          </>
+        ) : (
+          <>
+            <Camera size={26} className="text-text-accent" />
+            <span className="text-[12px] text-text-secondary font-medium">{label}</span>
+          </>
+        )}
+        <input
+          ref={ref}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (!f) return;
+            const reader = new FileReader();
+            reader.onload = () => onChange(String(reader.result));
+            reader.readAsDataURL(f);
+          }}
+        />
+      </button>
+      <span className="text-[11px] text-text-tertiary">{sub}</span>
+    </div>
   );
 }
 
@@ -412,12 +423,18 @@ function StepPhotos({ draft, patch }: { draft: Profile; patch: (p: Partial<Profi
         q="Take your starting photos"
         sub="This helps me assess your body composition and weak points."
       />
-      <div className="flex gap-3">
-        <PhotoButton label="Front" value={draft.photos.front} onChange={(v) => set("front", v)} />
-        <PhotoButton label="Side" value={draft.photos.side} onChange={(v) => set("side", v)} />
-        <PhotoButton label="Back" value={draft.photos.back} onChange={(v) => set("back", v)} />
+      <div className="flex gap-3 justify-center flex-wrap">
+        <PhotoButton label="Front" sub="Front relaxed" value={draft.photos.front} onChange={(v) => set("front", v)} />
+        <PhotoButton label="Side" sub="Side relaxed" value={draft.photos.side} onChange={(v) => set("side", v)} />
+        <PhotoButton label="Back" sub="Back relaxed" value={draft.photos.back} onChange={(v) => set("back", v)} />
       </div>
-      <p className="mt-6 text-center text-[13px] text-text-secondary underline">Skip for now</p>
+      <p className="mt-6 text-center text-[12px] text-text-secondary italic">
+        Same lighting each week for best comparison
+      </p>
+      <div className="mt-3 flex items-center justify-center gap-1.5 text-text-tertiary">
+        <Lock size={11} />
+        <span className="text-[11px]">Your photos stay private and are only used for body composition analysis</span>
+      </div>
     </div>
   );
 }
