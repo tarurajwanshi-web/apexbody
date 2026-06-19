@@ -18,6 +18,8 @@ export const Route = createFileRoute("/onboarding")({
 
 const TOTAL = 7;
 
+const hasAnyPhoto = (d: Profile) => !!(d.photos?.front || d.photos?.side || d.photos?.back);
+
 function Onboarding() {
   const navigate = useNavigate();
   const { profile, update } = useProfile();
