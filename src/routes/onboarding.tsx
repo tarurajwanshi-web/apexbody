@@ -1,13 +1,22 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { ChevronLeft, User, UserRound, Trophy, Flame, Dumbbell, Zap, Check } from "lucide-react";
+import { useRef, useState } from "react";
+import {
+  ChevronLeft,
+  Trophy,
+  Flame,
+  Dumbbell,
+  Zap,
+  Camera,
+  Check,
+  Activity,
+} from "lucide-react";
 import { useProfile, type Profile } from "@/lib/store";
 
 export const Route = createFileRoute("/onboarding")({
   component: Onboarding,
 });
 
-const TOTAL = 8;
+const TOTAL = 7;
 
 function Onboarding() {
   const navigate = useNavigate();
@@ -15,256 +24,478 @@ function Onboarding() {
   const [step, setStep] = useState(1);
   const [draft, setDraft] = useState<Profile>(profile);
 
+  const patch = (p: Partial<Profile>) => setDraft((d) => ({ ...d, ...p }));
+
+  const canContinue = (() => {
+    switch (step) {
+      case 1: return !!draft.name.trim() && !!draft.gender && draft.age > 0;
+      case 2: return draft.weightKg > 0 && draft.heightCm > 0;
+      case 3: return !!draft.experience;
+      case 4: return !!draft.goal;
+      case 7: return !!draft.recoveryDevice;
+      default: return true;
+    }
+  })();
+
   const next = () => {
     if (step === TOTAL) {
-      update({ ...draft, onboarded: false });
+      update({ ...draft });
       navigate({ to: "/meet-coach" });
     } else {
       setStep(step + 1);
     }
   };
-  const back = () => (step === 1 ? navigate({ to: "/disclaimer" }) : setStep(step - 1));
+  const back = () =>
+    step === 1 ? navigate({ to: "/disclaimer" }) : setStep(step - 1);
 
   return (
-    <div className="min-h-screen bg-bg-1 px-6 py-6 flex flex-col">
-      <div className="flex items-center justify-between">
-        <button onClick={back} className="text-text-secondary"><ChevronLeft size={24} /></button>
-        <span className="text-[11px] uppercase tracking-widest text-text-tertiary">Step {step} of {TOTAL}</span>
-      </div>
-      <div className="mt-4 h-0.5 w-full overflow-hidden rounded-full bg-white/5">
-        <div className="h-full gradient-brand transition-all" style={{ width: `${(step / TOTAL) * 100}%` }} />
+    <div className="min-h-screen flex flex-col px-6 pt-6 pb-8" style={{ backgroundColor: "#0A0E1A" }}>
+      <div className="h-[3px] w-full overflow-hidden rounded-full bg-white/5">
+        <div
+          className="h-full gradient-brand transition-all duration-300"
+          style={{ width: `${(step / TOTAL) * 100}%` }}
+        />
       </div>
 
-      <div className="flex-1 mt-10 animate-fade-up" key={step}>
-        {step === 1 && <Gender value={draft.gender} onChange={(v) => setDraft({ ...draft, gender: v })} />}
-        {step === 2 && <AgePicker value={draft.age} onChange={(v) => setDraft({ ...draft, age: v })} />}
-        {step === 3 && <WeightPicker value={draft.weightKg} onChange={(v) => setDraft({ ...draft, weightKg: v })} />}
-        {step === 4 && <HeightPicker value={draft.heightCm} onChange={(v) => setDraft({ ...draft, heightCm: v })} />}
-        {step === 5 && <Goal value={draft.goal} onChange={(v) => setDraft({ ...draft, goal: v })} />}
-        {step === 6 && <Experience value={draft.experience} onChange={(v) => setDraft({ ...draft, experience: v })} />}
-        {step === 7 && <Frequency value={draft.frequency} days={draft.days} onChange={(f, d) => setDraft({ ...draft, frequency: f, days: d })} />}
-        {step === 8 && <BodyFat current={draft.bodyFat} target={draft.targetBodyFat} onChange={(c, t) => setDraft({ ...draft, bodyFat: c, targetBodyFat: t })} />}
+      <div className="mt-5 flex items-center justify-between">
+        <button onClick={back} className="text-text-secondary -ml-1">
+          <ChevronLeft size={26} />
+        </button>
+        <span className="text-[12px] text-text-secondary">Step {step} of {TOTAL}</span>
+      </div>
+
+      <div className="flex-1 mt-8 animate-fade-up" key={step}>
+        {step === 1 && <StepBasics draft={draft} patch={patch} />}
+        {step === 2 && <StepBody draft={draft} patch={patch} />}
+        {step === 3 && <StepExperience draft={draft} patch={patch} />}
+        {step === 4 && <StepGoal draft={draft} patch={patch} />}
+        {step === 5 && <StepBodyFat draft={draft} patch={patch} />}
+        {step === 6 && <StepPhotos draft={draft} patch={patch} />}
+        {step === 7 && <StepRecovery draft={draft} patch={patch} />}
       </div>
 
       <button
         onClick={next}
-        className="mt-6 w-full rounded-2xl gradient-brand py-4 font-semibold text-white"
+        disabled={!canContinue}
+        className="w-full gradient-brand font-semibold text-white disabled:opacity-30 disabled:cursor-not-allowed transition"
+        style={{ height: "56px", borderRadius: "14px" }}
       >
-        {step === TOTAL ? "Build my plan" : "Continue"}
+        Next
       </button>
     </div>
   );
 }
 
-function Title({ q, sub }: { q: string; sub?: string }) {
+function Header({ q, sub }: { q: string; sub?: string }) {
   return (
-    <div className="mb-8">
-      <h1 className="text-3xl font-bold leading-tight">{q}</h1>
-      {sub && <p className="mt-2 text-[15px] text-text-secondary">{sub}</p>}
+    <div className="mb-7">
+      <h1 className="text-[24px] font-bold leading-tight text-white">{q}</h1>
+      {sub && <p className="mt-2 text-[14px] text-text-secondary">{sub}</p>}
     </div>
   );
 }
 
-function Gender({ value, onChange }: { value: Profile["gender"]; onChange: (v: Profile["gender"]) => void }) {
-  const opts = [
-    { v: "male" as const, icon: User, label: "Male" },
-    { v: "female" as const, icon: UserRound, label: "Female" },
+const inputCls =
+  "w-full rounded-xl border border-white/10 bg-[#171F33] px-4 py-3.5 text-white placeholder:text-text-tertiary outline-none focus:border-ai/60 transition";
+
+/* STEP 1 */
+function StepBasics({ draft, patch }: { draft: Profile; patch: (p: Partial<Profile>) => void }) {
+  const genders: { v: Profile["gender"]; label: string }[] = [
+    { v: "male", label: "Male" },
+    { v: "female", label: "Female" },
+    { v: "other", label: "Other" },
   ];
   return (
     <div>
-      <Title q="Tell us about yourself" sub="This helps personalize your experience" />
-      <div className="grid grid-cols-2 gap-4">
-        {opts.map(({ v, icon: Icon, label }) => {
-          const active = value === v;
-          return (
-            <button
-              key={v}
-              onClick={() => onChange(v)}
-              className={`rounded-3xl border p-6 flex flex-col items-center gap-3 transition ${active ? "border-transparent bg-ai/10 ring-2 ring-ai" : "border-white/8 bg-bg-2"}`}
-            >
-              <Icon size={48} className={active ? "text-text-accent" : "text-text-secondary"} />
-              <span className={`font-semibold ${active ? "text-text-primary" : "text-text-secondary"}`}>{label}</span>
-            </button>
-          );
-        })}
-      </div>
-      <button onClick={() => onChange("other")} className="mt-6 w-full text-center text-sm text-text-tertiary underline">
-        Prefer not to say
-      </button>
-    </div>
-  );
-}
-
-function AgePicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  return (
-    <div>
-      <Title q="How old are you?" sub="This calibrates your training and recovery." />
-      <div className="flex flex-col items-center gap-2 mt-4">
-        <div className="flex items-center gap-6">
-          <button onClick={() => onChange(Math.max(16, value - 1))} className="h-12 w-12 rounded-full bg-bg-3 text-2xl">−</button>
-          <div className="text-[72px] font-extrabold leading-none gradient-text tabular-nums">{value}</div>
-          <button onClick={() => onChange(Math.min(90, value + 1))} className="h-12 w-12 rounded-full bg-bg-3 text-2xl">+</button>
+      <Header q="Let's get to know you" sub="Tell us a little about yourself." />
+      <div className="space-y-4">
+        <div>
+          <label className="block text-[12px] text-text-secondary mb-2">Full name</label>
+          <input
+            className={inputCls}
+            placeholder="Your name"
+            value={draft.name}
+            onChange={(e) => patch({ name: e.target.value })}
+          />
         </div>
-        <p className="text-text-secondary mt-2">years old</p>
+        <div>
+          <label className="block text-[12px] text-text-secondary mb-2">Age</label>
+          <input
+            type="number"
+            inputMode="numeric"
+            className={inputCls}
+            placeholder="28"
+            value={draft.age || ""}
+            onChange={(e) => patch({ age: Number(e.target.value) })}
+          />
+        </div>
+        <div>
+          <label className="block text-[12px] text-text-secondary mb-2">Gender</label>
+          <div className="grid grid-cols-3 gap-2">
+            {genders.map(({ v, label }) => {
+              const active = draft.gender === v;
+              return (
+                <button
+                  key={v}
+                  onClick={() => patch({ gender: v })}
+                  className={`rounded-full py-3 text-sm font-medium transition ${
+                    active
+                      ? "gradient-brand text-white"
+                      : "bg-[#171F33] text-text-secondary border border-white/10"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-function WeightPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+/* STEP 2 */
+function UnitPill<T extends string>({
+  value, options, onChange,
+}: { value: T; options: T[]; onChange: (v: T) => void }) {
+  return (
+    <div className="inline-flex rounded-full bg-[#171F33] border border-white/10 p-1">
+      {options.map((o) => (
+        <button
+          key={o}
+          onClick={() => onChange(o)}
+          className={`px-3 py-1 text-xs font-semibold rounded-full transition ${
+            value === o ? "gradient-brand text-white" : "text-text-secondary"
+          }`}
+        >
+          {o}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function StepBody({ draft, patch }: { draft: Profile; patch: (p: Partial<Profile>) => void }) {
+  const weightDisplay = draft.weightUnit === "kg"
+    ? draft.weightKg
+    : Math.round(draft.weightKg * 2.20462);
+  const heightDisplay = draft.heightUnit === "cm"
+    ? draft.heightCm
+    : Number((draft.heightCm / 30.48).toFixed(1));
+
   return (
     <div>
-      <Title q="What's your weight?" />
-      <div className="text-center mt-6">
-        <span className="text-[72px] font-extrabold leading-none tabular-nums">{value}</span>
-        <span className="text-2xl text-text-secondary ml-2">kg</span>
+      <Header q="Your current stats" sub="Used to calibrate training and nutrition." />
+      <div className="space-y-5">
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-[12px] text-text-secondary">Weight</label>
+            <UnitPill
+              value={draft.weightUnit}
+              options={["kg", "lbs"]}
+              onChange={(u) => patch({ weightUnit: u })}
+            />
+          </div>
+          <input
+            type="number"
+            inputMode="decimal"
+            className={inputCls}
+            value={weightDisplay || ""}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              patch({ weightKg: draft.weightUnit === "kg" ? v : v / 2.20462 });
+            }}
+          />
+        </div>
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-[12px] text-text-secondary">Height</label>
+            <UnitPill
+              value={draft.heightUnit}
+              options={["cm", "ft"]}
+              onChange={(u) => patch({ heightUnit: u })}
+            />
+          </div>
+          <input
+            type="number"
+            inputMode="decimal"
+            className={inputCls}
+            value={heightDisplay || ""}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              patch({ heightCm: draft.heightUnit === "cm" ? v : v * 30.48 });
+            }}
+          />
+        </div>
       </div>
-      <input
-        type="range" min={40} max={180} value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full mt-8 accent-[--ai-purple]"
-      />
-      <div className="flex justify-between text-xs text-text-tertiary mt-2"><span>40</span><span>180</span></div>
     </div>
   );
 }
 
-function HeightPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+/* STEP 3 */
+function SelectCard({
+  active, title, sub, icon, onClick,
+}: {
+  active: boolean;
+  title: string;
+  sub: string;
+  icon?: React.ReactNode;
+  onClick: () => void;
+}) {
   return (
-    <div>
-      <Title q="What's your height?" />
-      <div className="text-center mt-6">
-        <span className="text-[72px] font-extrabold leading-none tabular-nums">{value}</span>
-        <span className="text-2xl text-text-secondary ml-2">cm</span>
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-4 rounded-2xl px-4 text-left transition ${
+        active
+          ? "bg-ai/10 border-l-4 border-ai pl-3"
+          : "bg-[#171F33] border border-white/10"
+      }`}
+      style={{ minHeight: "72px" }}
+    >
+      {icon && (
+        <div className={`flex-shrink-0 ${active ? "text-text-accent" : "text-text-secondary"}`}>
+          {icon}
+        </div>
+      )}
+      <div className="flex-1">
+        <div className="font-semibold text-white text-[15px]">{title}</div>
+        <div className="text-[12px] text-text-secondary mt-0.5">{sub}</div>
       </div>
-      <input
-        type="range" min={140} max={220} value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full mt-8 accent-[--ai-purple]"
-      />
-      <div className="flex justify-between text-xs text-text-tertiary mt-2"><span>140</span><span>220</span></div>
-    </div>
+    </button>
   );
 }
 
-function Goal({ value, onChange }: { value: Profile["goal"]; onChange: (v: Profile["goal"]) => void }) {
-  const opts = [
-    { v: "recomp" as const, icon: Trophy, label: "Body recomposition", sub: "Lose fat, build muscle simultaneously" },
-    { v: "fatloss" as const, icon: Flame, label: "Fat loss", sub: "Reduce body fat, maintain muscle" },
-    { v: "strength" as const, icon: Dumbbell, label: "Strength & muscle", sub: "Build size and strength" },
-    { v: "performance" as const, icon: Zap, label: "Performance", sub: "Athletic output, endurance" },
+function StepExperience({ draft, patch }: { draft: Profile; patch: (p: Partial<Profile>) => void }) {
+  const opts: { v: Profile["experience"]; title: string; sub: string }[] = [
+    { v: "beginner", title: "Beginner", sub: "Under 1 year consistent training" },
+    { v: "intermediate", title: "Intermediate", sub: "1-3 years, comfortable with compound lifts" },
+    { v: "advanced", title: "Advanced", sub: "3+ years, structured programming" },
   ];
   return (
     <div>
-      <Title q="What's your main goal?" sub="We'll build your entire system around this." />
+      <Header q="Your training experience" sub="We'll tune intensity and volume to your level." />
       <div className="space-y-3">
-        {opts.map(({ v, icon: Icon, label, sub }) => {
-          const active = value === v;
-          return (
-            <button
-              key={v}
-              onClick={() => onChange(v)}
-              className={`w-full flex items-center gap-4 rounded-2xl border p-4 text-left transition ${active ? "border-transparent bg-ai/10 ring-2 ring-ai" : "border-white/8 bg-bg-2"}`}
-            >
-              <Icon size={24} className={active ? "text-text-accent" : "text-text-secondary"} />
-              <div className="flex-1">
-                <div className="font-semibold">{label}</div>
-                <div className="text-xs text-text-secondary mt-0.5">{sub}</div>
-              </div>
-              {active && <Check size={18} className="text-text-accent" />}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function Experience({ value, onChange }: { value: Profile["experience"]; onChange: (v: Profile["experience"]) => void }) {
-  const opts = [
-    { v: "beginner" as const, label: "Beginner", sub: "Under 1 year of consistent training" },
-    { v: "intermediate" as const, label: "Intermediate", sub: "1–3 years, comfortable with compounds" },
-    { v: "advanced" as const, label: "Advanced", sub: "3+ years, structured programming" },
-  ];
-  return (
-    <div>
-      <Title q="Your training experience?" />
-      <div className="space-y-3">
-        {opts.map(({ v, label, sub }) => {
-          const active = value === v;
-          return (
-            <button
-              key={v}
-              onClick={() => onChange(v)}
-              className={`w-full rounded-2xl border p-4 text-left transition ${active ? "border-transparent bg-ai/10 ring-2 ring-ai" : "border-white/8 bg-bg-2"}`}
-            >
-              <div className="font-semibold">{label}</div>
-              <div className="text-xs text-text-secondary mt-0.5">{sub}</div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function Frequency({ value, days, onChange }: { value: number; days: string[]; onChange: (f: number, d: string[]) => void }) {
-  const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const toggle = (d: string) => {
-    const next = days.includes(d) ? days.filter((x) => x !== d) : [...days, d];
-    onChange(next.length, next);
-  };
-  return (
-    <div>
-      <Title q="How often do you train?" />
-      <div className="flex justify-center gap-2 flex-wrap">
-        {[2, 3, 4, 5, 6].map((n) => (
-          <button
-            key={n}
-            onClick={() => onChange(n, days)}
-            className={`h-12 w-12 rounded-full font-semibold ${value === n ? "gradient-brand text-white" : "bg-bg-3 text-text-secondary"}`}
-          >
-            {n}×
-          </button>
+        {opts.map((o) => (
+          <SelectCard
+            key={o.v}
+            active={draft.experience === o.v}
+            title={o.title}
+            sub={o.sub}
+            onClick={() => patch({ experience: o.v })}
+          />
         ))}
       </div>
-      <p className="mt-8 text-xs uppercase tracking-wider text-text-tertiary">Which days?</p>
-      <div className="mt-3 grid grid-cols-7 gap-2">
-        {weekdays.map((d) => {
-          const active = days.includes(d);
-          return (
-            <button
-              key={d}
-              onClick={() => toggle(d)}
-              className={`h-12 rounded-xl text-xs font-medium ${active ? "gradient-brand text-white" : "bg-bg-3 text-text-secondary"}`}
-            >
-              {d.slice(0, 2)}
-            </button>
-          );
-        })}
+    </div>
+  );
+}
+
+/* STEP 4 */
+function StepGoal({ draft, patch }: { draft: Profile; patch: (p: Partial<Profile>) => void }) {
+  const opts: { v: Profile["goal"]; title: string; sub: string; Icon: typeof Trophy }[] = [
+    { v: "recomp", title: "Body Recomposition", sub: "Lose fat, build muscle simultaneously", Icon: Trophy },
+    { v: "fatloss", title: "Fat Loss", sub: "Reduce body fat, maintain muscle", Icon: Flame },
+    { v: "strength", title: "Strength & Muscle", sub: "Build size and strength", Icon: Dumbbell },
+    { v: "performance", title: "Performance", sub: "Athletic output and endurance", Icon: Zap },
+  ];
+  return (
+    <div>
+      <Header q="What's your main goal?" sub="We'll build your system around this." />
+      <div className="space-y-3">
+        {opts.map(({ v, title, sub, Icon }) => (
+          <SelectCard
+            key={v}
+            active={draft.goal === v}
+            title={title}
+            sub={sub}
+            icon={<Icon size={24} />}
+            onClick={() => patch({ goal: v })}
+          />
+        ))}
       </div>
     </div>
   );
 }
 
-function BodyFat({ current, target, onChange }: { current: number; target: number; onChange: (c: number, t: number) => void }) {
+/* STEP 5 */
+function StepBodyFat({ draft, patch }: { draft: Profile; patch: (p: Partial<Profile>) => void }) {
   return (
     <div>
-      <Title q="Current and target body fat?" sub="Estimate is fine — we recalibrate every 2 weeks." />
-      <div className="space-y-8 mt-4">
+      <Header q="Current and target body fat" sub="Estimate is fine. We'll track progress." />
+      <div className="space-y-8 mt-2">
         <div>
-          <div className="flex justify-between text-sm mb-2"><span className="text-text-secondary">I'm currently around</span><span className="font-bold gradient-text">{current}%</span></div>
-          <input type="range" min={8} max={40} value={current} onChange={(e) => onChange(Number(e.target.value), target)} className="w-full accent-[--ai-purple]" />
+          <div className="flex items-end justify-between mb-3">
+            <span className="text-[13px] text-text-secondary">I'm currently around</span>
+            <span className="text-3xl font-bold gradient-text tabular-nums">{draft.bodyFat}%</span>
+          </div>
+          <input
+            type="range" min={8} max={40} value={draft.bodyFat}
+            onChange={(e) => patch({ bodyFat: Number(e.target.value) })}
+            className="w-full accent-[#7C3AED]"
+          />
         </div>
         <div>
-          <div className="flex justify-between text-sm mb-2"><span className="text-text-secondary">My goal is</span><span className="font-bold gradient-text">{target}%</span></div>
-          <input type="range" min={8} max={40} value={target} onChange={(e) => onChange(current, Number(e.target.value))} className="w-full accent-[--ai-purple]" />
+          <div className="flex items-end justify-between mb-3">
+            <span className="text-[13px] text-text-secondary">My goal is</span>
+            <span className="text-3xl font-bold gradient-text tabular-nums">{draft.targetBodyFat}%</span>
+          </div>
+          <input
+            type="range" min={8} max={40} value={draft.targetBodyFat}
+            onChange={(e) => patch({ targetBodyFat: Number(e.target.value) })}
+            className="w-full accent-[#7C3AED]"
+          />
         </div>
       </div>
-      <div className="mt-8 rounded-2xl bg-bg-3 border-l-2 border-ai p-4">
-        <p className="text-[13px] text-text-secondary italic">
-          APEX will build your coaching system around these numbers. We recalibrate every 2 weeks based on actual progress.
-        </p>
+      <p className="mt-8 text-[12px] text-text-tertiary text-center">
+        We recalibrate every 2 weeks based on actual progress
+      </p>
+    </div>
+  );
+}
+
+/* STEP 6 */
+function PhotoButton({
+  label, value, onChange,
+}: { label: string; value?: string; onChange: (data: string) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  return (
+    <button
+      type="button"
+      onClick={() => ref.current?.click()}
+      className="relative flex-1 aspect-[3/4] rounded-2xl bg-[#171F33] border border-white/10 flex flex-col items-center justify-center gap-2 overflow-hidden"
+    >
+      {value ? (
+        <>
+          <img src={value} alt={label} className="absolute inset-0 h-full w-full object-cover" />
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative h-8 w-8 rounded-full bg-success flex items-center justify-center">
+            <Check size={18} className="text-white" strokeWidth={3} />
+          </div>
+          <span className="relative text-xs font-semibold text-white">{label}</span>
+        </>
+      ) : (
+        <>
+          <Camera size={28} className="text-text-secondary" />
+          <span className="text-xs text-text-secondary font-medium">{label}</span>
+        </>
+      )}
+      <input
+        ref={ref}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (!f) return;
+          const reader = new FileReader();
+          reader.onload = () => onChange(String(reader.result));
+          reader.readAsDataURL(f);
+        }}
+      />
+    </button>
+  );
+}
+
+function StepPhotos({ draft, patch }: { draft: Profile; patch: (p: Partial<Profile>) => void }) {
+  const set = (k: "front" | "side" | "back", v: string) =>
+    patch({ photos: { ...draft.photos, [k]: v } });
+  return (
+    <div>
+      <Header
+        q="Take your starting photos"
+        sub="This helps me assess your body composition and weak points."
+      />
+      <div className="flex gap-3">
+        <PhotoButton label="Front" value={draft.photos.front} onChange={(v) => set("front", v)} />
+        <PhotoButton label="Side" value={draft.photos.side} onChange={(v) => set("side", v)} />
+        <PhotoButton label="Back" value={draft.photos.back} onChange={(v) => set("back", v)} />
+      </div>
+      <p className="mt-6 text-center text-[13px] text-text-secondary underline">Skip for now</p>
+    </div>
+  );
+}
+
+/* STEP 7 */
+function RecoveryCard({
+  active, title, sub, badge, badgeTone, disabled, onClick,
+}: {
+  active: boolean;
+  title: string;
+  sub?: string;
+  badge?: string;
+  badgeTone?: "green" | "gray";
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-full text-left rounded-2xl px-4 py-4 transition disabled:opacity-50 ${
+        active
+          ? "bg-ai/10 border-l-4 border-ai pl-3"
+          : "bg-[#171F33] border border-white/10"
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <span className="font-semibold text-white text-[15px]">{title}</span>
+        {badge && (
+          <span
+            className={`text-[10px] uppercase font-bold tracking-wide px-2 py-0.5 rounded-full ${
+              badgeTone === "green"
+                ? "bg-success/20 text-success"
+                : "bg-white/10 text-text-tertiary"
+            }`}
+          >
+            {badge}
+          </span>
+        )}
+      </div>
+      {sub && <div className="text-[12px] text-text-secondary mt-1">{sub}</div>}
+    </button>
+  );
+}
+
+function StepRecovery({ draft, patch }: { draft: Profile; patch: (p: Partial<Profile>) => void }) {
+  return (
+    <div>
+      <Header
+        q="How do you track recovery?"
+        sub="Connect your wearable or upload screenshots."
+      />
+      <div className="space-y-3">
+        <RecoveryCard
+          active={draft.recoveryDevice === "whoop"}
+          title="Connect WHOOP"
+          badge="Recommended"
+          badgeTone="green"
+          onClick={() => patch({ recoveryDevice: "whoop" })}
+        />
+        <RecoveryCard
+          active={draft.recoveryDevice === "screenshots"}
+          title="Upload screenshots"
+          sub="WHOOP, Oura, Ultrahuman, Garmin — I'll read them"
+          onClick={() => patch({ recoveryDevice: "screenshots" })}
+        />
+        <RecoveryCard
+          active={false}
+          disabled
+          title="Apple Health"
+          badge="Coming Soon"
+          badgeTone="gray"
+          onClick={() => {}}
+        />
+        <RecoveryCard
+          active={draft.recoveryDevice === "manual"}
+          title="Manual entry"
+          sub="I'll log sleep and recovery myself"
+          onClick={() => patch({ recoveryDevice: "manual" })}
+        />
+      </div>
+      <div className="mt-8 flex items-center justify-center gap-2 text-text-tertiary">
+        <Activity size={14} />
+        <span className="text-[11px]">Your data stays private and on-device</span>
       </div>
     </div>
   );
