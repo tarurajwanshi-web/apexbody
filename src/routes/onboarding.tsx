@@ -9,6 +9,7 @@ import {
   Camera,
   Check,
   Activity,
+  Lock as LockIcon,
 } from "lucide-react";
 import { useProfile, type Profile } from "@/lib/store";
 
