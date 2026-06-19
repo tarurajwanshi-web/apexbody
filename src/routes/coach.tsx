@@ -68,34 +68,29 @@ function Coach() {
     return "";
   })();
 
-  const chipSet: string[] = (() => {
-    if (mode === "no-data")
-      return [
-        "What data do you need from me?",
-        "How does APEX coaching work?",
-        "Set up my first workout",
-      ];
-    if (mode === "trained-today")
-      return [
-        "How should I recover tonight?",
-        "Was my volume enough?",
-        "What should I eat post-workout?",
-        "Am I hitting my macros?",
-      ];
-    return [
-      "What should I train today?",
-      "Should I push or recover?",
-      "I only have 30 minutes",
-      "Something feels tight",
-      "What should my next meal be?",
-    ];
-  })();
+  const journeyDay = getJourneyDay();
+  const isNewUser = journeyDay <= 5;
+  const daysLeft = Math.max(0, 5 - journeyDay + 1);
 
-  const greeting = (() => {
-    if (mode === "no-data") return "Let's get you started.";
-    if (mode === "trained-today") return `Nice work today, ${profile.name || "athlete"}.`;
-    return `Ready when you are, ${profile.name || "athlete"}.`;
-  })();
+  const chipSet: string[] = isNewUser
+    ? [
+        "What data do you need?",
+        "Set up my first workout",
+        "How does this work?",
+        "Log my sleep",
+      ]
+    : [
+        "Should I push or recover?",
+        "What should I eat?",
+        "Modify today's workout",
+        "Weekly assessment",
+      ];
+
+  const greeting = isNewUser
+    ? `I'm collecting data for the next ${daysLeft} day${daysLeft === 1 ? "" : "s"}. Log your workouts, snap your meals, and tell me how you feel. The more signal I get, the sharper your plan becomes.`
+    : mode === "trained-today"
+    ? `Nice work today, ${profile.name || "athlete"}.`
+    : `Ready when you are, ${profile.name || "athlete"}.`;
 
   const [messages, setMessages] = useState<Msg[]>([
     { role: "assistant", content: greeting },
