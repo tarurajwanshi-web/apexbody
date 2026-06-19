@@ -45,7 +45,7 @@ export const DEFAULT_PROFILE: Profile = {
 };
 
 
-const KEY = "apex.profile.v1";
+const KEY = "apex_user_profile";
 
 export function loadProfile(): Profile {
   if (typeof window === "undefined") return DEFAULT_PROFILE;
