@@ -433,7 +433,7 @@ function StepPhotos({ draft, patch }: { draft: Profile; patch: (p: Partial<Profi
         Same lighting each week for best comparison
       </p>
       <div className="mt-3 flex items-center justify-center gap-1.5 text-text-tertiary">
-        <Lock size={11} />
+        <LockIcon size={11} />
         <span className="text-[11px]">Your photos stay private and are only used for body composition analysis</span>
       </div>
     </div>
