@@ -349,15 +349,15 @@ function DashboardNav({ onCamera }: { onCamera: () => void }) {
       <NavIcon icon={Dumbbell} onClick={() => navigate({ to: "/workouts" })} />
       <button
         onClick={onCamera}
-        className="flex items-center justify-center rounded-full -mt-6 shrink-0"
+        className="flex items-center justify-center rounded-full -mt-6 shrink-0 active:scale-95 transition"
         style={{
-          width: 44, height: 44,
+          width: 48, height: 48,
           background: "linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%)",
-          boxShadow: "0 8px 24px rgba(124,58,237,0.45)",
+          boxShadow: "0 0 12px rgba(124,58,237,0.4), 0 8px 24px rgba(124,58,237,0.45)",
         }}
         aria-label="Camera"
       >
-        <Camera size={20} color="#fff" />
+        <Camera size={22} color="#fff" />
       </button>
       <NavIcon icon={Apple} onClick={() => navigate({ to: "/nutrition" })} />
       <NavIcon icon={Brain} onClick={() => navigate({ to: "/coach" })} />
