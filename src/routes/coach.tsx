@@ -227,12 +227,14 @@ function Coach() {
         ))}
         {loading && (
           <div className="flex justify-start">
-            <div className="rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-ai animate-pulse" />
-              <span className="text-xs text-text-secondary">Thinking…</span>
+            <div className="rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "0ms" }} />
+              <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "150ms" }} />
+              <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "300ms" }} />
             </div>
           </div>
         )}
+        <style>{`@keyframes typing-dot { 0%,60%,100% { opacity: 0.3; transform: scale(0.85); } 30% { opacity: 1; transform: scale(1); } }`}</style>
         {error && (
           <div className="rounded-2xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
             {error}
