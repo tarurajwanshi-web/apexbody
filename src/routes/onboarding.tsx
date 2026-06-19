@@ -490,17 +490,25 @@ function StepRecovery({ draft, patch }: { draft: Profile; patch: (p: Partial<Pro
       />
       <div className="space-y-3">
         <RecoveryCard
-          active={draft.recoveryDevice === "whoop"}
-          title="Connect WHOOP"
-          badge="Recommended"
-          badgeTone="green"
-          onClick={() => patch({ recoveryDevice: "whoop" })}
-        />
-        <RecoveryCard
           active={draft.recoveryDevice === "screenshots"}
           title="Upload screenshots"
-          sub="WHOOP, Oura, Ultrahuman, Garmin — I'll read them"
+          sub="WHOOP, Oura, Ultrahuman, Garmin — just screenshot your recovery screen"
+          accentLeft
           onClick={() => patch({ recoveryDevice: "screenshots" })}
+        />
+        <RecoveryCard
+          active={draft.recoveryDevice === "manual"}
+          title="Manual entry"
+          sub="I'll log sleep hours and how I feel daily"
+          onClick={() => patch({ recoveryDevice: "manual" })}
+        />
+        <RecoveryCard
+          active={false}
+          disabled
+          title="Connect WHOOP"
+          badge="Coming Soon"
+          badgeTone="gray"
+          onClick={() => {}}
         />
         <RecoveryCard
           active={false}
@@ -509,12 +517,6 @@ function StepRecovery({ draft, patch }: { draft: Profile; patch: (p: Partial<Pro
           badge="Coming Soon"
           badgeTone="gray"
           onClick={() => {}}
-        />
-        <RecoveryCard
-          active={draft.recoveryDevice === "manual"}
-          title="Manual entry"
-          sub="I'll log sleep and recovery myself"
-          onClick={() => patch({ recoveryDevice: "manual" })}
         />
       </div>
       <div className="mt-8 flex items-center justify-center gap-2 text-text-tertiary">
