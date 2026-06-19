@@ -24,6 +24,11 @@ function getTrainedToday(): boolean {
   if (typeof window === "undefined") return false;
   return localStorage.getItem("apex_trained_today") === "1";
 }
+function getJourneyDay(): number {
+  if (typeof window === "undefined") return 1;
+  const start = Number(localStorage.getItem("apex_journey_start") ?? Date.now());
+  return Math.max(1, Math.floor((Date.now() - start) / 86400000) + 1);
+}
 
 function Coach() {
   const { profile } = useProfile();
