@@ -301,11 +301,32 @@ function Dashboard() {
   );
 }
 
-function BreakdownRow({ color, text }: { color: string; text: string }) {
+function MetricRow({
+  color, name, value, trend, note, last,
+}: {
+  color: string;
+  name: string;
+  value: string;
+  trend: "up" | "stable" | "down";
+  note: string;
+  last?: boolean;
+}) {
+  const trendChar = trend === "up" ? "↑" : trend === "down" ? "↓" : "→";
+  const trendColor = trend === "up" ? "#10B981" : trend === "down" ? "#EF4444" : "#F59E0B";
   return (
-    <div className="flex items-center gap-3">
-      <span className="h-2 w-2 rounded-full shrink-0" style={{ background: color }} />
-      <p className="text-[13px] text-text-secondary">{text}</p>
+    <div
+      className="py-3"
+      style={!last ? { borderBottom: "1px solid rgba(255,255,255,0.05)" } : undefined}
+    >
+      <div className="flex items-center gap-2.5">
+        <span className="h-2 w-2 rounded-full shrink-0" style={{ background: color }} />
+        <span className="text-[13px] text-white flex-1">{name}</span>
+        <span className="text-[13px] font-semibold text-white tabular-nums">{value}</span>
+        <span className="text-[13px] font-semibold tabular-nums" style={{ color: trendColor }}>
+          {trendChar}
+        </span>
+      </div>
+      <p className="ml-[18px] mt-1 text-[11px] text-text-tertiary">{note}</p>
     </div>
   );
 }
