@@ -63,25 +63,31 @@ function Dashboard() {
   const week = Math.max(1, Math.ceil((day - LEARNING_DAYS) / 7));
   const subline = inLearning ? `Day ${day} of ${LEARNING_DAYS} — Learning phase` : `Week ${week} — Custom plan active`;
 
-  // Ring math
-  const size = 120;
-  const stroke = 9;
-  const cx = size / 2;
-  const cy = size / 2;
+  // Ring math — single circular ring with gradient stroke
+  const ringSize = 90;
+  const ringStroke = 8;
+  const ringR = ringSize / 2 - ringStroke / 2;
+  const ringC = 2 * Math.PI * ringR;
   const recovery = 68;
-  const hrvPct = 81; // treat 81ms as 81% for visual
-  const ringData = [
-    { r: cx - stroke / 2, val: recovery, color: "#10B981" },
-    { r: cx - stroke / 2 - (stroke + 4), val: hrvPct, color: "#8B5CF6" },
-  ];
+  const score = 74;
+  const fillPct = score / 100;
 
   return (
-    <div className="min-h-screen pb-32" style={{ backgroundColor: "#0A0E1A" }}>
-      <div className="px-5 pt-6 max-w-[480px] mx-auto space-y-4">
+    <div className="min-h-screen pb-32 relative" style={{ backgroundColor: "#0A0E1A" }}>
+      {/* Subtle radial backdrop */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0"
+        style={{
+          height: "40vh",
+          background: "radial-gradient(ellipse at 50% 0%, rgba(124,58,237,0.07), transparent 70%)",
+        }}
+      />
+      <div className="relative px-5 pt-6 max-w-[480px] mx-auto space-y-4">
         {/* Header */}
-        <header className="flex items-start justify-between">
+        <header className="flex items-start justify-between animate-fade-up" style={{ animationDelay: "0ms" }}>
           <div>
-            <h1 className="text-[20px] font-bold text-white leading-tight">
+            <h1 className="text-[20px] font-semibold text-white leading-tight">
               {greet}, {profile.name || "Athlete"}
             </h1>
             <p className="text-[13px] text-text-secondary mt-1">{subline}</p>
@@ -97,10 +103,11 @@ function Dashboard() {
         {/* Data collection banner (days 1-5) */}
         {inLearning && (
           <div
-            className="rounded-2xl p-4"
+            className="rounded-2xl p-4 animate-fade-up"
             style={{
               background: "linear-gradient(135deg, rgba(124,58,237,0.10), rgba(59,130,246,0.08))",
               border: "1px solid rgba(124,58,237,0.30)",
+              animationDelay: "100ms",
             }}
           >
             <div className="flex items-start gap-3">
@@ -120,16 +127,17 @@ function Dashboard() {
 
         {/* AI Insight */}
         <div
-          className="rounded-2xl p-5"
+          className="rounded-2xl p-5 animate-fade-up"
           style={{
             background: "linear-gradient(135deg, rgba(124,58,237,0.08), rgba(59,130,246,0.08))",
             border: "1px solid rgba(124,58,237,0.25)",
+            animationDelay: "200ms",
           }}
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Sparkles size={20} className="text-ai" />
-              <span className="text-[10px] font-semibold text-ai uppercase" style={{ letterSpacing: "1.5px" }}>
+              <span className="text-[10px] font-medium text-ai uppercase" style={{ letterSpacing: "1.5px" }}>
                 AI Insight
               </span>
             </div>
@@ -139,13 +147,13 @@ function Dashboard() {
           <div className="mt-4 flex gap-2">
             <button
               onClick={() => navigate({ to: "/coach" })}
-              className="rounded-full px-3 py-1.5 text-[12px] font-medium text-sleep"
+              className="rounded-full px-3 py-1.5 text-[12px] font-medium text-sleep active:scale-[0.98] transition"
               style={{ border: "1px solid rgba(59,130,246,0.4)" }}
             >
               Tell me why
             </button>
             <button
-              className="rounded-full px-3 py-1.5 text-[12px] font-medium text-text-secondary"
+              className="rounded-full px-3 py-1.5 text-[12px] font-medium text-text-secondary active:scale-[0.98] transition"
               style={{ border: "1px solid rgba(255,255,255,0.12)" }}
             >
               Got it
@@ -153,50 +161,80 @@ function Dashboard() {
           </div>
         </div>
 
-        {/* Score Ring */}
+        {/* APEX Score Card */}
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="w-full rounded-[20px] p-6 text-left"
-          style={{ background: "#0F1524", border: "1px solid rgba(255,255,255,0.06)" }}
+          className="w-full text-left rounded-[20px] p-6 animate-fade-up active:scale-[0.995] transition"
+          style={{
+            background: "#0F1524",
+            border: "1px solid rgba(255,255,255,0.06)",
+            animationDelay: "300ms",
+          }}
         >
-          <p className="text-[10px] font-semibold text-text-tertiary uppercase text-center" style={{ letterSpacing: "1.5px" }}>
-            Today's Score
-          </p>
-          <div className="mt-4 flex justify-center">
-            <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-              {ringData.map((ring, i) => {
-                const c = 2 * Math.PI * ring.r;
-                const dash = (ring.val / 100) * c;
-                return (
-                  <g key={i} transform={`rotate(-90 ${cx} ${cy})`}>
-                    <circle cx={cx} cy={cy} r={ring.r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={stroke} />
-                    <circle
-                      cx={cx} cy={cy} r={ring.r} fill="none"
-                      stroke={ring.color} strokeWidth={stroke}
-                      strokeDasharray={`${dash} ${c}`} strokeLinecap="round"
-                    />
-                  </g>
-                );
-              })}
-              <text x="50%" y="48%" textAnchor="middle" dominantBaseline="central"
-                className="fill-white" style={{ fontSize: 36, fontWeight: 800, fontFamily: "var(--font-display)" }}>
-                74
-              </text>
-              <text x="50%" y="68%" textAnchor="middle" dominantBaseline="central"
-                className="fill-text-tertiary" style={{ fontSize: 11 }}>
-                /100
-              </text>
-            </svg>
+          <div className="flex items-center justify-between gap-6">
+            {/* LEFT */}
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-medium text-text-tertiary uppercase" style={{ letterSpacing: "2px" }}>
+                APEX Score
+              </p>
+              <div className="mt-2 flex items-baseline gap-1">
+                <span
+                  className="text-white tabular-nums"
+                  style={{ fontSize: 56, fontWeight: 300, lineHeight: 1, textShadow: "0 0 20px rgba(124,58,237,0.3)" }}
+                >
+                  {score}
+                </span>
+                <span className="text-text-tertiary" style={{ fontSize: 18 }}>/100</span>
+              </div>
+              <div className="mt-3 inline-flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                <span className="text-[13px] text-success">On track for recomposition</span>
+              </div>
+            </div>
+
+            {/* RIGHT — single animated gradient ring */}
+            <div className="shrink-0 relative">
+              <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`} className="animate-pulse-ring">
+                <defs>
+                  <linearGradient id="scoreRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#7C3AED" />
+                    <stop offset="55%" stopColor="#3B82F6" />
+                    <stop offset="100%" stopColor="#10B981" />
+                  </linearGradient>
+                </defs>
+                <circle
+                  cx={ringSize / 2} cy={ringSize / 2} r={ringR}
+                  fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={ringStroke}
+                />
+                <circle
+                  cx={ringSize / 2} cy={ringSize / 2} r={ringR}
+                  fill="none" stroke="url(#scoreRingGrad)" strokeWidth={ringStroke}
+                  strokeLinecap="round"
+                  strokeDasharray={ringC}
+                  strokeDashoffset={ringC * (1 - fillPct)}
+                  transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                  style={{ animation: "ring-draw 1.5s ease-out both" }}
+                />
+                <text
+                  x="50%" y="50%" textAnchor="middle" dominantBaseline="central"
+                  className="fill-white" style={{ fontSize: 16, fontWeight: 500 }}
+                >
+                  {score}
+                </text>
+                <style>{`@keyframes ring-draw { from { stroke-dashoffset: ${ringC}; } to { stroke-dashoffset: ${ringC * (1 - fillPct)}; } }`}</style>
+              </svg>
+            </div>
           </div>
-          <p className="mt-3 text-[12px] text-text-tertiary text-center">
-            {expanded ? "Tap to collapse" : "Tap to see breakdown"}
-          </p>
+
           {expanded && (
-            <div className="mt-4 space-y-2.5 animate-fade-up">
-              <BreakdownRow color="#10B981" text="Recovery: 68% — Trending up. Ready to push." />
-              <BreakdownRow color="#3B82F6" text="Sleep: 7.2h — Consistent." />
-              <BreakdownRow color="#F59E0B" text="Strain: 55% — Room to push." />
-              <BreakdownRow color="#8B5CF6" text="HRV: 81ms — Best in 14 days." />
+            <div
+              className="mt-5 overflow-hidden"
+              style={{ animation: "fade-up 0.3s ease both" }}
+            >
+              <MetricRow color="#10B981" name="Recovery" value="68%" trend="up" note="Trending up. Ready to push." />
+              <MetricRow color="#3B82F6" name="Sleep" value="7.2h" trend="stable" note="Consistent." />
+              <MetricRow color="#F59E0B" name="Strain" value="55%" trend="stable" note="Room to push." />
+              <MetricRow color="#8B5CF6" name="HRV" value="81ms" trend="up" note="Best in 14 days." last />
             </div>
           )}
         </button>
