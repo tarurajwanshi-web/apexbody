@@ -24,6 +24,11 @@ function getTrainedToday(): boolean {
   if (typeof window === "undefined") return false;
   return localStorage.getItem("apex_trained_today") === "1";
 }
+function getJourneyDay(): number {
+  if (typeof window === "undefined") return 1;
+  const start = Number(localStorage.getItem("apex_journey_start") ?? Date.now());
+  return Math.max(1, Math.floor((Date.now() - start) / 86400000) + 1);
+}
 
 function Coach() {
   const { profile } = useProfile();
@@ -63,34 +68,29 @@ function Coach() {
     return "";
   })();
 
-  const chipSet: string[] = (() => {
-    if (mode === "no-data")
-      return [
-        "What data do you need from me?",
-        "How does APEX coaching work?",
-        "Set up my first workout",
-      ];
-    if (mode === "trained-today")
-      return [
-        "How should I recover tonight?",
-        "Was my volume enough?",
-        "What should I eat post-workout?",
-        "Am I hitting my macros?",
-      ];
-    return [
-      "What should I train today?",
-      "Should I push or recover?",
-      "I only have 30 minutes",
-      "Something feels tight",
-      "What should my next meal be?",
-    ];
-  })();
+  const journeyDay = getJourneyDay();
+  const isNewUser = journeyDay <= 5;
+  const daysLeft = Math.max(0, 5 - journeyDay + 1);
 
-  const greeting = (() => {
-    if (mode === "no-data") return "Let's get you started.";
-    if (mode === "trained-today") return `Nice work today, ${profile.name || "athlete"}.`;
-    return `Ready when you are, ${profile.name || "athlete"}.`;
-  })();
+  const chipSet: string[] = isNewUser
+    ? [
+        "What data do you need?",
+        "Set up my first workout",
+        "How does this work?",
+        "Log my sleep",
+      ]
+    : [
+        "Should I push or recover?",
+        "What should I eat?",
+        "Modify today's workout",
+        "Weekly assessment",
+      ];
+
+  const greeting = isNewUser
+    ? `I'm collecting data for the next ${daysLeft} day${daysLeft === 1 ? "" : "s"}. Log your workouts, snap your meals, and tell me how you feel. The more signal I get, the sharper your plan becomes.`
+    : mode === "trained-today"
+    ? `Nice work today, ${profile.name || "athlete"}.`
+    : `Ready when you are, ${profile.name || "athlete"}.`;
 
   const [messages, setMessages] = useState<Msg[]>([
     { role: "assistant", content: greeting },
@@ -136,7 +136,10 @@ function Coach() {
   };
 
   return (
-    <div className="min-h-screen bg-bg-1 pb-40 flex flex-col">
+    <div
+      className="min-h-screen pb-40 flex flex-col"
+      style={{ background: "linear-gradient(180deg, #0F1524 0%, #0A0E1A 60%)" }}
+    >
       <header className="flex items-center justify-between px-5 pt-6">
         <Link to="/home" className="text-text-secondary"><ChevronLeft size={24} /></Link>
         <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Coach</span>
@@ -224,12 +227,14 @@ function Coach() {
         ))}
         {loading && (
           <div className="flex justify-start">
-            <div className="rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-ai animate-pulse" />
-              <span className="text-xs text-text-secondary">Thinking…</span>
+            <div className="rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "0ms" }} />
+              <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "150ms" }} />
+              <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "300ms" }} />
             </div>
           </div>
         )}
+        <style>{`@keyframes typing-dot { 0%,60%,100% { opacity: 0.3; transform: scale(0.85); } 30% { opacity: 1; transform: scale(1); } }`}</style>
         {error && (
           <div className="rounded-2xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
             {error}
