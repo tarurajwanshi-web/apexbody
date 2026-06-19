@@ -76,11 +76,15 @@ function Onboarding() {
 
       <button
         onClick={next}
-        disabled={!canContinue}
-        className="w-full gradient-brand font-semibold text-white disabled:opacity-30 disabled:cursor-not-allowed transition"
+        disabled={!canContinue && step !== 6}
+        className={`w-full font-semibold text-white disabled:opacity-30 disabled:cursor-not-allowed transition active:scale-[0.98] ${
+          step === 6 && !hasAnyPhoto(draft)
+            ? "bg-[#171F33] border border-white/10 text-text-secondary"
+            : "gradient-brand"
+        }`}
         style={{ height: "56px", borderRadius: "14px" }}
       >
-        Next
+        {step === 6 && !hasAnyPhoto(draft) ? "Skip Photos" : "Next"}
       </button>
     </div>
   );
