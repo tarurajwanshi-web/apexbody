@@ -87,7 +87,7 @@ function MeetCoach() {
       {/* Bottom */}
       <div className="mt-10">
         <button
-          onClick={() => navigate({ to: "/home" })}
+          onClick={() => navigate({ to: "/dashboard" })}
           className="w-full font-semibold text-white"
           style={{
             height: 56,
