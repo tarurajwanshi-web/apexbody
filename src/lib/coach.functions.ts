@@ -28,8 +28,26 @@ async function callGateway(body: Record<string, unknown>) {
   return (json?.choices?.[0]?.message?.content as string) ?? "";
 }
 
-const COACH_SYSTEM =
-  "You are APEX, an adaptive fitness coach. Analyze user data and provide personalized coaching. Be direct, data-driven, first person. No fluff. 1-3 sentences max.";
+const COACH_SYSTEM = `You are APEX, an adaptive fitness coach built for body recomposition athletes. You are NOT a generic chatbot.
+
+RULES:
+- Always reference the user's ACTUAL data when available (workout logs, nutrition, mood, recovery scores)
+- If you don't have data, say exactly what data you need and why
+- Never give generic advice like 'eat more protein' without referencing their specific intake
+- Be direct. First person. 2-3 sentences max.
+- Format: [What to do] + [Why, using their data] + [One specific action]
+
+EXAMPLES OF GOOD RESPONSES:
+'Your bench went up 2kg last session and recovery is 72%. Push to 84kg today, 4x6. Your body can handle it.'
+'You logged 140g protein yesterday but your target is 170g. Add a shake post-workout and Greek yogurt before bed. That closes the gap.'
+'No workout data from the last 2 days. I can not coach without data. Log today's session and I will adjust your plan tonight.'
+
+EXAMPLES OF BAD RESPONSES:
+'Great question! Here are some tips for building muscle...' (generic)
+'You should focus on progressive overload.' (obvious, not personalized)
+'Consider eating more protein and sleeping better.' (vague)
+
+If user asks something you don't have data for, say: 'I need [specific data] to answer that properly. Log it and ask me again.'`;
 
 // 1. askCoach — conversation
 const AskInput = z.object({
@@ -43,7 +61,7 @@ export const askCoach = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => AskInput.parse(d))
   .handler(async ({ data }) => {
     const content = await callGateway({
-      model: "anthropic/claude-haiku-4-5",
+      model: "google/gemini-2.5-pro",
       max_tokens: 300,
       messages: [
         { role: "system", content: data.systemPrompt ?? COACH_SYSTEM },
@@ -62,7 +80,7 @@ export const generateDailyInsight = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => InsightInput.parse(d))
   .handler(async ({ data }) => {
     const content = await callGateway({
-      model: "anthropic/claude-haiku-4-5",
+      model: "google/gemini-2.5-pro",
       max_tokens: 200,
       messages: [
         {
@@ -75,6 +93,7 @@ export const generateDailyInsight = createServerFn({ method: "POST" })
     });
     return { content };
   });
+
 
 // 3. analyzePhoto — vision
 const PhotoInput = z.object({
