@@ -1,11 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Bell, Flame, ChevronRight, Dumbbell, Apple, Moon, TrendingUp } from "lucide-react";
+import { Bell, Flame, ChevronRight, Dumbbell, Apple, Moon, TrendingUp, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { useProfile } from "@/lib/store";
 import { BottomNav } from "@/components/BottomNav";
 import { AIBadge } from "@/components/AIOrb";
 import { RingChart } from "@/components/RingChart";
-import { todayMetrics, weekDays, aiInsightRotation } from "@/lib/mock";
-import { Sparkles } from "lucide-react";
+import { todayMetrics, weekDays, aiInsightRotation, macroTargets, macroToday } from "@/lib/mock";
+import { generateDailyInsight } from "@/lib/coach.functions";
 
 export const Route = createFileRoute("/home")({
   head: () => ({ meta: [{ title: "Home — APEX" }] }),
@@ -14,7 +16,31 @@ export const Route = createFileRoute("/home")({
 
 function Home() {
   const { profile } = useProfile();
-  const insight = aiInsightRotation[new Date().getDate() % aiInsightRotation.length];
+  const fallback = aiInsightRotation[new Date().getDate() % aiInsightRotation.length];
+  const fn = useServerFn(generateDailyInsight);
+  const [insight, setInsight] = useState<string>(fallback);
+  const [loadingInsight, setLoadingInsight] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fn({
+      data: {
+        userData: {
+          goal: profile.goal,
+          apexScore: todayMetrics.apexScore,
+          recovery: todayMetrics.recovery,
+          hrv: todayMetrics.hrv,
+          sleepHours: todayMetrics.sleepHours,
+          proteinShortG: macroTargets.p - macroToday.p,
+          streak: profile.streak,
+        },
+      },
+    })
+      .then((r) => { if (!cancelled && r.content) setInsight(r.content); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoadingInsight(false); });
+    return () => { cancelled = true; };
+  }, [fn, profile.goal, profile.streak]);
 
   const hour = new Date().getHours();
   const greet = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
@@ -72,7 +98,7 @@ function Home() {
 
       {/* AI insight */}
       <Link to="/coach" className="mx-5 mt-4 flex items-center gap-3 rounded-2xl border border-ai/25 bg-gradient-to-r from-ai/10 to-sleep/5 p-4 active:scale-[0.99] transition">
-        <Sparkles size={18} className="text-ai shrink-0" />
+        <Sparkles size={18} className={`text-ai shrink-0 ${loadingInsight ? "animate-pulse" : ""}`} />
         <p className="flex-1 text-sm leading-snug">{insight}</p>
         <ChevronRight size={18} className="text-text-tertiary shrink-0" />
       </Link>
