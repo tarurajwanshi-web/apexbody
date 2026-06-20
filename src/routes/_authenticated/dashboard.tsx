@@ -64,6 +64,7 @@ function Dashboard() {
     const h = new Date().getHours();
     setGreet(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
     reloadReadiness();
+    reloadMacros();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
