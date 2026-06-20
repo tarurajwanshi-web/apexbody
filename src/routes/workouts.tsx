@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
-import { ChevronLeft, Lock, Check, Dumbbell } from "lucide-react";
+import { ChevronLeft, Lock, Check, Dumbbell, Sparkles, X, Info } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { BottomNav } from "@/components/BottomNav";
+import { AICard } from "@/components/AIOrb";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/workouts")({
@@ -10,11 +11,11 @@ export const Route = createFileRoute("/workouts")({
   component: WorkoutsPage,
 });
 
-type Exercise = { name: string; sets: number; reps: string; rest_seconds: number };
+type Exercise = { name: string; sets: number; reps: string; rest_seconds: number; cue?: string };
 type DayPlan = { day: number; day_name: string; session_name: string | null; rest: boolean; exercises: Exercise[] };
 type Plan = { days: DayPlan[] };
 type WeeklyPlan = { id: string; week_start_date: string; unlock_date: string; is_locked: boolean; plan_data: Plan };
-type SetLog = { id?: string; exercise_name: string; set_number: number; reps_completed: number | null; weight_kg: number | null; completed: boolean };
+type SetLog = { id?: string; exercise_name: string; set_number: number; reps_completed: number | null; weight_kg: number | null; completed: boolean; entry_date?: string };
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -29,6 +30,8 @@ function WorkoutsPage() {
   const [loading, setLoading] = useState(true);
   const [plan, setPlan] = useState<WeeklyPlan | null>(null);
   const [setLogs, setSetLogs] = useState<SetLog[]>([]);
+  const [weekLogs, setWeekLogs] = useState<SetLog[]>([]);
+  const [cueEx, setCueEx] = useState<Exercise | null>(null);
   const todayIdx = todayMondayIndex();
 
   const loadAll = useCallback(async () => {
@@ -51,6 +54,18 @@ function WorkoutsPage() {
         .eq("user_id", uid)
         .eq("entry_date", todayISO());
       setSetLogs((logs as any) ?? []);
+
+      // Pull this week's logs (Monday → today) for the volume nudge.
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - todayMondayIndex());
+      const weekStartISO = weekStart.toISOString().slice(0, 10);
+      const { data: wlogs } = await supabase
+        .from("workout_set_logs")
+        .select("*")
+        .eq("user_id", uid)
+        .gte("entry_date", weekStartISO)
+        .lte("entry_date", todayISO());
+      setWeekLogs((wlogs as any) ?? []);
     } finally {
       setLoading(false);
     }
