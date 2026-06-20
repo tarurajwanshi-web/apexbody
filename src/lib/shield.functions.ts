@@ -97,7 +97,7 @@ export const logMeal = createServerFn({ method: "POST" })
       .insert({
         user_id: context.userId,
         entry_date: today(),
-        meal_description: data.meal_description,
+        meal_description: data.meal_description ?? null,
         meal_photo_url: data.meal_photo_url ?? null,
         claude_score_status: "pending",
       })
