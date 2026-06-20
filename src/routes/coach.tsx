@@ -184,6 +184,18 @@ function Coach() {
         <Link to="/settings" className="text-[11px] text-text-tertiary">Settings</Link>
       </header>
 
+      {/* LOCKED BADGE — personalized coaching gate */}
+      {isLocked && (
+        <div className="mx-5 mt-4 flex items-center gap-2 rounded-full border border-white/10 bg-bg-2 px-3 py-1.5 w-fit">
+          <Lock size={12} className="text-text-tertiary" />
+          <span className="text-[11px] font-semibold text-text-secondary">
+            {daysUntilUnlock != null
+              ? `Personalized coaching unlocks in ${daysUntilUnlock} day${daysUntilUnlock === 1 ? "" : "s"}`
+              : "Personalized coaching unlocks on Day 7"}
+          </span>
+        </div>
+      )}
+
       {/* SMART CONTEXT CARD */}
       <div
         className="mx-5 mt-5 rounded-2xl p-4 border"
