@@ -1,7 +1,9 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw, LogOut } from "lucide-react";
 import { useProfile } from "@/lib/store";
 import { BottomNav } from "@/components/BottomNav";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({ meta: [{ title: "Settings — APEX" }] }),
@@ -11,6 +13,15 @@ export const Route = createFileRoute("/settings")({
 function Settings() {
   const { profile, reset } = useProfile();
   const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      toast.error(`Sign-out failed: ${error.message}`);
+      return;
+    }
+    navigate({ to: "/" });
+  };
 
   return (
     <div className="min-h-screen bg-bg-1 pb-32">
