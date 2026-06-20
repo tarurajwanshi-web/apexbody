@@ -256,7 +256,23 @@ Deno.serve(async (req) => {
     }
     const strainHistory = perDay.map((d) => d.strainNorm).filter((v): v is number => v != null);
     const penalty = fatiguePenalty(sleepDebt, strainHistory);
-    const final_pre_cap = raw_score - penalty;
+
+    // ----- Pre-workout readiness check (additive AFTER existing formula) -----
+    // If a row exists for today with session_readiness in the bottom 2 (1 or 2),
+    // apply an extra -5 to score; respect the existing -15 combined cap (penalty + extra).
+    const { data: psc } = await supabase
+      .from("pre_session_checks")
+      .select("session_readiness")
+      .eq("user_id", user_id)
+      .eq("entry_date", today)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const lowReadiness = psc != null && Number(psc.session_readiness) <= 2;
+    const rawExtra = lowReadiness ? 5 : 0;
+    const combinedPenalty = Math.min(15, penalty + rawExtra);
+    const preSessionDelta = combinedPenalty - penalty; // 0..5 — actually applied extra
+    const final_pre_cap = raw_score - combinedPenalty;
 
     const confidence = deriveConfidence(presentToday.recovery, presentToday.sleep, coverage);
     const backbone_present = presentToday.recovery && presentToday.sleep;
