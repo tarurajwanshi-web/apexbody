@@ -125,7 +125,7 @@ function Dashboard() {
             <div className="flex items-start gap-3">
               <Sparkles size={18} className="text-ai shrink-0 mt-0.5" />
               <p className="text-[13px] text-text-primary leading-snug">
-                I'm learning about you. Log workouts, meals, and mood daily. Day {day} of {LEARNING_DAYS}.
+                Day {day} of {LEARNING_DAYS} — I'm learning your patterns to personalize your program.
               </p>
             </div>
             <div className="mt-3 h-1.5 w-full rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
