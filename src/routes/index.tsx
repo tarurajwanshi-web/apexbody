@@ -13,15 +13,31 @@ export const Route = createFileRoute("/")({
 async function routeAfterAuth(navigate: ReturnType<typeof useNavigate>, userId: string) {
   const { data } = await supabase
     .from("profiles")
-    .select("profile_completed_at")
+    .select("profile_completed_at, disclaimer_accepted_at")
     .eq("user_id", userId)
     .maybeSingle();
-  if (data?.profile_completed_at) {
+
+  // STATE 1: no profile row → create it, then disclaimer
+  if (!data) {
+    await supabase.from("profiles").insert({ user_id: userId });
+    navigate({ to: "/disclaimer" });
+    return;
+  }
+
+  // STATE 3: fully onboarded
+  if (data.profile_completed_at) {
     navigate({ to: "/dashboard" });
+    return;
+  }
+
+  // STATE 2: profile exists, onboarding incomplete
+  if (data.disclaimer_accepted_at) {
+    navigate({ to: "/onboarding" });
   } else {
     navigate({ to: "/disclaimer" });
   }
 }
+
 
 function AuthScreen() {
   const navigate = useNavigate();
