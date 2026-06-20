@@ -142,7 +142,7 @@ export const updateMeal = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
     z.object({
       id: z.string().uuid(),
-      meal_description: z.string().min(1),
+      meal_description: z.string().nullable().optional(),
       meal_photo_url: z.string().nullable().optional(),
     }).parse(d),
   )
