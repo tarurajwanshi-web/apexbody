@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState, useCallback } from "react";
-import { ChevronLeft, Lock, Check, Dumbbell } from "lucide-react";
+import { useEffect, useState, useCallback, type ReactNode } from "react";
+import { ChevronLeft, Lock, Check, Dumbbell, Sparkles, X, Info } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { BottomNav } from "@/components/BottomNav";
+import { AICard } from "@/components/AIOrb";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/workouts")({
@@ -10,11 +11,11 @@ export const Route = createFileRoute("/workouts")({
   component: WorkoutsPage,
 });
 
-type Exercise = { name: string; sets: number; reps: string; rest_seconds: number };
+type Exercise = { name: string; sets: number; reps: string; rest_seconds: number; cue?: string };
 type DayPlan = { day: number; day_name: string; session_name: string | null; rest: boolean; exercises: Exercise[] };
 type Plan = { days: DayPlan[] };
 type WeeklyPlan = { id: string; week_start_date: string; unlock_date: string; is_locked: boolean; plan_data: Plan };
-type SetLog = { id?: string; exercise_name: string; set_number: number; reps_completed: number | null; weight_kg: number | null; completed: boolean };
+type SetLog = { id?: string; exercise_name: string; set_number: number; reps_completed: number | null; weight_kg: number | null; completed: boolean; entry_date?: string };
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -29,6 +30,8 @@ function WorkoutsPage() {
   const [loading, setLoading] = useState(true);
   const [plan, setPlan] = useState<WeeklyPlan | null>(null);
   const [setLogs, setSetLogs] = useState<SetLog[]>([]);
+  const [weekLogs, setWeekLogs] = useState<SetLog[]>([]);
+  const [cueEx, setCueEx] = useState<Exercise | null>(null);
   const todayIdx = todayMondayIndex();
 
   const loadAll = useCallback(async () => {
@@ -51,6 +54,18 @@ function WorkoutsPage() {
         .eq("user_id", uid)
         .eq("entry_date", todayISO());
       setSetLogs((logs as any) ?? []);
+
+      // Pull this week's logs (Monday → today) for the volume nudge.
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - todayMondayIndex());
+      const weekStartISO = weekStart.toISOString().slice(0, 10);
+      const { data: wlogs } = await supabase
+        .from("workout_set_logs")
+        .select("*")
+        .eq("user_id", uid)
+        .gte("entry_date", weekStartISO)
+        .lte("entry_date", todayISO());
+      setWeekLogs((wlogs as any) ?? []);
     } finally {
       setLoading(false);
     }
@@ -83,6 +98,7 @@ function WorkoutsPage() {
       {!loading && plan && (
         <>
           <LockBanner plan={plan} />
+          <VolumeNudge plan={plan} weekLogs={weekLogs} todayIdx={todayIdx} />
           <div className="mx-5 mt-4 space-y-3">
             {plan.plan_data?.days?.map((d, i) => (
               <DayCard
@@ -92,13 +108,75 @@ function WorkoutsPage() {
                 isToday={i === todayIdx}
                 setLogs={setLogs}
                 onLogged={loadAll}
+                onShowCue={(ex) => setCueEx(ex)}
               />
             ))}
           </div>
         </>
       )}
 
+      {cueEx && <CueSheet exercise={cueEx} onClose={() => setCueEx(null)} />}
+
       <BottomNav />
+    </div>
+  );
+}
+
+function VolumeNudge({ plan, weekLogs, todayIdx }: { plan: WeeklyPlan; weekLogs: SetLog[]; todayIdx: number }) {
+  // Sum planned sets across days 0..todayIdx; sum completed sets logged so far.
+  const days = plan.plan_data?.days ?? [];
+  let plannedThroughToday = 0;
+  for (let i = 0; i <= todayIdx; i++) {
+    const d = days[i];
+    if (!d || d.rest) continue;
+    for (const ex of d.exercises ?? []) plannedThroughToday += ex.sets;
+  }
+  const completed = weekLogs.filter((l) => l.completed).length;
+  if (plannedThroughToday === 0) return null;
+  const gap = plannedThroughToday - completed;
+  // Find next non-rest training day after today for the suggestion.
+  let nextDayLabel = "your next session";
+  for (let i = todayIdx + 1; i < days.length; i++) {
+    if (!days[i].rest) { nextDayLabel = days[i].day_name || DAY_NAMES[i]; break; }
+  }
+  let msg: ReactNode;
+  if (gap >= 4) {
+    msg = <>You're <span className="text-text-primary font-semibold">{gap} sets behind plan</span> this week. Add an extra set or two on {nextDayLabel} to catch up.</>;
+  } else if (gap >= 1) {
+    msg = <>You're <span className="text-text-primary font-semibold">{gap} {gap === 1 ? "set" : "sets"} short</span> of plan through today. Knock them out before {nextDayLabel}.</>;
+  } else {
+    msg = <>You're <span className="text-text-primary font-semibold">on track</span> — {completed}/{plannedThroughToday} planned sets logged this week. Keep it up.</>;
+  }
+  return <div className="mx-5 mt-4"><AICard>{msg}</AICard></div>;
+}
+
+function CueSheet({ exercise, onClose }: { exercise: Exercise; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-end" onClick={onClose}>
+      <div
+        className="w-full max-w-[480px] mx-auto bg-bg-2 rounded-t-3xl border-t border-white/10 p-6 animate-fade-up"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="h-1 w-12 rounded-full bg-white/20 mx-auto mb-4" />
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Exercise cue</p>
+            <h3 className="mt-1 text-xl font-bold">{exercise.name}</h3>
+            <p className="text-[12px] text-text-tertiary mt-0.5">{exercise.sets}×{exercise.reps} · {exercise.rest_seconds}s rest</p>
+          </div>
+          <button onClick={onClose} className="text-text-tertiary p-1"><X size={18} /></button>
+        </div>
+        <div className="mt-4 rounded-xl p-4" style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.10), rgba(59,130,246,0.08))", border: "1px solid rgba(124,58,237,0.25)" }}>
+          <div className="flex items-start gap-2">
+            <Sparkles size={14} className="text-ai shrink-0 mt-0.5" />
+            <p className="text-[13px] leading-relaxed">
+              {exercise.cue && exercise.cue.trim().length > 0
+                ? exercise.cue
+                : "Guidance not available for this plan. New plans generated from now on will include execution cues."}
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -121,8 +199,8 @@ function LockBanner({ plan }: { plan: WeeklyPlan }) {
 }
 
 function DayCard({
-  dayIdx, day, isToday, setLogs, onLogged,
-}: { dayIdx: number; day: DayPlan; isToday: boolean; setLogs: SetLog[]; onLogged: () => void }) {
+  dayIdx, day, isToday, setLogs, onLogged, onShowCue,
+}: { dayIdx: number; day: DayPlan; isToday: boolean; setLogs: SetLog[]; onLogged: () => void; onShowCue: (ex: Exercise) => void }) {
   const label = day.day_name || DAY_NAMES[dayIdx] || `Day ${dayIdx + 1}`;
   return (
     <div className={`rounded-2xl border p-4 ${isToday ? "border-ai/40" : "border-white/5"} bg-bg-2`}>
@@ -139,9 +217,18 @@ function DayCard({
       {!day.rest && day.exercises?.length > 0 && (
         <ul className="mt-3 space-y-1.5">
           {day.exercises.map((ex, i) => (
-            <li key={i} className="text-[13px] text-text-secondary flex justify-between">
-              <span>{ex.name}</span>
-              <span className="text-text-tertiary tabular-nums">{ex.sets}×{ex.reps}</span>
+            <li key={i}>
+              <button
+                type="button"
+                onClick={() => onShowCue(ex)}
+                className="w-full text-[13px] text-text-secondary flex justify-between items-center py-0.5 active:opacity-70"
+              >
+                <span className="flex items-center gap-1.5 text-left">
+                  {ex.name}
+                  <Info size={11} className="text-text-tertiary shrink-0" />
+                </span>
+                <span className="text-text-tertiary tabular-nums">{ex.sets}×{ex.reps}</span>
+              </button>
             </li>
           ))}
         </ul>

@@ -158,7 +158,7 @@ function ProfileSetup() {
         {step === 2 && <GoalStep value={draft.goal} onChange={(goal) => patch({ goal })} />}
         {step === 3 && <DaysStep value={draft.days} onChange={(days) => patch({ days })} />}
         {step === 4 && <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />}
-        {step === 5 && <BodyStep draft={draft} patch={patch} />}
+        {step === 5 && <BodyStep draft={draft} patch={patch} onSkip={() => { patch({ bodyDataType: null, dexaBf: "", dexaLean: "", waist: "", hip: "", weight: "", height: "" }); next(); }} />}
         {step === 6 && <ReviewStep draft={draft} />}
       </main>
 
@@ -385,7 +385,7 @@ function inToCm(inches: number) { return inches * 2.54; }
 function kgToLb(kg: number) { return kg * 2.20462; }
 function lbToKg(lb: number) { return lb / 2.20462; }
 
-function BodyStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>) => void }) {
+function BodyStep({ draft, patch, onSkip }: { draft: Draft; patch: (p: Partial<Draft>) => void; onSkip: () => void }) {
   const [lenUnit, setLenUnit] = useState<LengthUnit>("cm");
   const [wUnit, setWUnit] = useState<WeightUnit>("kg");
 
@@ -416,12 +416,10 @@ function BodyStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>) =
       <div className="text-right mb-5">
         <button
           type="button"
-          onClick={() => patch({ bodyDataType: null })}
-          className={`text-xs underline underline-offset-2 ${
-            draft.bodyDataType === null ? "text-text-secondary" : "text-text-tertiary hover:text-text-secondary"
-          }`}
+          onClick={onSkip}
+          className="text-xs underline underline-offset-2 text-text-tertiary hover:text-text-secondary"
         >
-          Skip for now
+          Skip for now →
         </button>
       </div>
 

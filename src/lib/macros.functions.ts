@@ -15,6 +15,7 @@ export type MacroSummary = {
   target_protein_g: number | null;
   target_carbs_g: number | null;
   target_fat_g: number | null;
+  goal: string | null;
 };
 
 export const getTodayMacroSummary = createServerFn({ method: "GET" })
@@ -31,9 +32,19 @@ export const getTodayMacroSummary = createServerFn({ method: "GET" })
     const sum = (key: string) =>
       (meals ?? []).reduce((s: number, m: any) => s + Number(m[key] ?? 0), 0);
 
+    // Always select the MOST RECENT macro target row, so the screen reflects
+    // the latest calculate-macros run rather than an arbitrary stale row.
     const { data: target } = await context.supabase
       .from("daily_macro_targets")
-      .select("target_calories, target_protein_g, target_carbs_g, target_fat_g")
+      .select("target_calories, target_protein_g, target_carbs_g, target_fat_g, calculated_at")
+      .eq("user_id", context.userId)
+      .order("calculated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const { data: profile } = await context.supabase
+      .from("profiles")
+      .select("goal")
       .eq("user_id", context.userId)
       .maybeSingle();
 
@@ -47,5 +58,6 @@ export const getTodayMacroSummary = createServerFn({ method: "GET" })
       target_protein_g: target?.target_protein_g != null ? Number(target.target_protein_g) : null,
       target_carbs_g: target?.target_carbs_g != null ? Number(target.target_carbs_g) : null,
       target_fat_g: target?.target_fat_g != null ? Number(target.target_fat_g) : null,
+      goal: (profile?.goal as string | null) ?? null,
     };
   });
