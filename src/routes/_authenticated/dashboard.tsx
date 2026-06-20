@@ -1,9 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Sparkles, Dumbbell, Camera, Apple, Brain, Home as HomeIcon, Flame, Heart } from "lucide-react";
+import { Sparkles, Dumbbell, Camera, Apple, Brain, Home as HomeIcon, Flame, Heart, BookOpen } from "lucide-react";
 import { useProfile } from "@/lib/store";
-import { generateDailyInsight } from "@/lib/coach.functions";
+import { getOrCreateDailyInsight } from "@/lib/coach.functions";
 import { getTodayReadiness, getActivityWeek, type TodayReadiness, type ActivityWeek } from "@/lib/shield.functions";
 import { RecoveryLogModal, MealLogModal } from "@/components/LogModals";
 import { MealHistoryList } from "@/components/MealHistoryList";
@@ -14,7 +14,7 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
   component: Dashboard,
 });
 
-const LEARNING_DAYS = 5;
+const LEARNING_DAYS = 7;
 
 function getDayOfJourney(): number {
   if (typeof window === "undefined") return 1;
