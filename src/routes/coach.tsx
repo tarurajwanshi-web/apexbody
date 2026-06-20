@@ -321,7 +321,7 @@ function Coach() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send(input)}
-            placeholder="What's on your mind?"
+            placeholder={isLocked ? "Ask a general fitness question…" : "What's on your mind?"}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-text-tertiary"
           />
           <button
