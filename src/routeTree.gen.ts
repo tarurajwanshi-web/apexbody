@@ -16,9 +16,9 @@ import { Route as NutritionRouteImport } from './routes/nutrition'
 import { Route as MeetCoachRouteImport } from './routes/meet-coach'
 import { Route as HomeRouteImport } from './routes/home'
 import { Route as DisclaimerRouteImport } from './routes/disclaimer'
-import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as CoachRouteImport } from './routes/coach'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 
 const WorkoutsRoute = WorkoutsRouteImport.update({
   id: '/workouts',
@@ -55,11 +55,6 @@ const DisclaimerRoute = DisclaimerRouteImport.update({
   path: '/disclaimer',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DashboardRoute = DashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const CoachRoute = CoachRouteImport.update({
   id: '/coach',
   path: '/coach',
@@ -70,11 +65,15 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
+  id: '/_authenticated/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/coach': typeof CoachRoute
-  '/dashboard': typeof DashboardRoute
   '/disclaimer': typeof DisclaimerRoute
   '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
@@ -82,11 +81,11 @@ export interface FileRoutesByFullPath {
   '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRoute
   '/workouts': typeof WorkoutsRoute
+  '/dashboard': typeof AuthenticatedDashboardRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/coach': typeof CoachRoute
-  '/dashboard': typeof DashboardRoute
   '/disclaimer': typeof DisclaimerRoute
   '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
@@ -94,12 +93,12 @@ export interface FileRoutesByTo {
   '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRoute
   '/workouts': typeof WorkoutsRoute
+  '/dashboard': typeof AuthenticatedDashboardRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/coach': typeof CoachRoute
-  '/dashboard': typeof DashboardRoute
   '/disclaimer': typeof DisclaimerRoute
   '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
@@ -107,13 +106,13 @@ export interface FileRoutesById {
   '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRoute
   '/workouts': typeof WorkoutsRoute
+  '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/coach'
-    | '/dashboard'
     | '/disclaimer'
     | '/home'
     | '/meet-coach'
@@ -121,11 +120,11 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/settings'
     | '/workouts'
+    | '/dashboard'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/coach'
-    | '/dashboard'
     | '/disclaimer'
     | '/home'
     | '/meet-coach'
@@ -133,11 +132,11 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/settings'
     | '/workouts'
+    | '/dashboard'
   id:
     | '__root__'
     | '/'
     | '/coach'
-    | '/dashboard'
     | '/disclaimer'
     | '/home'
     | '/meet-coach'
@@ -145,12 +144,12 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/settings'
     | '/workouts'
+    | '/_authenticated/dashboard'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CoachRoute: typeof CoachRoute
-  DashboardRoute: typeof DashboardRoute
   DisclaimerRoute: typeof DisclaimerRoute
   HomeRoute: typeof HomeRoute
   MeetCoachRoute: typeof MeetCoachRoute
@@ -158,6 +157,7 @@ export interface RootRouteChildren {
   OnboardingRoute: typeof OnboardingRoute
   SettingsRoute: typeof SettingsRoute
   WorkoutsRoute: typeof WorkoutsRoute
+  AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -211,13 +211,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DisclaimerRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/dashboard': {
-      id: '/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof DashboardRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/coach': {
       id: '/coach'
       path: '/coach'
@@ -232,13 +225,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/dashboard': {
+      id: '/_authenticated/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AuthenticatedDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CoachRoute: CoachRoute,
-  DashboardRoute: DashboardRoute,
   DisclaimerRoute: DisclaimerRoute,
   HomeRoute: HomeRoute,
   MeetCoachRoute: MeetCoachRoute,
@@ -246,6 +245,7 @@ const rootRouteChildren: RootRouteChildren = {
   OnboardingRoute: OnboardingRoute,
   SettingsRoute: SettingsRoute,
   WorkoutsRoute: WorkoutsRoute,
+  AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

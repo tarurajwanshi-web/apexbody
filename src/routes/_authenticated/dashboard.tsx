@@ -8,7 +8,7 @@ import { getTodayReadiness, type TodayReadiness } from "@/lib/shield.functions";
 import { RecoveryLogModal, MealLogModal, WorkoutLogModal } from "@/components/LogModals";
 import { MealHistoryList } from "@/components/MealHistoryList";
 
-export const Route = createFileRoute("/dashboard")({
+export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — APEX" }] }),
   component: Dashboard,
 });
