@@ -318,6 +318,7 @@ Deno.serve(async (req) => {
         confidence_level: row.confidence_level,
         coverage,
         fatigue_adjustment: row.fatigue_adjustment,
+        pre_session_adjustment: row.pre_session_adjustment,
         pillar_breakdown,
         nudge_pillar,
         nudge_message,
