@@ -155,7 +155,7 @@ function Dashboard() {
             className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-semibold text-white"
             style={{ background: "rgba(124,58,237,0.10)", border: "1px solid rgba(124,58,237,0.20)" }}
           >
-            <Flame size={12} className="text-warning" /> {profile.streak}
+            <Flame size={12} className="text-warning" /> {activity?.streak ?? 0}
           </span>
         </header>
 
@@ -344,23 +344,28 @@ function Dashboard() {
           )}
         </button>
 
-        {/* Quick Actions */}
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => setWorkoutOpen(true)}
-            className="flex items-center justify-center gap-2 rounded-[14px] h-14 text-[14px] font-semibold text-sleep active:scale-[0.98] transition"
-            style={{ background: "#0F1524", border: "1px solid rgba(59,130,246,0.35)" }}
-          >
-            <Dumbbell size={18} /> Log Workout
-          </button>
-          <button
-            onClick={() => setMealOpen(true)}
-            className="flex items-center justify-center gap-2 rounded-[14px] h-14 text-[14px] font-semibold text-success active:scale-[0.98] transition"
-            style={{ background: "#0F1524", border: "1px solid rgba(16,185,129,0.35)" }}
-          >
-            <Camera size={18} /> Log Meal
-          </button>
-        </div>
+        {/* Recovery / Sleep / Mood — primary entry point (no dedicated tab) */}
+        <button
+          onClick={() => setRecoveryOpen(true)}
+          className="w-full flex items-center gap-3 rounded-2xl p-4 text-left active:scale-[0.99] transition"
+          style={{
+            background: "linear-gradient(135deg, rgba(124,58,237,0.14), rgba(59,130,246,0.10))",
+            border: "1px solid rgba(124,58,237,0.35)",
+          }}
+        >
+          <div className="h-10 w-10 rounded-full gradient-brand flex items-center justify-center shrink-0">
+            <Heart size={18} className="text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[14px] font-semibold text-white">
+              {hasToday ? "Update today's recovery" : "Log today's recovery"}
+            </p>
+            <p className="text-[12px] text-text-secondary mt-0.5">
+              Sleep, mood &amp; how you feel — feeds your APEX score
+            </p>
+          </div>
+          <span className="text-text-tertiary">›</span>
+        </button>
 
         {/* Today's meals — edit / delete */}
         <MealHistoryList
@@ -408,9 +413,8 @@ function Dashboard() {
 
       <DashboardNav onCamera={() => setMealOpen(true)} />
 
-      <RecoveryLogModal open={recoveryOpen} onClose={() => setRecoveryOpen(false)} onSaved={() => { captureScore(); showToast("Recovery logged"); reloadReadiness(); pollScoreChange(); }} />
-      <MealLogModal open={mealOpen} onClose={() => setMealOpen(false)} onSaved={() => { captureScore(); showToast("Meal logged"); pollScoreChange(); setTimeout(reloadMacros, 4000); }} />
-      <WorkoutLogModal open={workoutOpen} onClose={() => setWorkoutOpen(false)} onSaved={() => { captureScore(); showToast("Workout logged"); pollScoreChange(); }} />
+      <RecoveryLogModal open={recoveryOpen} onClose={() => setRecoveryOpen(false)} onSaved={() => { captureScore(); showToast("Recovery logged"); reloadReadiness(); reloadActivity(); pollScoreChange(); }} />
+      <MealLogModal open={mealOpen} onClose={() => setMealOpen(false)} onSaved={() => { captureScore(); showToast("Meal logged"); pollScoreChange(); reloadActivity(); setTimeout(reloadMacros, 4000); }} />
 
 
       {toast && (
