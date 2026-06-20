@@ -87,7 +87,7 @@ export const logMeal = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z.object({
-      meal_description: z.string().min(1),
+      meal_description: z.string().nullable().optional(),
       meal_photo_url: z.string().nullable().optional(),
     }).parse(d),
   )
