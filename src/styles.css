@@ -166,11 +166,18 @@
   to { transform: rotate(360deg); }
 }
 @keyframes ambient-pulse {
-  0%, 100% { opacity: 0.95; filter: drop-shadow(0 0 18px rgba(124,58,237,0.35)); }
-  50% { opacity: 1; filter: drop-shadow(0 0 36px rgba(59,130,246,0.55)); }
+  0%, 100% { opacity: 0.92; filter: drop-shadow(0 0 16px rgba(124,58,237,0.32)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 38px rgba(59,130,246,0.6)); }
 }
-.ambient-ring { animation: ambient-pulse 4.5s ease-in-out infinite; }
-.ambient-ring-rotate { animation: ambient-rotate 22s linear infinite; transform-origin: 50% 50%; }
+/* Breathe the arc length itself — gradient grows/shrinks while it spins.
+   Values are tuned for r=105 (circumference ~659): 0.50c..0.74c. */
+@keyframes ambient-arc-breathe {
+  0%, 100% { stroke-dasharray: 330 659; }
+  50% { stroke-dasharray: 488 659; }
+}
+.ambient-ring { animation: ambient-pulse 6s ease-in-out infinite; }
+.ambient-ring-rotate { animation: ambient-rotate 26s linear infinite; transform-origin: 50% 50%; }
+.ambient-ring-arc { animation: ambient-arc-breathe 6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .ambient-ring, .ambient-ring-rotate { animation: none; }
+  .ambient-ring, .ambient-ring-rotate, .ambient-ring-arc { animation: none; }
 }

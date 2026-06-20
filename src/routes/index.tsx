@@ -119,6 +119,7 @@ function AmbientRing() {
           fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={stroke}
         />
         <circle
+          className="ambient-ring-arc"
           cx={size / 2} cy={size / 2} r={r}
           fill="none" stroke="url(#ambientRingGrad)" strokeWidth={stroke}
           strokeLinecap="round"

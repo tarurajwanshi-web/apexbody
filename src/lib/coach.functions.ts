@@ -81,12 +81,12 @@ export const generateDailyInsight = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const content = await callGateway({
       model: "google/gemini-2.5-pro",
-      max_tokens: 200,
+      max_tokens: 600,
       messages: [
         {
           role: "system",
           content:
-            "You are APEX coach. Generate ONE morning insight based on user data. Reference their actual numbers. Be specific, actionable, first person. 2 sentences max.",
+            "You are APEX coach. Write ONE complete morning insight (2-3 full sentences) based on user data. Reference their actual numbers when present. Be specific, actionable, first person. Always finish your sentences — never trail off.",
         },
         { role: "user", content: JSON.stringify(data.userData) },
       ],

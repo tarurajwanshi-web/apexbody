@@ -12,6 +12,8 @@ export const Route = createFileRoute("/_authenticated/onboarding")({
 type Goal = "recomposition" | "muscle_gain" | "fat_loss" | "strength" | "athletic_performance";
 type Equipment = "home_gym_db_only" | "commercial_gym" | "limited_equipment" | "bodyweight_only";
 type BodyDataType = "dexa" | "measurements" | null;
+type LengthUnit = "cm" | "in";
+type WeightUnit = "kg" | "lb";
 
 const GOALS: { id: Goal; label: string; desc: string; Icon: typeof Trophy }[] = [
   { id: "recomposition", label: "Recomposition", desc: "Build muscle, lose fat", Icon: Activity },
@@ -32,11 +34,12 @@ const TOTAL = 5;
 
 type Draft = {
   goal: Goal | null;
-  days: number | null;
+  days: number;
   equipment: Equipment | null;
   bodyDataType: BodyDataType;
   dexaBf: string;
   dexaLean: string;
+  // Stored in cm/kg always:
   waist: string;
   hip: string;
   weight: string;
@@ -44,7 +47,7 @@ type Draft = {
 };
 
 const EMPTY: Draft = {
-  goal: null, days: null, equipment: null, bodyDataType: null,
+  goal: null, days: 3, equipment: null, bodyDataType: null,
   dexaBf: "", dexaLean: "", waist: "", hip: "", weight: "", height: "",
 };
 
@@ -65,7 +68,7 @@ function ProfileSetup() {
   const canContinue = (() => {
     switch (step) {
       case 1: return !!draft.goal;
-      case 2: return !!draft.days;
+      case 2: return draft.days >= 1 && draft.days <= 6;
       case 3: return !!draft.equipment;
       case 4: return bodyPathValid;
       case 5: return true;
@@ -111,10 +114,7 @@ function ProfileSetup() {
       const { error: fnErr } = await supabase.functions.invoke("generate-plan", {
         body: { user_id: userId },
       });
-      if (fnErr) {
-        // Non-blocking — plan generation will be retried later.
-        console.warn("generate-plan failed", fnErr);
-      }
+      if (fnErr) console.warn("generate-plan failed", fnErr);
 
       navigate({ to: "/dashboard" });
     } catch (e: any) {
@@ -124,7 +124,7 @@ function ProfileSetup() {
   };
 
   return (
-    <div className="min-h-screen bg-bg-1 pb-24">
+    <div className="min-h-screen bg-bg-1 pb-32">
       <header className="flex items-center justify-between px-5 pt-6">
         <button onClick={step === 1 ? () => navigate({ to: "/" }) : back} className="text-text-secondary">
           <ChevronLeft size={24} />
@@ -139,7 +139,7 @@ function ProfileSetup() {
         <div className="h-full gradient-brand transition-all" style={{ width: `${(step / TOTAL) * 100}%` }} />
       </div>
 
-      <main className="px-5 mt-8">
+      <main className="px-5 mt-8 max-w-[480px] mx-auto">
         {step === 1 && <GoalStep value={draft.goal} onChange={(goal) => patch({ goal })} />}
         {step === 2 && <DaysStep value={draft.days} onChange={(days) => patch({ days })} />}
         {step === 3 && <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />}
@@ -147,24 +147,33 @@ function ProfileSetup() {
         {step === 5 && <ReviewStep draft={draft} />}
       </main>
 
-      <footer className="fixed inset-x-0 bottom-0 p-5 bg-gradient-to-t from-bg-1 via-bg-1 to-transparent pt-10">
-        {step < TOTAL ? (
-          <button
-            disabled={!canContinue}
-            onClick={next}
-            className="w-full rounded-2xl gradient-brand text-white py-3.5 text-sm font-semibold disabled:opacity-40"
-          >
-            Continue
-          </button>
-        ) : (
-          <button
-            disabled={submitting}
-            onClick={submit}
-            className="w-full rounded-2xl gradient-brand text-white py-3.5 text-sm font-semibold disabled:opacity-40"
-          >
-            {submitting ? "Generating your plan…" : "Generate my plan"}
-          </button>
-        )}
+      <footer
+        className="fixed inset-x-0 bottom-0 z-20 pt-10 pb-5"
+        style={{
+          background: "linear-gradient(to top, var(--bg-1) 0%, var(--bg-1) 60%, transparent 100%)",
+        }}
+      >
+        <div className="mx-auto max-w-[480px] px-5">
+          {step < TOTAL ? (
+            <button
+              disabled={!canContinue}
+              onClick={next}
+              className="block w-full rounded-2xl gradient-brand text-white py-3.5 text-sm font-semibold disabled:opacity-40"
+              style={{ borderRadius: 18 }}
+            >
+              Continue
+            </button>
+          ) : (
+            <button
+              disabled={submitting}
+              onClick={submit}
+              className="block w-full rounded-2xl gradient-brand text-white py-3.5 text-sm font-semibold disabled:opacity-40"
+              style={{ borderRadius: 18 }}
+            >
+              {submitting ? "Generating your plan…" : "Generate my plan"}
+            </button>
+          )}
+        </div>
       </footer>
     </div>
   );
@@ -179,6 +188,13 @@ function StepHeader({ title, sub }: { title: string; sub?: string }) {
   );
 }
 
+/* ---------- Selected-state helpers (gradient tint) ---------- */
+const SELECTED_STYLE: React.CSSProperties = {
+  background: "linear-gradient(135deg, rgba(124,58,237,0.28), rgba(59,130,246,0.22))",
+  borderColor: "rgba(167,139,250,0.7)",
+  boxShadow: "0 0 0 1px rgba(167,139,250,0.35), 0 8px 24px -12px rgba(124,58,237,0.5)",
+};
+
 function GoalStep({ value, onChange }: { value: Goal | null; onChange: (g: Goal) => void }) {
   return (
     <>
@@ -189,10 +205,12 @@ function GoalStep({ value, onChange }: { value: Goal | null; onChange: (g: Goal)
           return (
             <button
               key={id}
+              type="button"
               onClick={() => onChange(id)}
               className={`w-full flex items-center gap-3 rounded-2xl p-4 text-left border transition ${
-                active ? "border-accent bg-accent/10" : "border-white/5 bg-bg-2"
+                active ? "" : "border-white/5 bg-bg-2"
               }`}
+              style={active ? SELECTED_STYLE : undefined}
             >
               <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${active ? "gradient-brand text-white" : "bg-bg-1 text-text-secondary"}`}>
                 <Icon size={18} />
@@ -201,7 +219,7 @@ function GoalStep({ value, onChange }: { value: Goal | null; onChange: (g: Goal)
                 <p className="font-semibold text-sm">{label}</p>
                 <p className="text-xs text-text-tertiary">{desc}</p>
               </div>
-              {active && <Check size={18} className="text-accent" />}
+              {active && <Check size={18} className="text-white" />}
             </button>
           );
         })}
@@ -210,29 +228,64 @@ function GoalStep({ value, onChange }: { value: Goal | null; onChange: (g: Goal)
   );
 }
 
-function DaysStep({ value, onChange }: { value: number | null; onChange: (n: number) => void }) {
+/* ---------- Training-days slider ---------- */
+function DaysStep({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  const pct = ((value - 1) / 5) * 100;
   return (
     <>
       <StepHeader title="How many days per week can you train?" />
-      <div className="grid grid-cols-3 gap-2">
-        {[1, 2, 3, 4, 5, 6].map((n) => {
-          const active = value === n;
-          return (
+      <div className="text-center mt-2 mb-8">
+        <span className="text-6xl font-bold tabular-nums text-white">{value}</span>
+        <span className="ml-2 text-base text-text-tertiary">{value === 1 ? "day" : "days"} / week</span>
+      </div>
+
+      <div className="px-2">
+        <div className="relative h-10 flex items-center">
+          {/* Track */}
+          <div className="absolute inset-x-0 h-2 rounded-full bg-white/10" />
+          {/* Filled portion */}
+          <div
+            className="absolute h-2 rounded-full gradient-brand pointer-events-none"
+            style={{ width: `${pct}%` }}
+          />
+          {/* Thumb */}
+          <div
+            className="absolute h-6 w-6 rounded-full bg-white shadow-lg pointer-events-none -translate-x-1/2"
+            style={{ left: `${pct}%`, boxShadow: "0 0 0 4px rgba(124,58,237,0.25)" }}
+          />
+          {/* Range input (transparent, on top) */}
+          <input
+            type="range"
+            min={1}
+            max={6}
+            step={1}
+            value={value}
+            onChange={(e) => onChange(Number(e.target.value))}
+            className="relative w-full h-10 opacity-0 cursor-pointer z-10"
+            aria-label="Training days per week"
+          />
+        </div>
+
+        {/* Tick labels */}
+        <div className="mt-3 flex justify-between px-0.5">
+          {[1, 2, 3, 4, 5, 6].map((n) => (
             <button
               key={n}
+              type="button"
               onClick={() => onChange(n)}
-              className={`rounded-2xl py-6 text-center border transition ${
-                active ? "border-accent bg-accent/10" : "border-white/5 bg-bg-2"
+              className={`text-xs tabular-nums w-6 h-6 rounded-full transition ${
+                n === value ? "text-white font-semibold" : "text-text-tertiary hover:text-text-secondary"
               }`}
             >
-              <p className="text-3xl font-bold">{n}</p>
-              <p className="text-[10px] uppercase tracking-wider text-text-tertiary mt-1">
-                {n === 1 ? "day" : "days"}
-              </p>
+              {n}
             </button>
-          );
-        })}
+          ))}
+        </div>
       </div>
+
+      <p className="mt-10 text-center text-xs text-text-tertiary">
+        Drag the slider or tap a number.
+      </p>
     </>
   );
 }
@@ -247,16 +300,22 @@ function EquipmentStep({ value, onChange }: { value: Equipment | null; onChange:
           return (
             <button
               key={id}
+              type="button"
               onClick={() => onChange(id)}
               className={`w-full flex items-center justify-between rounded-2xl p-4 text-left border transition ${
-                active ? "border-accent bg-accent/10" : "border-white/5 bg-bg-2"
+                active ? "" : "border-white/5 bg-bg-2"
               }`}
+              style={active ? SELECTED_STYLE : undefined}
             >
               <div>
-                <p className="font-semibold text-sm">{label}</p>
+                <p className="font-semibold text-sm text-white">{label}</p>
                 <p className="text-xs text-text-tertiary">{desc}</p>
               </div>
-              {active && <Check size={18} className="text-accent" />}
+              {active && (
+                <div className="h-7 w-7 rounded-full gradient-brand flex items-center justify-center">
+                  <Check size={16} className="text-white" />
+                </div>
+              )}
             </button>
           );
         })}
@@ -265,15 +324,27 @@ function EquipmentStep({ value, onChange }: { value: Equipment | null; onChange:
   );
 }
 
+/* ---------- Body data: tabs + skip link + unit toggles ---------- */
+
+function cmToIn(cm: number) { return cm / 2.54; }
+function inToCm(inches: number) { return inches * 2.54; }
+function kgToLb(kg: number) { return kg * 2.20462; }
+function lbToKg(lb: number) { return lb / 2.20462; }
+
 function BodyStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>) => void }) {
-  const tabBtn = (id: BodyDataType, label: string) => {
+  const [lenUnit, setLenUnit] = useState<LengthUnit>("cm");
+  const [wUnit, setWUnit] = useState<WeightUnit>("kg");
+
+  const tabBtn = (id: Exclude<BodyDataType, null>, label: string) => {
     const active = draft.bodyDataType === id;
     return (
       <button
+        type="button"
         onClick={() => patch({ bodyDataType: id })}
-        className={`flex-1 rounded-xl py-2.5 text-xs font-semibold border ${
-          active ? "border-accent bg-accent/10 text-white" : "border-white/5 bg-bg-2 text-text-secondary"
+        className={`flex-1 rounded-xl py-2.5 text-xs font-semibold border transition ${
+          active ? "text-white" : "border-white/5 bg-bg-2 text-text-secondary"
         }`}
+        style={active ? SELECTED_STYLE : undefined}
       >
         {label}
       </button>
@@ -282,12 +353,22 @@ function BodyStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>) =
 
   return (
     <>
-      <StepHeader title="Body data" sub="Optional — improves accuracy. You can skip this." />
+      <StepHeader title="Body data" sub="Optional — improves accuracy." />
 
-      <div className="flex gap-2 mb-4">
-        {tabBtn(null, "Skip for now")}
+      <div className="flex gap-2 mb-2">
         {tabBtn("dexa", "DEXA scan")}
         {tabBtn("measurements", "Measurements")}
+      </div>
+      <div className="text-right mb-5">
+        <button
+          type="button"
+          onClick={() => patch({ bodyDataType: null })}
+          className={`text-xs underline underline-offset-2 ${
+            draft.bodyDataType === null ? "text-text-secondary" : "text-text-tertiary hover:text-text-secondary"
+          }`}
+        >
+          Skip for now
+        </button>
       </div>
 
       {draft.bodyDataType === "dexa" && (
@@ -299,19 +380,138 @@ function BodyStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>) =
 
       {draft.bodyDataType === "measurements" && (
         <div className="space-y-3">
-          <Field label="Waist" value={draft.waist} onChange={(v) => patch({ waist: v })} suffix="cm" />
-          <Field label="Hip" value={draft.hip} onChange={(v) => patch({ hip: v })} suffix="cm" />
-          <Field label="Weight" value={draft.weight} onChange={(v) => patch({ weight: v })} suffix="kg" />
-          <Field label="Height" value={draft.height} onChange={(v) => patch({ height: v })} suffix="cm" />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Length</span>
+            <UnitToggle
+              options={[{ id: "cm", label: "cm" }, { id: "in", label: "in" }]}
+              value={lenUnit}
+              onChange={(v) => setLenUnit(v as LengthUnit)}
+            />
+          </div>
+          <UnitField
+            label="Waist"
+            cmValue={draft.waist}
+            onChangeCm={(v) => patch({ waist: v })}
+            unit={lenUnit}
+            convertToDisplay={cmToIn}
+            convertFromDisplay={inToCm}
+          />
+          <UnitField
+            label="Hip"
+            cmValue={draft.hip}
+            onChangeCm={(v) => patch({ hip: v })}
+            unit={lenUnit}
+            convertToDisplay={cmToIn}
+            convertFromDisplay={inToCm}
+          />
+          <UnitField
+            label="Height"
+            cmValue={draft.height}
+            onChangeCm={(v) => patch({ height: v })}
+            unit={lenUnit}
+            convertToDisplay={cmToIn}
+            convertFromDisplay={inToCm}
+          />
+
+          <div className="flex items-center justify-between gap-2 pt-2">
+            <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Weight</span>
+            <UnitToggle
+              options={[{ id: "kg", label: "kg" }, { id: "lb", label: "lb" }]}
+              value={wUnit}
+              onChange={(v) => setWUnit(v as WeightUnit)}
+            />
+          </div>
+          <UnitField
+            label="Weight"
+            cmValue={draft.weight}
+            onChangeCm={(v) => patch({ weight: v })}
+            unit={wUnit}
+            convertToDisplay={kgToLb}
+            convertFromDisplay={lbToKg}
+          />
         </div>
       )}
 
       {draft.bodyDataType === null && (
-        <p className="text-center text-xs text-text-tertiary mt-8">
+        <p className="text-center text-xs text-text-tertiary mt-10">
           No body data shared — you can add this later in Settings.
         </p>
       )}
     </>
+  );
+}
+
+function UnitToggle({
+  options, value, onChange,
+}: {
+  options: { id: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="inline-flex rounded-full bg-bg-2 border border-white/10 p-0.5">
+      {options.map((o) => {
+        const active = o.id === value;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            onClick={() => onChange(o.id)}
+            className={`px-3 py-1 text-xs rounded-full transition ${
+              active ? "gradient-brand text-white" : "text-text-tertiary"
+            }`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Stores cm or kg internally; displays converted value while typing in display unit. */
+function UnitField({
+  label, cmValue, onChangeCm, unit, convertToDisplay, convertFromDisplay,
+}: {
+  label: string;
+  cmValue: string; // stored canonical (cm or kg)
+  onChangeCm: (v: string) => void;
+  unit: string; // "cm" | "in" | "kg" | "lb"
+  convertToDisplay: (n: number) => number;
+  convertFromDisplay: (n: number) => number;
+}) {
+  const isCanonical = unit === "cm" || unit === "kg";
+  const display = (() => {
+    if (!cmValue) return "";
+    if (isCanonical) return cmValue;
+    const n = Number(cmValue);
+    if (Number.isNaN(n)) return "";
+    return convertToDisplay(n).toFixed(1);
+  })();
+
+  const handle = (raw: string) => {
+    if (raw === "") return onChangeCm("");
+    if (isCanonical) return onChangeCm(raw);
+    const n = Number(raw);
+    if (Number.isNaN(n)) return onChangeCm("");
+    onChangeCm(String(Number(convertFromDisplay(n).toFixed(2))));
+  };
+
+  return (
+    <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3">
+      <span className="text-sm text-text-secondary">{label}</span>
+      <span className="flex items-center gap-1">
+        <input
+          type="number"
+          inputMode="decimal"
+          value={display}
+          onChange={(e) => handle(e.target.value)}
+          className="w-24 bg-transparent text-right text-sm font-semibold focus:outline-none"
+          placeholder="—"
+        />
+        <span className="text-xs text-text-tertiary">{unit}</span>
+      </span>
+    </label>
   );
 }
 
@@ -342,7 +542,7 @@ function ReviewStep({ draft }: { draft: Draft }) {
       <StepHeader title="Review" sub="Confirm and we'll build your plan." />
       <div className="rounded-2xl bg-bg-2 border border-white/5 divide-y divide-white/5">
         <Row label="Goal" value={goalLabel} />
-        <Row label="Training days" value={`${draft.days ?? "—"} / week`} />
+        <Row label="Training days" value={`${draft.days} / week`} />
         <Row label="Equipment" value={eqLabel} />
         <Row
           label="Body data"
@@ -350,7 +550,7 @@ function ReviewStep({ draft }: { draft: Draft }) {
             draft.bodyDataType === "dexa"
               ? `DEXA · ${draft.dexaBf}% · ${draft.dexaLean}kg`
               : draft.bodyDataType === "measurements"
-              ? `Waist ${draft.waist} · Hip ${draft.hip} · ${draft.weight}kg · ${draft.height}cm`
+              ? `Waist ${draft.waist}cm · Hip ${draft.hip}cm · ${draft.weight}kg · ${draft.height}cm`
               : "Not provided"
           }
         />
