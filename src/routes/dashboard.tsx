@@ -314,28 +314,20 @@ function Dashboard() {
 
         {/* Quick Actions */}
         <div className="grid grid-cols-2 gap-3">
-          <Link
-            to="/workouts"
-            className="flex items-center justify-center gap-2 rounded-[14px] h-14 text-[14px] font-semibold text-sleep"
+          <button
+            onClick={() => setWorkoutOpen(true)}
+            className="flex items-center justify-center gap-2 rounded-[14px] h-14 text-[14px] font-semibold text-sleep active:scale-[0.98] transition"
             style={{ background: "#0F1524", border: "1px solid rgba(59,130,246,0.35)" }}
           >
             <Dumbbell size={18} /> Log Workout
-          </Link>
+          </button>
           <button
-            onClick={() => fileRef.current?.click()}
-            className="flex items-center justify-center gap-2 rounded-[14px] h-14 text-[14px] font-semibold text-success"
+            onClick={() => setMealOpen(true)}
+            className="flex items-center justify-center gap-2 rounded-[14px] h-14 text-[14px] font-semibold text-success active:scale-[0.98] transition"
             style={{ background: "#0F1524", border: "1px solid rgba(16,185,129,0.35)" }}
           >
             <Camera size={18} /> Log Meal
           </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={() => navigate({ to: "/nutrition" })}
-          />
         </div>
 
         {/* Today's Plan */}
@@ -360,16 +352,29 @@ function Dashboard() {
               </li>
             ))}
           </ul>
-          <Link
-            to="/workouts"
-            className="mt-4 block rounded-2xl gradient-brand py-3 text-center text-[14px] font-semibold text-white"
+          <button
+            onClick={() => navigate({ to: "/workouts" })}
+            className="mt-4 w-full block rounded-2xl gradient-brand py-3 text-center text-[14px] font-semibold text-white active:scale-[0.98] transition"
           >
             Start Workout →
-          </Link>
+          </button>
         </div>
       </div>
 
-      <DashboardNav onCamera={() => fileRef.current?.click()} />
+      <DashboardNav onCamera={() => setMealOpen(true)} />
+
+      <RecoveryLogModal open={recoveryOpen} onClose={() => setRecoveryOpen(false)} onSaved={() => { showToast("Recovery logged"); reloadReadiness(); }} />
+      <MealLogModal open={mealOpen} onClose={() => setMealOpen(false)} onSaved={() => showToast("Meal logged")} />
+      <WorkoutLogModal open={workoutOpen} onClose={() => setWorkoutOpen(false)} onSaved={() => showToast("Workout logged")} />
+
+      {toast && (
+        <div
+          className="fixed left-1/2 -translate-x-1/2 bottom-28 z-[101] px-4 py-2 rounded-full text-[13px] text-white animate-fade-up"
+          style={{ background: "rgba(15,21,36,0.95)", border: "1px solid rgba(124,58,237,0.4)", backdropFilter: "blur(20px)" }}
+        >
+          ✓ {toast}
+        </div>
+      )}
     </div>
   );
 }
