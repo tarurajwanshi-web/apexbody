@@ -30,9 +30,13 @@ const EQUIPMENT: { id: Equipment; label: string; desc: string }[] = [
   { id: "bodyweight_only", label: "Bodyweight only", desc: "No equipment" },
 ];
 
-const TOTAL = 5;
+const TOTAL = 6;
+
+type Sex = "male" | "female";
 
 type Draft = {
+  age: string;
+  sex: Sex | null;
   goal: Goal | null;
   days: number;
   equipment: Equipment | null;
@@ -47,6 +51,7 @@ type Draft = {
 };
 
 const EMPTY: Draft = {
+  age: "", sex: null,
   goal: null, days: 3, equipment: null, bodyDataType: null,
   dexaBf: "", dexaLean: "", waist: "", hip: "", weight: "", height: "",
 };
