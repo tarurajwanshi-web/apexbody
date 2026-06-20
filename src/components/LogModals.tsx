@@ -228,7 +228,7 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!desc.trim()) return;
+    if (!desc.trim() && !file && !editing) return;
     setBusy(true); setErr(null);
     try {
       let photoPath: string | null = editing?.meal_photo_url ?? null;
