@@ -186,27 +186,49 @@ function Dashboard() {
           <div className="flex items-center justify-between gap-6">
             {/* LEFT */}
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-medium text-text-tertiary uppercase" style={{ letterSpacing: "2px" }}>
-                APEX Score
-              </p>
-              <div className="mt-2 flex items-baseline gap-1">
-                <span
-                  className="text-white tabular-nums"
-                  style={{ fontSize: 56, fontWeight: 300, lineHeight: 1, textShadow: "0 0 20px rgba(124,58,237,0.3)" }}
-                >
-                  {score}
-                </span>
-                <span className="text-text-tertiary" style={{ fontSize: 18 }}>/100</span>
+              <div className="flex items-center gap-2">
+                <p className="text-[10px] font-medium text-text-tertiary uppercase" style={{ letterSpacing: "2px" }}>
+                  APEX Score
+                </p>
+                {hasToday && readiness?.confidence_level && (
+                  <ConfidenceBadge level={readiness.confidence_level} />
+                )}
               </div>
-              <div className="mt-3 inline-flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                <span className="text-[13px] text-success">On track for recomposition</span>
-              </div>
+              {score != null ? (
+                <>
+                  <div className="mt-2 flex items-baseline gap-1">
+                    <span
+                      className="text-white tabular-nums"
+                      style={{ fontSize: 56, fontWeight: 300, lineHeight: 1, textShadow: "0 0 20px rgba(124,58,237,0.3)" }}
+                    >
+                      {score}
+                    </span>
+                    <span className="text-text-tertiary" style={{ fontSize: 18 }}>/100</span>
+                  </div>
+                  <div className="mt-3 inline-flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                    <span className="text-[13px] text-success">Today's readiness</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="mt-3 text-[13px] text-text-secondary leading-snug">
+                    Log today's recovery to see your score
+                  </p>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); navigate({ to: "/coach" }); }}
+                    className="mt-3 rounded-full px-3 py-1.5 text-[12px] font-semibold text-white gradient-brand active:scale-[0.98] transition"
+                  >
+                    Log recovery →
+                  </button>
+                </>
+              )}
             </div>
 
-            {/* RIGHT — single animated gradient ring */}
+            {/* RIGHT — ring */}
             <div className="shrink-0 relative">
-              <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`} className="animate-pulse-ring">
+              <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`}>
                 <defs>
                   <linearGradient id="scoreRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
                     <stop offset="0%" stopColor="#7C3AED" />
@@ -218,22 +240,22 @@ function Dashboard() {
                   cx={ringSize / 2} cy={ringSize / 2} r={ringR}
                   fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={ringStroke}
                 />
-                <circle
-                  cx={ringSize / 2} cy={ringSize / 2} r={ringR}
-                  fill="none" stroke="url(#scoreRingGrad)" strokeWidth={ringStroke}
-                  strokeLinecap="round"
-                  strokeDasharray={ringC}
-                  strokeDashoffset={ringC * (1 - fillPct)}
-                  transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
-                  style={{ animation: "ring-draw 1.5s ease-out both" }}
-                />
+                {score != null && (
+                  <circle
+                    cx={ringSize / 2} cy={ringSize / 2} r={ringR}
+                    fill="none" stroke="url(#scoreRingGrad)" strokeWidth={ringStroke}
+                    strokeLinecap="round"
+                    strokeDasharray={ringC}
+                    strokeDashoffset={ringC * (1 - fillPct)}
+                    transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                  />
+                )}
                 <text
                   x="50%" y="50%" textAnchor="middle" dominantBaseline="central"
                   className="fill-white" style={{ fontSize: 16, fontWeight: 500 }}
                 >
-                  {score}
+                  {score ?? "—"}
                 </text>
-                <style>{`@keyframes ring-draw { from { stroke-dashoffset: ${ringC}; } to { stroke-dashoffset: ${ringC * (1 - fillPct)}; } }`}</style>
               </svg>
             </div>
           </div>
@@ -243,10 +265,34 @@ function Dashboard() {
               className="mt-5 overflow-hidden"
               style={{ animation: "fade-up 0.3s ease both" }}
             >
-              <MetricRow color="#10B981" name="Recovery" value="68%" trend="up" note="Trending up. Ready to push." />
-              <MetricRow color="#3B82F6" name="Sleep" value="7.2h" trend="stable" note="Consistent." />
-              <MetricRow color="#F59E0B" name="Strain" value="55%" trend="stable" note="Room to push." />
-              <MetricRow color="#8B5CF6" name="HRV" value="81ms" trend="up" note="Best in 14 days." last />
+              {PILLAR_META.map((p, i) => {
+                const raw = readiness?.pillar_breakdown?.[p.key];
+                const value = raw == null || raw === "" ? "—" : String(raw);
+                return (
+                  <MetricRow
+                    key={p.key}
+                    color={p.color}
+                    name={p.label}
+                    value={value}
+                    trend="stable"
+                    note=""
+                    hideNote
+                    last={i === PILLAR_META.length - 1}
+                  />
+                );
+              })}
+              {readiness?.nudge_message && (
+                <div
+                  className="mt-4 rounded-xl p-3 flex items-start gap-2"
+                  style={{
+                    background: "linear-gradient(135deg, rgba(124,58,237,0.08), rgba(59,130,246,0.08))",
+                    border: "1px solid rgba(124,58,237,0.25)",
+                  }}
+                >
+                  <Sparkles size={14} className="text-ai shrink-0 mt-0.5" />
+                  <p className="text-[12px] text-text-primary leading-snug">{readiness.nudge_message}</p>
+                </div>
+              )}
             </div>
           )}
         </button>
