@@ -151,7 +151,7 @@ export const updateMeal = createServerFn({ method: "POST" })
     const { error } = await context.supabase
       .from("shield_nutrition_logs")
       .update({
-        meal_description: data.meal_description,
+        meal_description: data.meal_description ?? null,
         meal_photo_url: data.meal_photo_url ?? null,
         protein_tier: null,
         carb_quality_score: null,
