@@ -179,7 +179,7 @@ function Coach() {
       style={{ background: "linear-gradient(180deg, #0F1524 0%, #0A0E1A 60%)" }}
     >
       <header className="flex items-center justify-between px-5 pt-6">
-        <Link to="/home" className="text-text-secondary"><ChevronLeft size={24} /></Link>
+        <Link to="/dashboard" className="text-text-secondary"><ChevronLeft size={24} /></Link>
         <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Coach</span>
         <Link to="/settings" className="text-[11px] text-text-tertiary">Settings</Link>
       </header>
