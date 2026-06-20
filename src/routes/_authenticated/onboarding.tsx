@@ -210,6 +210,45 @@ const SELECTED_STYLE: React.CSSProperties = {
   boxShadow: "0 0 0 1px rgba(167,139,250,0.35), 0 8px 24px -12px rgba(124,58,237,0.5)",
 };
 
+function AboutYouStep({
+  age, sex, onAge, onSex,
+}: { age: string; sex: Sex | null; onAge: (v: string) => void; onSex: (v: Sex) => void }) {
+  return (
+    <>
+      <StepHeader title="About you" sub="Quick basics so we can calculate your targets." />
+      <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3">
+        <span className="text-sm text-text-secondary">Age</span>
+        <span className="flex items-center gap-1">
+          <input
+            type="number" inputMode="numeric" min={10} max={100}
+            value={age} onChange={(e) => onAge(e.target.value)}
+            placeholder="—"
+            className="w-20 bg-transparent text-right text-sm font-semibold focus:outline-none"
+          />
+          <span className="text-xs text-text-tertiary">yrs</span>
+        </span>
+      </label>
+      <p className="mt-5 mb-2 text-[11px] uppercase tracking-wider text-text-tertiary">Biological sex</p>
+      <div className="grid grid-cols-2 gap-2">
+        {(["male", "female"] as Sex[]).map((s) => {
+          const active = sex === s;
+          return (
+            <button
+              key={s} type="button" onClick={() => onSex(s)}
+              className={`rounded-2xl py-3 text-sm font-semibold border transition ${active ? "" : "border-white/5 bg-bg-2 text-text-secondary"}`}
+              style={active ? SELECTED_STYLE : undefined}
+            >
+              {s === "male" ? "Male" : "Female"}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-4 text-[11px] text-text-tertiary">Used to estimate metabolic rate (Mifflin-St Jeor).</p>
+    </>
+  );
+}
+
+
 function GoalStep({ value, onChange }: { value: Goal | null; onChange: (g: Goal) => void }) {
   return (
     <>
