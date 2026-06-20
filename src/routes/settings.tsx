@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, RotateCcw, LogOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw, LogOut, Upload, FileText, Trash2, Download, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useProfile } from "@/lib/store";
 import { BottomNav } from "@/components/BottomNav";
 import { supabase } from "@/integrations/supabase/client";
@@ -39,12 +40,6 @@ function Settings() {
         </div>
       </section>
 
-      <section className="mx-5 mt-4 grid grid-cols-3 gap-2">
-        <Stat n="47" l="Workouts" />
-        <Stat n="312" l="Meals" />
-        <Stat n="15" l="Coach" />
-      </section>
-
       <Group title="Profile">
         <Row label="Age" value={`${profile.age}`} />
         <Row label="Weight" value={`${profile.weightKg} kg`} />
@@ -68,6 +63,8 @@ function Settings() {
         <Row label="Coach name" value={profile.coachName} />
       </Group>
 
+      <ResourceLibrary />
+
       <button
         onClick={handleSignOut}
         className="mx-5 mt-6 w-[calc(100%-2.5rem)] flex items-center justify-center gap-2 rounded-2xl bg-bg-2 border border-white/10 py-3.5 text-sm font-semibold"
@@ -87,12 +84,109 @@ function Settings() {
   );
 }
 
-function Stat({ n, l }: { n: string; l: string }) {
+type ResourceFile = { name: string; id?: string; size?: number; updated_at?: string };
+
+function ResourceLibrary() {
+  const [files, setFiles] = useState<ResourceFile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const load = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.storage.from("resources").list("", {
+      limit: 100,
+      sortBy: { column: "updated_at", order: "desc" },
+    });
+    if (error) toast.error(error.message);
+    setFiles((data ?? []).filter((f) => f.name && !f.name.endsWith("/")));
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      const safeName = file.name.replace(/\s+/g, "-");
+      const path = `${Date.now()}-${safeName}`;
+      const { error } = await supabase.storage.from("resources").upload(path, file, {
+        contentType: file.type || "application/octet-stream",
+      });
+      if (error) throw error;
+      toast.success("Uploaded");
+      await load();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const download = async (name: string) => {
+    const { data, error } = await supabase.storage.from("resources").createSignedUrl(name, 300);
+    if (error || !data?.signedUrl) { toast.error(error?.message ?? "Could not get link"); return; }
+    window.open(data.signedUrl, "_blank");
+  };
+
+  const remove = async (name: string) => {
+    if (!confirm(`Delete "${name}"?`)) return;
+    const { error } = await supabase.storage.from("resources").remove([name]);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Deleted");
+    await load();
+  };
+
   return (
-    <div className="rounded-2xl bg-bg-2 border border-white/5 p-4 text-center">
-      <p className="text-2xl font-bold gradient-text">{n}</p>
-      <p className="text-[10px] uppercase tracking-wider text-text-tertiary mt-1">{l}</p>
-    </div>
+    <section className="mx-5 mt-6">
+      <div className="flex items-center justify-between mb-2 ml-1">
+        <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Resource library</p>
+        <button
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          className="flex items-center gap-1 text-[11px] text-text-accent font-semibold disabled:opacity-50"
+        >
+          {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+          {uploading ? "Uploading…" : "Upload"}
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="application/pdf,.pdf,.epub,.mobi,application/epub+zip"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) upload(f);
+            e.target.value = "";
+          }}
+        />
+      </div>
+      <div className="rounded-2xl bg-bg-2 border border-white/5 divide-y divide-white/5">
+        {loading ? (
+          <div className="px-4 py-6 flex justify-center"><Loader2 size={16} className="animate-spin text-text-tertiary" /></div>
+        ) : files.length === 0 ? (
+          <p className="px-4 py-5 text-[12px] text-text-tertiary">No resources yet. Upload a PDF or ebook to get started.</p>
+        ) : (
+          files.map((f) => (
+            <div key={f.name} className="flex items-center gap-3 px-4 py-3">
+              <FileText size={16} className="text-text-tertiary shrink-0" />
+              <button onClick={() => download(f.name)} className="flex-1 min-w-0 text-left">
+                <p className="text-sm truncate">{f.name.replace(/^\d+-/, "")}</p>
+                {f.size != null && (
+                  <p className="text-[10px] text-text-tertiary">{(f.size / 1024).toFixed(0)} KB</p>
+                )}
+              </button>
+              <button onClick={() => download(f.name)} className="p-1 text-text-tertiary active:opacity-70" aria-label="Download">
+                <Download size={14} />
+              </button>
+              <button onClick={() => remove(f.name)} className="p-1 text-danger/80 active:opacity-70" aria-label="Delete">
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
   );
 }
 
