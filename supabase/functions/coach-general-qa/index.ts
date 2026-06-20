@@ -1,7 +1,7 @@
 // supabase/functions/coach-general-qa/index.ts
 // General fitness/nutrition Q&A for the locked period (pre plan_unlock_date).
 // IMPORTANT: receives NO personal user data, profile, or plan context.
-// Personalized coaching lives elsewhere and runs AFTER plan_unlock_date.
+// Routes directly to Anthropic Claude Haiku.
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -25,9 +25,9 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
 
   try {
-    const apiKey = Deno.env.get("LOVABLE_API_KEY");
+    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (!apiKey) {
-      return new Response(JSON.stringify({ error: "Missing LOVABLE_API_KEY" }), {
+      return new Response(JSON.stringify({ error: "Missing ANTHROPIC_API_KEY" }), {
         status: 500, headers: { ...CORS, "Content-Type": "application/json" },
       });
     }
@@ -45,20 +45,18 @@ Deno.serve(async (req) => {
       .filter((m: any) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
       .map((m: any) => ({ role: m.role, content: m.content }));
 
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Lovable-API-Key": apiKey,
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        // claude-haiku-4-5-20251001 requested; falls back via gateway routing.
-        model: "google/gemini-2.5-flash",
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 500,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          ...safeMessages,
-        ],
+        system: SYSTEM_PROMPT,
+        messages: safeMessages,
       }),
     });
 
@@ -75,7 +73,7 @@ Deno.serve(async (req) => {
     }
 
     const json = await res.json();
-    const content = json?.choices?.[0]?.message?.content ?? "";
+    const content = json?.content?.[0]?.text ?? "";
     return new Response(JSON.stringify({ content }), {
       headers: { ...CORS, "Content-Type": "application/json" },
     });

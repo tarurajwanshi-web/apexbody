@@ -37,13 +37,16 @@ async function callClaude(apiKey: string, prompt: string) {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-5",
-      max_tokens: 2200,
+      model: "claude-sonnet-4-6",
+      max_tokens: 3000,
       system:
         "You are an expert evidence-based strength & conditioning coach. " +
         "Respond with ONLY a single JSON object, no prose, no markdown fences. " +
-        "Schema: { \"days\": [ { \"day\": 1-7, \"day_name\": \"Monday\"...\"Sunday\", \"session_name\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int } ] } ] }. " +
-        "Always return exactly 7 days starting Monday. Rest days have rest=true, session_name=null, exercises=[].",
+        "Schema: { \"days\": [ { \"day\": 1-7, \"day_name\": \"Monday\"...\"Sunday\", \"session_name\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string } ] } ] }. " +
+        "Always return exactly 7 days starting Monday. Rest days have rest=true, session_name=null, exercises=[]. " +
+        "Every exercise MUST include a 'cue' field: 1-2 short beginner-friendly sentences of execution guidance " +
+        "(e.g. \"Keep your chest up and drive through your heels as you stand. Brace your core throughout.\"). " +
+        "Cues are plain language, not jargon.",
       messages: [{ role: "user", content: prompt }],
     }),
   });

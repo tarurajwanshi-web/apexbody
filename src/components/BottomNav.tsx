@@ -2,7 +2,7 @@ import { Link, useLocation } from "@tanstack/react-router";
 import { Home, Dumbbell, Apple, Brain, Sparkles } from "lucide-react";
 
 const items = [
-  { to: "/home", icon: Home, label: "Home" },
+  { to: "/dashboard", icon: Home, label: "Home" },
   { to: "/workouts", icon: Dumbbell, label: "Train" },
   { to: "/nutrition", icon: Apple, label: "Eat" },
   { to: "/coach", icon: Brain, label: "Coach" },
