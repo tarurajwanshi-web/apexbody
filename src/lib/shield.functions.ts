@@ -220,6 +220,7 @@ export type TodayReadiness = {
   confidence_level: "HIGH" | "MEDIUM" | "LOW" | null;
   pillar_breakdown: PillarBreakdown | null;
   nudge_message: string | null;
+  pre_session_adjustment?: number | null;
 } | null;
 
 export const getTodayReadiness = createServerFn({ method: "GET" })
@@ -227,7 +228,7 @@ export const getTodayReadiness = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<TodayReadiness> => {
     const { data, error } = await context.supabase
       .from("readiness_scores")
-      .select("score_date, final_score, confidence_level, pillar_breakdown, nudge_message")
+      .select("score_date, final_score, confidence_level, pillar_breakdown, nudge_message, pre_session_adjustment")
       .eq("user_id", context.userId)
       .order("score_date", { ascending: false })
       .limit(1)
