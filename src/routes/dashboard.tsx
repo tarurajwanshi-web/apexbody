@@ -37,22 +37,36 @@ const PILLAR_META: { key: "recovery" | "sleep" | "nutrition" | "training" | "moo
 function Dashboard() {
   const { profile } = useProfile();
   const navigate = useNavigate();
-  const fileRef = useRef<HTMLInputElement>(null);
   const [day, setDay] = useState(1);
   const [greet, setGreet] = useState("Hello");
   const [insight, setInsight] = useState("Your recovery is strong. Ready to push intensity today.");
   const [insightTime] = useState("Just now");
   const [expanded, setExpanded] = useState(false);
   const [readiness, setReadiness] = useState<TodayReadiness>(null);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [mealOpen, setMealOpen] = useState(false);
+  const [workoutOpen, setWorkoutOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const fn = useServerFn(generateDailyInsight);
   const fetchReadiness = useServerFn(getTodayReadiness);
+
+  const reloadReadiness = () => {
+    fetchReadiness().then(setReadiness).catch(() => setReadiness(null));
+  };
 
   useEffect(() => {
     setDay(getDayOfJourney());
     const h = new Date().getHours();
     setGreet(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
-    fetchReadiness().then(setReadiness).catch(() => setReadiness(null));
-  }, [fetchReadiness]);
+    reloadReadiness();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 1800);
+  };
+
 
   useEffect(() => {
     let cancelled = false;
