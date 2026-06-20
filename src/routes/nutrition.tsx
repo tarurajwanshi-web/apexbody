@@ -7,7 +7,7 @@ import { RingChart } from "@/components/RingChart";
 import { BottomNav } from "@/components/BottomNav";
 import { analyzePhoto } from "@/lib/coach.functions";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
-import { getTodayMeals, logManualNutrition, type TodayMeal } from "@/lib/shield.functions";
+import { getTodayMeals, logMeal, type TodayMeal } from "@/lib/shield.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/nutrition")({
