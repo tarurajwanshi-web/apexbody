@@ -100,6 +100,9 @@ function Dashboard() {
   };
 
 
+  // Daily AI insight — cached server-side in daily_ai_insights, one per user per day.
+  // This fires only once per dashboard mount; the server returns the cached row
+  // without calling Claude when one already exists for today.
   useEffect(() => {
     let cancelled = false;
     fn({
@@ -112,10 +115,12 @@ function Dashboard() {
         },
       },
     })
-      .then((r) => { if (!cancelled && r.content) setInsight(r.content); })
+      .then((r: { content: string }) => { if (!cancelled && r.content) setInsight(r.content); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [fn, day, profile.name, profile.goal, readiness?.final_score]);
+    // Intentionally only depend on `day` (the calendar day) so we hit cache on tab switches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [day]);
 
   const today = new Date().toISOString().slice(0, 10);
   const hasToday = !!readiness && readiness.score_date === today;
