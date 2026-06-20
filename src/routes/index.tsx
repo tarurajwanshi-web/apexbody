@@ -128,10 +128,11 @@ type DemoState = {
 };
 
 const DEMO_STATES: DemoState[] = [
-  { score: 74, confidence: "HIGH", insight: "Recovery's strong. Push today." },
-  { score: 52, confidence: "MEDIUM", insight: "Limited data. Log sleep to sharpen this." },
-  { score: 38, confidence: "HIGH", insight: "You're carrying fatigue. Recovery day recommended." },
+  { score: 74, confidence: "HIGH", insight: "Backbone synced. Full range unlocked today." },
+  { score: 52, confidence: "MEDIUM", insight: "Half the picture. Sleep data closes the gap." },
+  { score: 38, confidence: "HIGH", insight: "Yesterday's strain didn't clear. This number means it." },
 ];
+
 
 const CYCLE = {
   ambient: 1500,
