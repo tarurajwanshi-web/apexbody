@@ -6,6 +6,8 @@ import { useProfile } from "@/lib/store";
 import { generateDailyInsight } from "@/lib/coach.functions";
 import { getTodayReadiness, type TodayReadiness } from "@/lib/shield.functions";
 import { RecoveryLogModal, MealLogModal, WorkoutLogModal } from "@/components/LogModals";
+import { MealHistoryList } from "@/components/MealHistoryList";
+import { useRef } from "react";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — APEX" }] }),
