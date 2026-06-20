@@ -362,8 +362,13 @@ function Dashboard() {
         {/* Today's meals — edit / delete */}
         <MealHistoryList
           onMutationStart={captureScore}
-          onMutationDone={pollScoreChange}
+          onMutationDone={() => { pollScoreChange(); reloadMacros(); }}
         />
+
+        {/* Macros (estimated from photos) */}
+        <MacrosCard macros={macros} />
+
+
 
 
 
