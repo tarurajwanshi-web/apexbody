@@ -25,7 +25,7 @@ function getDayOfJourney(): number {
   return Math.max(1, days);
 }
 
-const PILLAR_META: { key: keyof NonNullable<TodayReadiness>["pillar_breakdown"] & string; label: string; color: string }[] = [
+const PILLAR_META: { key: "recovery" | "sleep" | "nutrition" | "training" | "mood"; label: string; color: string }[] = [
   { key: "recovery", label: "Recovery", color: "#10B981" },
   { key: "sleep", label: "Sleep", color: "#3B82F6" },
   { key: "nutrition", label: "Nutrition", color: "#22C55E" },
