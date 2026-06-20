@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, type ReactNode } from "react";
 import { ChevronLeft, Lock, Check, Dumbbell, Sparkles, X, Info } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { BottomNav } from "@/components/BottomNav";
@@ -139,7 +139,7 @@ function VolumeNudge({ plan, weekLogs, todayIdx }: { plan: WeeklyPlan; weekLogs:
   for (let i = todayIdx + 1; i < days.length; i++) {
     if (!days[i].rest) { nextDayLabel = days[i].day_name || DAY_NAMES[i]; break; }
   }
-  let msg: React.ReactNode;
+  let msg: ReactNode;
   if (gap >= 4) {
     msg = <>You're <span className="text-text-primary font-semibold">{gap} sets behind plan</span> this week. Add an extra set or two on {nextDayLabel} to catch up.</>;
   } else if (gap >= 1) {
