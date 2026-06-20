@@ -1,9 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Sparkles, Dumbbell, Camera, Apple, Brain, Home as HomeIcon, Flame, Heart } from "lucide-react";
+import { Sparkles, Dumbbell, Camera, Apple, Brain, Home as HomeIcon, Flame, Heart, BookOpen } from "lucide-react";
 import { useProfile } from "@/lib/store";
-import { generateDailyInsight } from "@/lib/coach.functions";
+import { getOrCreateDailyInsight } from "@/lib/coach.functions";
 import { getTodayReadiness, getActivityWeek, type TodayReadiness, type ActivityWeek } from "@/lib/shield.functions";
 import { RecoveryLogModal, MealLogModal } from "@/components/LogModals";
 import { MealHistoryList } from "@/components/MealHistoryList";
@@ -14,7 +14,7 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
   component: Dashboard,
 });
 
-const LEARNING_DAYS = 5;
+const LEARNING_DAYS = 7;
 
 function getDayOfJourney(): number {
   if (typeof window === "undefined") return 1;
@@ -48,7 +48,7 @@ function Dashboard() {
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [mealOpen, setMealOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const fn = useServerFn(generateDailyInsight);
+  const fn = useServerFn(getOrCreateDailyInsight);
   const fetchReadiness = useServerFn(getTodayReadiness);
   const fetchMacros = useServerFn(getTodayMacroSummary);
   const fetchActivity = useServerFn(getActivityWeek);
@@ -100,6 +100,9 @@ function Dashboard() {
   };
 
 
+  // Daily AI insight — cached server-side in daily_ai_insights, one per user per day.
+  // This fires only once per dashboard mount; the server returns the cached row
+  // without calling Claude when one already exists for today.
   useEffect(() => {
     let cancelled = false;
     fn({
@@ -112,10 +115,12 @@ function Dashboard() {
         },
       },
     })
-      .then((r) => { if (!cancelled && r.content) setInsight(r.content); })
+      .then((r: { content: string }) => { if (!cancelled && r.content) setInsight(r.content); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [fn, day, profile.name, profile.goal, readiness?.final_score]);
+    // Intentionally only depend on `day` (the calendar day) so we hit cache on tab switches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [day]);
 
   const today = new Date().toISOString().slice(0, 10);
   const hasToday = !!readiness && readiness.score_date === today;
@@ -219,6 +224,24 @@ function Dashboard() {
             </button>
           </div>
         </div>
+
+        {/* Pre-workout readiness adjustment note */}
+        {readiness?.pre_session_adjustment != null && Number(readiness.pre_session_adjustment) < 0 && (
+          <div
+            className="rounded-2xl p-3 flex items-start gap-2"
+            style={{
+              background: "rgba(245,158,11,0.08)",
+              border: "1px solid rgba(245,158,11,0.25)",
+            }}
+          >
+            <Sparkles size={14} className="text-warning shrink-0 mt-0.5" />
+            <p className="text-[12px] text-text-primary leading-snug">
+              Pre-workout check flagged low readiness - today's score reflects this.
+            </p>
+          </div>
+        )}
+
+
 
         {/* APEX Score Card */}
         <button
@@ -375,6 +398,24 @@ function Dashboard() {
 
         {/* Macros (estimated from photos) */}
         <MacrosCard macros={macros} />
+
+        {/* Resource library — read-only browse */}
+        <button
+          onClick={() => navigate({ to: "/resources" })}
+          className="w-full flex items-center gap-3 rounded-2xl p-4 text-left active:scale-[0.99] transition"
+          style={{ background: "#0F1524", border: "1px solid rgba(255,255,255,0.06)" }}
+        >
+          <div className="h-10 w-10 rounded-xl gradient-brand flex items-center justify-center shrink-0">
+            <BookOpen size={18} className="text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[14px] font-semibold text-white">Resources</p>
+            <p className="text-[12px] text-text-secondary mt-0.5">Guides & ebooks from APEX</p>
+          </div>
+          <span className="text-text-tertiary">›</span>
+        </button>
+
+
 
 
 

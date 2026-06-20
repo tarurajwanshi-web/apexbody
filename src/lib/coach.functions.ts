@@ -1,9 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-// All three coach AI calls go DIRECTLY to api.anthropic.com using
-// ANTHROPIC_API_KEY — same pattern as score-nutrition and coach-general-qa
-// edge functions. No Lovable AI Gateway in the path.
+// All coach AI calls go DIRECTLY to api.anthropic.com using ANTHROPIC_API_KEY.
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
 type AnthropicMessage = { role: "user" | "assistant"; content: unknown };
@@ -38,16 +37,33 @@ async function callAnthropic(opts: {
   return (json?.content?.[0]?.text as string) ?? "";
 }
 
-const COACH_SYSTEM = `You are APEX, an adaptive fitness coach built for body recomposition athletes. You are NOT a generic chatbot.
+// Strip residual markdown the model might still emit despite the prompt.
+function sanitize(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/—/g, "-")
+    .replace(/–/g, "-")
+    .trim();
+}
 
-RULES:
-- Always reference the user's ACTUAL data when available (workout logs, nutrition, mood, recovery scores)
-- If you don't have data, say exactly what data you need and why
-- Never give generic advice like 'eat more protein' without referencing their specific intake
-- Be direct. First person. 2-3 sentences max.
-- Format: [What to do] + [Why, using their data] + [One specific action]`;
+const COACH_SYSTEM = `You are APEX, an adaptive coach for body recomposition athletes. Brand voice: confident, direct, a little assertive — like a knowledgeable friend texting back. "Confidence isn't given. It's calculated."
 
-// 1. askCoach — conversation (Haiku: fast, low-cost chat)
+Formatting rules (strict):
+- NO markdown at all. No #, no **bold**, no bullet dashes, no em-dashes (—). Plain hyphens only.
+- 2 to 4 short sentences. No headers, no lists, no "Tips:" blocks.
+
+Content rules:
+- Always reference the user's ACTUAL data when available (logs, nutrition, recovery, mood).
+- If you don't have the data you need, say which one piece is missing and why.
+- Never generic platitudes ("eat more protein"). Always tie it to a number or behavior they did.
+- Pattern: what to do, why (their data), one concrete next step.`;
+
+// 1. askCoach — conversation (Haiku)
 const AskInput = z.object({
   messages: z
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() }))
@@ -58,16 +74,23 @@ const AskInput = z.object({
 export const askCoach = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => AskInput.parse(d))
   .handler(async ({ data }) => {
-    const content = await callAnthropic({
+    const raw = await callAnthropic({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 400,
       system: data.systemPrompt ?? COACH_SYSTEM,
       messages: data.messages,
     });
-    return { content };
+    return { content: sanitize(raw) };
   });
 
-// 2. generateDailyInsight — morning insight (Haiku)
+const INSIGHT_SYSTEM = `You are APEX coach. Write ONE morning insight as 2 to 3 short sentences.
+
+Formatting rules (strict):
+- NO markdown. No #, no **bold**, no bullets, no em-dashes (—). Plain hyphens only.
+- Sound like a friend texting, not a corporate report. Confident, direct, a touch assertive.
+- Reference the user's actual numbers when present. Always finish your sentences.`;
+
+// 2. generateDailyInsight — raw generator (kept for backward compatibility)
 const InsightInput = z.object({
   userData: z.record(z.string(), z.any()),
 });
@@ -75,15 +98,52 @@ const InsightInput = z.object({
 export const generateDailyInsight = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => InsightInput.parse(d))
   .handler(async ({ data }) => {
-    const content = await callAnthropic({
+    const raw = await callAnthropic({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 600,
-      system:
-        "You are APEX coach. Write ONE complete morning insight (2-3 full sentences) based on user data. Reference their actual numbers when present. Be specific, actionable, first person. Always finish your sentences — never trail off.",
+      max_tokens: 300,
+      system: INSIGHT_SYSTEM,
       messages: [{ role: "user", content: JSON.stringify(data.userData) }],
     });
-    return { content };
+    return { content: sanitize(raw) };
   });
+
+// 2b. getOrCreateDailyInsight — cached: one insight per user per day.
+// Reads from daily_ai_insights; only calls Claude when no row exists for today.
+const CachedInsightInput = z.object({
+  userData: z.record(z.string(), z.any()),
+});
+
+export const getOrCreateDailyInsight = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => CachedInsightInput.parse(d))
+  .handler(async ({ data, context }) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: existing } = await context.supabase
+      .from("daily_ai_insights")
+      .select("content")
+      .eq("user_id", context.userId)
+      .eq("insight_date", today)
+      .maybeSingle();
+    if (existing?.content) return { content: existing.content, cached: true };
+
+    const raw = await callAnthropic({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 300,
+      system: INSIGHT_SYSTEM,
+      messages: [{ role: "user", content: JSON.stringify(data.userData) }],
+    });
+    const content = sanitize(raw);
+    if (content) {
+      await context.supabase
+        .from("daily_ai_insights")
+        .upsert(
+          { user_id: context.userId, insight_date: today, content },
+          { onConflict: "user_id,insight_date" },
+        );
+    }
+    return { content, cached: false };
+  });
+
 
 // 3. analyzePhoto — vision (Sonnet for better visual reasoning)
 const PhotoInput = z.object({

@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { ChevronLeft, Check, Trophy, Flame, Dumbbell, Zap, Activity } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronLeft, Check, Trophy, Flame, Dumbbell, Zap, Activity, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -136,6 +136,9 @@ function ProfileSetup() {
       setSubmitting(false);
     }
   };
+
+  if (submitting) return <BuildingPlanScreen />;
+
 
   return (
     <div className="min-h-screen bg-bg-1 pb-32">
@@ -619,6 +622,49 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between px-4 py-3.5">
       <span className="text-sm text-text-secondary">{label}</span>
       <span className="text-sm font-medium text-right">{value}</span>
+    </div>
+  );
+}
+
+function BuildingPlanScreen() {
+  const MESSAGES = [
+    "Building your training split…",
+    "Calculating your macro targets…",
+    "Tailoring exercises to your equipment…",
+    "Setting your weekly volume…",
+    "Almost ready…",
+  ];
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setIdx((i) => (i + 1) % MESSAGES.length), 1800);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ backgroundColor: "#06080F" }}>
+      <div
+        className="flex items-center justify-center rounded-full"
+        style={{
+          width: 96, height: 96,
+          backgroundImage: "linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%)",
+          boxShadow: "0 0 60px rgba(124, 58, 237, 0.45)",
+          animation: "coach-breathe 2.4s ease-in-out infinite",
+        }}
+      >
+        <Sparkles size={28} color="#fff" strokeWidth={2.5} />
+      </div>
+      <h1 className="mt-8 text-2xl font-semibold text-white text-center">Generating your plan</h1>
+      <p key={idx} className="mt-3 text-[14px] text-text-secondary text-center animate-fade-up min-h-[20px]">
+        {MESSAGES[idx]}
+      </p>
+      <div className="mt-8 flex gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite" }} />
+        <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "150ms" }} />
+        <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "300ms" }} />
+      </div>
+      <style>{`
+        @keyframes coach-breathe { 0%,100% { transform: scale(0.97); } 50% { transform: scale(1.04); } }
+        @keyframes typing-dot { 0%,60%,100% { opacity: 0.3; transform: scale(0.85); } 30% { opacity: 1; transform: scale(1); } }
+      `}</style>
     </div>
   );
 }

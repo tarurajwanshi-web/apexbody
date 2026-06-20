@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkoutsRouteImport } from './routes/workouts'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ResourcesRouteImport } from './routes/resources'
 import { Route as NutritionRouteImport } from './routes/nutrition'
 import { Route as MeetCoachRouteImport } from './routes/meet-coach'
 import { Route as HomeRouteImport } from './routes/home'
@@ -29,6 +30,11 @@ const WorkoutsRoute = WorkoutsRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResourcesRoute = ResourcesRouteImport.update({
+  id: '/resources',
+  path: '/resources',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NutritionRoute = NutritionRouteImport.update({
@@ -83,6 +89,7 @@ export interface FileRoutesByFullPath {
   '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
   '/nutrition': typeof NutritionRoute
+  '/resources': typeof ResourcesRoute
   '/settings': typeof SettingsRoute
   '/workouts': typeof WorkoutsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
@@ -95,6 +102,7 @@ export interface FileRoutesByTo {
   '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
   '/nutrition': typeof NutritionRoute
+  '/resources': typeof ResourcesRoute
   '/settings': typeof SettingsRoute
   '/workouts': typeof WorkoutsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
@@ -109,6 +117,7 @@ export interface FileRoutesById {
   '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
   '/nutrition': typeof NutritionRoute
+  '/resources': typeof ResourcesRoute
   '/settings': typeof SettingsRoute
   '/workouts': typeof WorkoutsRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
@@ -123,6 +132,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/meet-coach'
     | '/nutrition'
+    | '/resources'
     | '/settings'
     | '/workouts'
     | '/dashboard'
@@ -135,6 +145,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/meet-coach'
     | '/nutrition'
+    | '/resources'
     | '/settings'
     | '/workouts'
     | '/dashboard'
@@ -148,6 +159,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/meet-coach'
     | '/nutrition'
+    | '/resources'
     | '/settings'
     | '/workouts'
     | '/_authenticated/dashboard'
@@ -162,6 +174,7 @@ export interface RootRouteChildren {
   HomeRoute: typeof HomeRoute
   MeetCoachRoute: typeof MeetCoachRoute
   NutritionRoute: typeof NutritionRoute
+  ResourcesRoute: typeof ResourcesRoute
   SettingsRoute: typeof SettingsRoute
   WorkoutsRoute: typeof WorkoutsRoute
 }
@@ -180,6 +193,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/resources': {
+      id: '/resources'
+      path: '/resources'
+      fullPath: '/resources'
+      preLoaderRoute: typeof ResourcesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/nutrition': {
@@ -269,6 +289,7 @@ const rootRouteChildren: RootRouteChildren = {
   HomeRoute: HomeRoute,
   MeetCoachRoute: MeetCoachRoute,
   NutritionRoute: NutritionRoute,
+  ResourcesRoute: ResourcesRoute,
   SettingsRoute: SettingsRoute,
   WorkoutsRoute: WorkoutsRoute,
 }

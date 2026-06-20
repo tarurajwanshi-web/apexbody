@@ -12,9 +12,9 @@ function MeetCoach() {
   const name = profile.name?.trim() || "there";
 
   const messages = [
-    `Hi ${name}. I'm APEX — your adaptive coach.`,
-    "I've set up a starting plan for you. Follow it for 5 days while I study your training, nutrition, and recovery patterns.",
-    "By Day 6, I'll know your weak points, your strengths, and exactly how to build YOUR program. Not a template. Yours.",
+    `Hi ${name}. I'm APEX - your adaptive coach.`,
+    "I've set up a starting plan for you. Follow it for 7 days while I study your training, nutrition, and recovery patterns.",
+    "By Day 8, I'll know your weak points, your strengths, and exactly how to build YOUR program. Not a template. Yours.",
   ];
 
   const unlocks = [
@@ -80,7 +80,7 @@ function MeetCoach() {
         }}
       >
         <p className="text-[12px] font-medium uppercase" style={{ color: "#8892A4", letterSpacing: "1.5px" }}>
-          After 5 days of data, you unlock:
+          After 7 days of data, you unlock:
         </p>
         <div className="mt-3 space-y-2.5">
           {unlocks.map((u) => (
