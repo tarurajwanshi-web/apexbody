@@ -72,11 +72,15 @@ function ProfileSetup() {
 
   const canContinue = (() => {
     switch (step) {
-      case 1: return !!draft.goal;
-      case 2: return draft.days >= 1 && draft.days <= 6;
-      case 3: return !!draft.equipment;
-      case 4: return bodyPathValid;
-      case 5: return true;
+      case 1: {
+        const a = Number(draft.age);
+        return !!draft.sex && Number.isFinite(a) && a >= 10 && a <= 100;
+      }
+      case 2: return !!draft.goal;
+      case 3: return draft.days >= 1 && draft.days <= 6;
+      case 4: return !!draft.equipment;
+      case 5: return bodyPathValid;
+      case 6: return true;
       default: return false;
     }
   })();
