@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState, useCallback, useMemo, type ReactNode } from "react";
-import { ChevronLeft, Lock, Check, Dumbbell, Sparkles, X, Info, ChevronDown, ChevronUp } from "lucide-react";
+import { useEffect, useState, useCallback, useMemo, useRef, type ReactNode } from "react";
+import { ChevronLeft, Lock, Check, Dumbbell, Sparkles, X, ChevronDown, ChevronUp, Zap, Camera, Trash2, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { BottomNav } from "@/components/BottomNav";
 import { AICard } from "@/components/AIOrb";
