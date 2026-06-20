@@ -28,6 +28,7 @@ function Onboarding() {
   const { profile, update } = useProfile();
   const [step, setStep] = useState(1);
   const [draft, setDraft] = useState<Profile>(profile);
+  const savePref = useServerFn(setInputPathPreference);
 
   const patch = (p: Partial<Profile>) => setDraft((d) => ({ ...d, ...p }));
 
@@ -45,6 +46,8 @@ function Onboarding() {
   const next = () => {
     if (step === TOTAL) {
       update({ ...draft });
+      const pref = draft.recoveryDevice === "manual" ? "manual" : "device";
+      savePref({ data: { input_path_preference: pref } }).catch(() => {});
       navigate({ to: "/meet-coach" });
     } else {
       setStep(step + 1);
