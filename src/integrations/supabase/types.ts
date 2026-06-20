@@ -14,7 +14,183 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      readiness_scores: {
+        Row: {
+          confidence_level: string | null
+          confidence_reason: string | null
+          created_at: string
+          engine_version: string
+          fatigue_adjustment: number
+          final_score: number
+          id: string
+          input_path: string | null
+          nudge_message: string | null
+          pillar_breakdown: Json
+          score_date: string
+          user_id: string
+        }
+        Insert: {
+          confidence_level?: string | null
+          confidence_reason?: string | null
+          created_at?: string
+          engine_version?: string
+          fatigue_adjustment?: number
+          final_score: number
+          id?: string
+          input_path?: string | null
+          nudge_message?: string | null
+          pillar_breakdown: Json
+          score_date: string
+          user_id: string
+        }
+        Update: {
+          confidence_level?: string | null
+          confidence_reason?: string | null
+          created_at?: string
+          engine_version?: string
+          fatigue_adjustment?: number
+          final_score?: number
+          id?: string
+          input_path?: string | null
+          nudge_message?: string | null
+          pillar_breakdown?: Json
+          score_date?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      shield_device_uploads: {
+        Row: {
+          created_at: string
+          device_source: string | null
+          entry_date: string
+          id: string
+          parse_status: string
+          parsed_hrv: number | null
+          parsed_rhr: number | null
+          parsed_sleep_hours: number | null
+          parsed_sleep_stages: Json | null
+          screenshot_url: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          device_source?: string | null
+          entry_date: string
+          id?: string
+          parse_status?: string
+          parsed_hrv?: number | null
+          parsed_rhr?: number | null
+          parsed_sleep_hours?: number | null
+          parsed_sleep_stages?: Json | null
+          screenshot_url: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          device_source?: string | null
+          entry_date?: string
+          id?: string
+          parse_status?: string
+          parsed_hrv?: number | null
+          parsed_rhr?: number | null
+          parsed_sleep_hours?: number | null
+          parsed_sleep_stages?: Json | null
+          screenshot_url?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      shield_manual_inputs: {
+        Row: {
+          created_at: string
+          entry_date: string
+          id: string
+          mood_emoji: string | null
+          recovery_self_rating: number | null
+          sleep_hours: number | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          entry_date: string
+          id?: string
+          mood_emoji?: string | null
+          recovery_self_rating?: number | null
+          sleep_hours?: number | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          entry_date?: string
+          id?: string
+          mood_emoji?: string | null
+          recovery_self_rating?: number | null
+          sleep_hours?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      shield_nutrition_logs: {
+        Row: {
+          claude_quality_score: number | null
+          claude_score_status: string
+          created_at: string
+          entry_date: string
+          id: string
+          meal_description: string | null
+          meal_photo_url: string | null
+          user_id: string
+        }
+        Insert: {
+          claude_quality_score?: number | null
+          claude_score_status?: string
+          created_at?: string
+          entry_date: string
+          id?: string
+          meal_description?: string | null
+          meal_photo_url?: string | null
+          user_id: string
+        }
+        Update: {
+          claude_quality_score?: number | null
+          claude_score_status?: string
+          created_at?: string
+          entry_date?: string
+          id?: string
+          meal_description?: string | null
+          meal_photo_url?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      shield_training_logs: {
+        Row: {
+          created_at: string
+          entry_date: string
+          id: string
+          session_notes: string | null
+          strain_value: number | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          entry_date: string
+          id?: string
+          session_notes?: string | null
+          strain_value?: number | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          entry_date?: string
+          id?: string
+          session_notes?: string | null
+          strain_value?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
