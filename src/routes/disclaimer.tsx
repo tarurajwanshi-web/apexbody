@@ -85,13 +85,14 @@ function Disclaimer() {
         </label>
 
         <button
-          disabled={!agreed}
-          onClick={() => { update({ agreedTerms: true }); navigate({ to: "/onboarding" }); }}
+          disabled={!agreed || saving}
+          onClick={accept}
           className="w-full gradient-brand font-semibold text-white disabled:opacity-30 disabled:cursor-not-allowed transition"
           style={{ height: "56px", borderRadius: "14px" }}
         >
-          I Understand, Let's Begin
+          {saving ? "Saving…" : "I Understand, Let's Begin"}
         </button>
+
         <p className="text-center text-[10px] text-text-tertiary">Powered by Claude AI</p>
       </div>
     </div>
