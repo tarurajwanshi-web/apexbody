@@ -300,6 +300,7 @@ Deno.serve(async (req) => {
       confidence_level: confidence.toUpperCase(),
       pillar_breakdown,
       fatigue_adjustment: -penalty,
+      pre_session_adjustment: -preSessionDelta,
       nudge_message,
       input_path,
       engine_version: ENGINE_VERSION,
