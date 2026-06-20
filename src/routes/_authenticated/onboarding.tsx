@@ -137,6 +137,9 @@ function ProfileSetup() {
     }
   };
 
+  if (submitting) return <BuildingPlanScreen />;
+
+
   return (
     <div className="min-h-screen bg-bg-1 pb-32">
       <header className="flex items-center justify-between px-5 pt-6">
