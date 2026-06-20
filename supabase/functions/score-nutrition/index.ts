@@ -163,10 +163,71 @@ Deno.serve(async (req) => {
 
       if (upErr) throw upErr;
 
+      // SEPARATE, parallel call: calorie/macro estimation from the photo.
+      // This MUST NOT affect protein_tier/carb_quality_score/timing_score.
+      let estimate: { calories: number; protein_g: number; carbs_g: number; fat_g: number } | null = null;
+      if (row.meal_photo_url) {
+        try {
+          const estContent: Array<Record<string, unknown>> = [];
+          try {
+            const imgRes = await fetch(row.meal_photo_url);
+            const buf = new Uint8Array(await imgRes.arrayBuffer());
+            let bin = ""; for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+            const b64 = btoa(bin);
+            const media_type = imgRes.headers.get("content-type") || "image/jpeg";
+            estContent.push({ type: "image", source: { type: "base64", media_type, data: b64 } });
+          } catch (_) { /* ignore */ }
+          estContent.push({
+            type: "text",
+            text: `Description: ${row.meal_description ?? "(none)"}. Estimate total calories and macros for the WHOLE meal shown.`,
+          });
+          const estRes = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
+            body: JSON.stringify({
+              model: "claude-haiku-4-5-20251001",
+              max_tokens: 250,
+              system:
+                "You estimate calories and macros from a meal photo + description. " +
+                "Respond with ONLY a single JSON object, no prose, no fences: " +
+                "{ \"estimated_calories\": <number>, \"estimated_protein_g\": <number>, \"estimated_carbs_g\": <number>, \"estimated_fat_g\": <number> }. " +
+                "Be realistic; this is an estimate, not precise tracking.",
+              messages: [{ role: "user", content: estContent }],
+            }),
+          });
+          if (estRes.ok) {
+            const j = await estRes.json();
+            const txt = j?.content?.[0]?.text ?? "";
+            const ep = JSON.parse(stripFences(txt));
+            estimate = {
+              calories: Math.max(0, Math.round(Number(ep.estimated_calories))),
+              protein_g: Math.max(0, Math.round(Number(ep.estimated_protein_g))),
+              carbs_g: Math.max(0, Math.round(Number(ep.estimated_carbs_g))),
+              fat_g: Math.max(0, Math.round(Number(ep.estimated_fat_g))),
+            };
+          }
+        } catch (e) { console.error("Macro estimate failed:", e); }
+      }
+
+      if (estimate) {
+        await supabase.from("shield_nutrition_logs").update({
+          estimated_calories: estimate.calories,
+          estimated_protein_g: estimate.protein_g,
+          estimated_carbs_g: estimate.carbs_g,
+          estimated_fat_g: estimate.fat_g,
+          calorie_estimate_status: "estimated",
+        }).eq("id", nutrition_log_id);
+      } else {
+        await supabase.from("shield_nutrition_logs").update({
+          calorie_estimate_status: "failed",
+        }).eq("id", nutrition_log_id);
+      }
+
       return new Response(
         JSON.stringify({
           row: updated,
           scores: { protein_tier, carb_quality_score, timing_score, claude_quality_score },
+          estimate,
           reasoning: parsed.reasoning,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },

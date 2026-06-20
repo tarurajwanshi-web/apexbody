@@ -30,9 +30,13 @@ const EQUIPMENT: { id: Equipment; label: string; desc: string }[] = [
   { id: "bodyweight_only", label: "Bodyweight only", desc: "No equipment" },
 ];
 
-const TOTAL = 5;
+const TOTAL = 6;
+
+type Sex = "male" | "female";
 
 type Draft = {
+  age: string;
+  sex: Sex | null;
   goal: Goal | null;
   days: number;
   equipment: Equipment | null;
@@ -47,6 +51,7 @@ type Draft = {
 };
 
 const EMPTY: Draft = {
+  age: "", sex: null,
   goal: null, days: 3, equipment: null, bodyDataType: null,
   dexaBf: "", dexaLean: "", waist: "", hip: "", weight: "", height: "",
 };
@@ -67,11 +72,15 @@ function ProfileSetup() {
 
   const canContinue = (() => {
     switch (step) {
-      case 1: return !!draft.goal;
-      case 2: return draft.days >= 1 && draft.days <= 6;
-      case 3: return !!draft.equipment;
-      case 4: return bodyPathValid;
-      case 5: return true;
+      case 1: {
+        const a = Number(draft.age);
+        return !!draft.sex && Number.isFinite(a) && a >= 10 && a <= 100;
+      }
+      case 2: return !!draft.goal;
+      case 3: return draft.days >= 1 && draft.days <= 6;
+      case 4: return !!draft.equipment;
+      case 5: return bodyPathValid;
+      case 6: return true;
       default: return false;
     }
   })();
@@ -92,6 +101,8 @@ function ProfileSetup() {
 
       const payload = {
         user_id: userId,
+        age: Number(draft.age),
+        biological_sex: draft.sex,
         goal: draft.goal,
         training_days_per_week: draft.days,
         equipment_access: draft.equipment,
@@ -111,10 +122,13 @@ function ProfileSetup() {
         .upsert(payload, { onConflict: "user_id" });
       if (error) throw error;
 
-      const { error: fnErr } = await supabase.functions.invoke("generate-plan", {
-        body: { user_id: userId },
-      });
-      if (fnErr) console.warn("generate-plan failed", fnErr);
+      // Fire deterministic macro calc + Claude plan generation in parallel.
+      const [macroRes, planRes] = await Promise.allSettled([
+        supabase.functions.invoke("calculate-macros", { body: { user_id: userId } }),
+        supabase.functions.invoke("generate-plan", { body: { user_id: userId } }),
+      ]);
+      if (macroRes.status === "rejected") console.warn("calculate-macros failed", macroRes.reason);
+      if (planRes.status === "rejected") console.warn("generate-plan failed", planRes.reason);
 
       navigate({ to: "/dashboard" });
     } catch (e: any) {
@@ -140,11 +154,12 @@ function ProfileSetup() {
       </div>
 
       <main className="px-5 mt-8 max-w-[480px] mx-auto">
-        {step === 1 && <GoalStep value={draft.goal} onChange={(goal) => patch({ goal })} />}
-        {step === 2 && <DaysStep value={draft.days} onChange={(days) => patch({ days })} />}
-        {step === 3 && <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />}
-        {step === 4 && <BodyStep draft={draft} patch={patch} />}
-        {step === 5 && <ReviewStep draft={draft} />}
+        {step === 1 && <AboutYouStep age={draft.age} sex={draft.sex} onAge={(age) => patch({ age })} onSex={(sex) => patch({ sex })} />}
+        {step === 2 && <GoalStep value={draft.goal} onChange={(goal) => patch({ goal })} />}
+        {step === 3 && <DaysStep value={draft.days} onChange={(days) => patch({ days })} />}
+        {step === 4 && <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />}
+        {step === 5 && <BodyStep draft={draft} patch={patch} />}
+        {step === 6 && <ReviewStep draft={draft} />}
       </main>
 
       <footer
@@ -194,6 +209,45 @@ const SELECTED_STYLE: React.CSSProperties = {
   borderColor: "rgba(167,139,250,0.7)",
   boxShadow: "0 0 0 1px rgba(167,139,250,0.35), 0 8px 24px -12px rgba(124,58,237,0.5)",
 };
+
+function AboutYouStep({
+  age, sex, onAge, onSex,
+}: { age: string; sex: Sex | null; onAge: (v: string) => void; onSex: (v: Sex) => void }) {
+  return (
+    <>
+      <StepHeader title="About you" sub="Quick basics so we can calculate your targets." />
+      <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3">
+        <span className="text-sm text-text-secondary">Age</span>
+        <span className="flex items-center gap-1">
+          <input
+            type="number" inputMode="numeric" min={10} max={100}
+            value={age} onChange={(e) => onAge(e.target.value)}
+            placeholder="—"
+            className="w-20 bg-transparent text-right text-sm font-semibold focus:outline-none"
+          />
+          <span className="text-xs text-text-tertiary">yrs</span>
+        </span>
+      </label>
+      <p className="mt-5 mb-2 text-[11px] uppercase tracking-wider text-text-tertiary">Biological sex</p>
+      <div className="grid grid-cols-2 gap-2">
+        {(["male", "female"] as Sex[]).map((s) => {
+          const active = sex === s;
+          return (
+            <button
+              key={s} type="button" onClick={() => onSex(s)}
+              className={`rounded-2xl py-3 text-sm font-semibold border transition ${active ? "" : "border-white/5 bg-bg-2 text-text-secondary"}`}
+              style={active ? SELECTED_STYLE : undefined}
+            >
+              {s === "male" ? "Male" : "Female"}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-4 text-[11px] text-text-tertiary">Used to estimate metabolic rate (Mifflin-St Jeor).</p>
+    </>
+  );
+}
+
 
 function GoalStep({ value, onChange }: { value: Goal | null; onChange: (g: Goal) => void }) {
   return (

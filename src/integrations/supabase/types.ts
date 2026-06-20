@@ -14,8 +14,55 @@ export type Database = {
   }
   public: {
     Tables: {
+      daily_macro_targets: {
+        Row: {
+          bmr: number
+          calculated_at: string
+          created_at: string
+          formula_used: string
+          id: string
+          target_calories: number
+          target_carbs_g: number
+          target_fat_g: number
+          target_protein_g: number
+          tdee: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          bmr: number
+          calculated_at?: string
+          created_at?: string
+          formula_used: string
+          id?: string
+          target_calories: number
+          target_carbs_g: number
+          target_fat_g: number
+          target_protein_g: number
+          tdee: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          bmr?: number
+          calculated_at?: string
+          created_at?: string
+          formula_used?: string
+          id?: string
+          target_calories?: number
+          target_carbs_g?: number
+          target_fat_g?: number
+          target_protein_g?: number
+          tdee?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
+          age: number | null
+          biological_sex: string | null
           body_data_type: string | null
           created_at: string
           dexa_body_fat_pct: number | null
@@ -36,6 +83,8 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          age?: number | null
+          biological_sex?: string | null
           body_data_type?: string | null
           created_at?: string
           dexa_body_fat_pct?: number | null
@@ -56,6 +105,8 @@ export type Database = {
           user_id: string
         }
         Update: {
+          age?: number | null
+          biological_sex?: string | null
           body_data_type?: string | null
           created_at?: string
           dexa_body_fat_pct?: number | null
@@ -196,12 +247,17 @@ export type Database = {
       }
       shield_nutrition_logs: {
         Row: {
+          calorie_estimate_status: string
           carb_quality_score: number | null
           claude_quality_score: number | null
           claude_score_status: string
           created_at: string
           deleted: boolean
           entry_date: string
+          estimated_calories: number | null
+          estimated_carbs_g: number | null
+          estimated_fat_g: number | null
+          estimated_protein_g: number | null
           id: string
           meal_description: string | null
           meal_photo_url: string | null
@@ -211,12 +267,17 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          calorie_estimate_status?: string
           carb_quality_score?: number | null
           claude_quality_score?: number | null
           claude_score_status?: string
           created_at?: string
           deleted?: boolean
           entry_date: string
+          estimated_calories?: number | null
+          estimated_carbs_g?: number | null
+          estimated_fat_g?: number | null
+          estimated_protein_g?: number | null
           id?: string
           meal_description?: string | null
           meal_photo_url?: string | null
@@ -226,12 +287,17 @@ export type Database = {
           user_id: string
         }
         Update: {
+          calorie_estimate_status?: string
           carb_quality_score?: number | null
           claude_quality_score?: number | null
           claude_score_status?: string
           created_at?: string
           deleted?: boolean
           entry_date?: string
+          estimated_calories?: number | null
+          estimated_carbs_g?: number | null
+          estimated_fat_g?: number | null
+          estimated_protein_g?: number | null
           id?: string
           meal_description?: string | null
           meal_photo_url?: string | null
@@ -266,6 +332,78 @@ export type Database = {
           session_notes?: string | null
           strain_value?: number | null
           user_id?: string
+        }
+        Relationships: []
+      }
+      weekly_plans: {
+        Row: {
+          created_at: string
+          generated_by: string
+          id: string
+          is_locked: boolean
+          plan_data: Json
+          unlock_date: string
+          user_id: string
+          week_start_date: string
+        }
+        Insert: {
+          created_at?: string
+          generated_by?: string
+          id?: string
+          is_locked?: boolean
+          plan_data: Json
+          unlock_date: string
+          user_id: string
+          week_start_date: string
+        }
+        Update: {
+          created_at?: string
+          generated_by?: string
+          id?: string
+          is_locked?: boolean
+          plan_data?: Json
+          unlock_date?: string
+          user_id?: string
+          week_start_date?: string
+        }
+        Relationships: []
+      }
+      workout_set_logs: {
+        Row: {
+          completed: boolean
+          created_at: string
+          entry_date: string
+          exercise_name: string
+          id: string
+          reps_completed: number | null
+          set_number: number
+          updated_at: string
+          user_id: string
+          weight_kg: number | null
+        }
+        Insert: {
+          completed?: boolean
+          created_at?: string
+          entry_date: string
+          exercise_name: string
+          id?: string
+          reps_completed?: number | null
+          set_number: number
+          updated_at?: string
+          user_id: string
+          weight_kg?: number | null
+        }
+        Update: {
+          completed?: boolean
+          created_at?: string
+          entry_date?: string
+          exercise_name?: string
+          id?: string
+          reps_completed?: number | null
+          set_number?: number
+          updated_at?: string
+          user_id?: string
+          weight_kg?: number | null
         }
         Relationships: []
       }

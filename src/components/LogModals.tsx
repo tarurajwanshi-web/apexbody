@@ -228,7 +228,7 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!desc.trim()) return;
+    if (!desc.trim() && !file && !editing) return;
     setBusy(true); setErr(null);
     try {
       let photoPath: string | null = editing?.meal_photo_url ?? null;
@@ -261,31 +261,40 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
   return (
     <Sheet open={open} onClose={onClose} title={editing ? "Edit meal" : "Log a meal"}>
       <form onSubmit={submit} className="space-y-5">
+        {/* Primary: photo */}
         <div>
-          <label className="text-[12px] uppercase text-text-tertiary tracking-wider">What did you eat?</label>
+          <label className="text-[12px] uppercase text-text-tertiary tracking-wider">
+            Photo {editing?.meal_photo_url ? "(replace optional)" : "(recommended)"}
+          </label>
+          <button type="button" onClick={() => inputRef.current?.click()}
+            className="mt-3 w-full rounded-2xl py-7 flex flex-col items-center gap-2 text-white active:scale-[0.99] transition"
+            style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.18), rgba(59,130,246,0.12))", border: "1px solid rgba(16,185,129,0.5)" }}>
+            <Upload size={22} />
+            <span className="text-[14px] font-semibold">
+              {file ? file.name : editing?.meal_photo_url ? "Photo on file — tap to replace" : "Tap to add a photo"}
+            </span>
+            <span className="text-[11px] text-text-tertiary">AI estimates calories & macros</span>
+          </button>
+          <input ref={inputRef} type="file" accept="image/*" capture="environment" className="hidden"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          <p className="mt-2 text-[11px] text-text-tertiary">
+            Estimates are approximate — useful for trends, not precise tracking.
+          </p>
+        </div>
+
+        {/* Secondary: text description */}
+        <div>
+          <label className="text-[12px] uppercase text-text-tertiary tracking-wider">Description (optional but helps accuracy)</label>
           <textarea
             value={desc} onChange={(e) => setDesc(e.target.value)}
             placeholder="e.g. Grilled chicken, rice, broccoli"
-            rows={3}
+            rows={2}
             className="mt-3 w-full rounded-2xl p-4 text-[14px] text-white placeholder:text-text-tertiary resize-none focus:outline-none"
             style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)" }}
           />
         </div>
-        <div>
-          <label className="text-[12px] uppercase text-text-tertiary tracking-wider">
-            Photo {editing?.meal_photo_url ? "(replace optional)" : "(optional)"}
-          </label>
-          <button type="button" onClick={() => inputRef.current?.click()}
-            className="mt-3 w-full rounded-2xl py-5 flex flex-col items-center gap-2 text-text-secondary active:scale-[0.99] transition"
-            style={{ background: "#0A0E1A", border: "1px dashed rgba(16,185,129,0.4)" }}>
-            <Upload size={18} />
-            <span className="text-[13px]">{file ? file.name : editing?.meal_photo_url ? "Photo on file — tap to replace" : "Tap to add photo"}</span>
-          </button>
-          <input ref={inputRef} type="file" accept="image/*" capture="environment" className="hidden"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-        </div>
         {err && <p className="text-[12px] text-red-400">{err}</p>}
-        <SubmitBtn busy={busy} label={editing ? "Save changes" : "Log meal"} disabled={!desc.trim()} />
+        <SubmitBtn busy={busy} label={editing ? "Save changes" : "Log meal"} disabled={!file && !desc.trim()} />
       </form>
     </Sheet>
   );
