@@ -13,15 +13,31 @@ export const Route = createFileRoute("/")({
 async function routeAfterAuth(navigate: ReturnType<typeof useNavigate>, userId: string) {
   const { data } = await supabase
     .from("profiles")
-    .select("profile_completed_at")
+    .select("profile_completed_at, disclaimer_accepted_at")
     .eq("user_id", userId)
     .maybeSingle();
-  if (data?.profile_completed_at) {
+
+  // STATE 1: no profile row → create it, then disclaimer
+  if (!data) {
+    await supabase.from("profiles").insert({ user_id: userId });
+    navigate({ to: "/disclaimer" });
+    return;
+  }
+
+  // STATE 3: fully onboarded
+  if (data.profile_completed_at) {
     navigate({ to: "/dashboard" });
+    return;
+  }
+
+  // STATE 2: profile exists, onboarding incomplete
+  if (data.disclaimer_accepted_at) {
+    navigate({ to: "/onboarding" });
   } else {
     navigate({ to: "/disclaimer" });
   }
 }
+
 
 function AuthScreen() {
   const navigate = useNavigate();
@@ -60,11 +76,23 @@ function AuthScreen() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-between bg-bg-0 px-6 py-12">
       <div className="flex-1 flex flex-col items-center justify-center w-full">
+        <div className="flex flex-col items-center mb-8">
+          <h1
+            className="text-[34px] font-bold text-white leading-none"
+            style={{ letterSpacing: "4px" }}
+          >
+            APEX
+          </h1>
+          <p className="mt-2 text-[11px] font-medium tracking-[0.2em] uppercase text-text-tertiary">
+            Shield + Intelligence
+          </p>
+        </div>
         <DemoRing />
-        <p className="mt-10 text-center text-[15px] text-text-secondary max-w-[280px] leading-relaxed">
-          Not just a number.<br />Know how much to trust it.
+        <p className="mt-10 text-center text-[15px] text-text-secondary max-w-[300px] leading-relaxed">
+          Confidence isn't given.<br />It's calculated.
         </p>
       </div>
+
 
       <div className="w-full max-w-sm">
         <button
@@ -100,10 +128,11 @@ type DemoState = {
 };
 
 const DEMO_STATES: DemoState[] = [
-  { score: 74, confidence: "HIGH", insight: "Recovery's strong. Push today." },
-  { score: 52, confidence: "MEDIUM", insight: "Limited data. Log sleep to sharpen this." },
-  { score: 38, confidence: "HIGH", insight: "You're carrying fatigue. Recovery day recommended." },
+  { score: 74, confidence: "HIGH", insight: "Backbone synced. Full range unlocked today." },
+  { score: 52, confidence: "MEDIUM", insight: "Half the picture. Sleep data closes the gap." },
+  { score: 38, confidence: "HIGH", insight: "Yesterday's strain didn't clear. This number means it." },
 ];
+
 
 const CYCLE = {
   ambient: 1500,

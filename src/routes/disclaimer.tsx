@@ -1,6 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useProfile } from "@/lib/store";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import { Sparkles } from "lucide-react";
 
 export const Route = createFileRoute("/disclaimer")({
@@ -11,6 +13,28 @@ function Disclaimer() {
   const navigate = useNavigate();
   const { update } = useProfile();
   const [agreed, setAgreed] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const accept = async () => {
+    setSaving(true);
+    try {
+      const { data: userRes, error: uerr } = await supabase.auth.getUser();
+      if (uerr || !userRes.user) throw new Error("Not signed in");
+      const { error } = await supabase
+        .from("profiles")
+        .upsert(
+          { user_id: userRes.user.id, disclaimer_accepted_at: new Date().toISOString() },
+          { onConflict: "user_id" },
+        );
+      if (error) throw error;
+      update({ agreedTerms: true });
+      navigate({ to: "/onboarding" });
+    } catch (e: any) {
+      toast.error(e?.message ?? "Could not save");
+      setSaving(false);
+    }
+  };
+
 
   return (
     <div className="relative min-h-screen bg-gradient-to-b from-bg-2 to-bg-0 px-6 py-10 flex flex-col">
@@ -61,13 +85,14 @@ function Disclaimer() {
         </label>
 
         <button
-          disabled={!agreed}
-          onClick={() => { update({ agreedTerms: true }); navigate({ to: "/onboarding" }); }}
+          disabled={!agreed || saving}
+          onClick={accept}
           className="w-full gradient-brand font-semibold text-white disabled:opacity-30 disabled:cursor-not-allowed transition"
           style={{ height: "56px", borderRadius: "14px" }}
         >
-          I Understand, Let's Begin
+          {saving ? "Saving…" : "I Understand, Let's Begin"}
         </button>
+
         <p className="text-center text-[10px] text-text-tertiary">Powered by Claude AI</p>
       </div>
     </div>
