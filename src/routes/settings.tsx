@@ -26,7 +26,7 @@ function Settings() {
   return (
     <div className="min-h-screen bg-bg-1 pb-32">
       <header className="flex items-center justify-between px-5 pt-6">
-        <Link to="/home" className="text-text-secondary"><ChevronLeft size={24} /></Link>
+        <Link to="/dashboard" className="text-text-secondary"><ChevronLeft size={24} /></Link>
         <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Profile</span>
         <span className="w-6" />
       </header>
