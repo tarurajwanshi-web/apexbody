@@ -1,4 +1,5 @@
-// Score nutrition logs using Anthropic Claude
+// Score nutrition logs across protein / carb-quality / timing dimensions
+// using Anthropic Claude Haiku.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -15,6 +16,12 @@ function stripFences(text: string): string {
   return t.trim();
 }
 
+function clamp(n: unknown): number {
+  const v = Math.round(Number(n));
+  if (!Number.isFinite(v)) throw new Error("invalid score");
+  return Math.max(0, Math.min(100, v));
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -24,6 +31,16 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
   const supabase = createClient(supabaseUrl, serviceKey);
+
+  const markFailed = async (id: string) => {
+    const { data } = await supabase
+      .from("shield_nutrition_logs")
+      .update({ claude_score_status: "failed" })
+      .eq("id", id)
+      .select()
+      .single();
+    return data;
+  };
 
   try {
     const { nutrition_log_id } = await req.json();
@@ -47,22 +64,36 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Pull training context for same date (if any) for timing evaluation.
+    const { data: training } = await supabase
+      .from("shield_training_logs")
+      .select("*")
+      .eq("user_id", row.user_id)
+      .eq("entry_date", row.entry_date)
+      .maybeSingle();
+
     if (!anthropicKey) {
-      const { data: updated } = await supabase
-        .from("shield_nutrition_logs")
-        .update({ claude_score_status: "failed" })
-        .eq("id", nutrition_log_id)
-        .select()
-        .single();
+      const updated = await markFailed(nutrition_log_id);
       console.error("ANTHROPIC_API_KEY secret missing");
-      return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY not configured", row: updated }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ error: "ANTHROPIC_API_KEY not configured", row: updated }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
+    const trainingContext = training
+      ? `Training session that day: strain=${training.strain ?? "unknown"}, notes=${training.notes ?? "(none)"}.`
+      : "No training session logged for this day.";
+
     const systemPrompt =
-      'You evaluate meal quality for an athletic performance app. Respond with ONLY a single JSON object, no prose, no markdown: { "quality_score": <number 0-100>, "reasoning": "<one short sentence>" }. Consider protein adequacy, micronutrient density, processing level, and athletic recovery value.';
+      'You evaluate a single meal for an athletic performance app along three dimensions. ' +
+      'Respond with ONLY a single JSON object, no prose, no markdown fences: ' +
+      '{ "protein_tier": <0-100>, "carb_quality_score": <0-100>, "timing_score": <0-100>, "reasoning": "<one short sentence>" }. ' +
+      'protein_tier: protein adequacy & quality for athletic recovery. ' +
+      'carb_quality_score: carbohydrate quality (whole vs processed, fiber, glycemic profile). ' +
+      'timing_score: how well meal timing aligns with that day\'s training session. ' +
+      'If no training session is logged for the day, score timing_score against general meal-spacing quality; ' +
+      'default toward 70 when there is no strong signal either way.';
 
     const userContent: Array<Record<string, unknown>> = [];
     if (row.meal_photo_url) {
@@ -83,7 +114,7 @@ Deno.serve(async (req) => {
     }
     userContent.push({
       type: "text",
-      text: `Meal description: ${row.meal_description ?? "(none provided)"}`,
+      text: `Meal description: ${row.meal_description ?? "(none provided)"}\n${trainingContext}`,
     });
 
     try {
@@ -96,7 +127,7 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
-          max_tokens: 300,
+          max_tokens: 400,
           system: systemPrompt,
           messages: [{ role: "user", content: userContent }],
         }),
@@ -109,13 +140,21 @@ Deno.serve(async (req) => {
       const aJson = await aRes.json();
       const text = aJson?.content?.[0]?.text ?? "";
       const parsed = JSON.parse(stripFences(text));
-      const score = Number(parsed.quality_score);
-      if (!Number.isFinite(score)) throw new Error("invalid quality_score");
+
+      const protein_tier = clamp(parsed.protein_tier);
+      const carb_quality_score = clamp(parsed.carb_quality_score);
+      const timing_score = clamp(parsed.timing_score);
+      // claude_quality_score is a generated column in the DB — don't write it directly.
+      const claude_quality_score = Math.round(
+        0.4 * protein_tier + 0.35 * carb_quality_score + 0.25 * timing_score,
+      );
 
       const { data: updated, error: upErr } = await supabase
         .from("shield_nutrition_logs")
         .update({
-          claude_quality_score: score,
+          protein_tier,
+          carb_quality_score,
+          timing_score,
           claude_score_status: "scored",
         })
         .eq("id", nutrition_log_id)
@@ -124,17 +163,17 @@ Deno.serve(async (req) => {
 
       if (upErr) throw upErr;
 
-      return new Response(JSON.stringify({ row: updated, reasoning: parsed.reasoning }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({
+          row: updated,
+          scores: { protein_tier, carb_quality_score, timing_score, claude_quality_score },
+          reasoning: parsed.reasoning,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     } catch (err) {
       console.error("Scoring failed:", err);
-      const { data: updated } = await supabase
-        .from("shield_nutrition_logs")
-        .update({ claude_score_status: "failed" })
-        .eq("id", nutrition_log_id)
-        .select()
-        .single();
+      const updated = await markFailed(nutrition_log_id);
       return new Response(
         JSON.stringify({ error: String(err instanceof Error ? err.message : err), row: updated }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
