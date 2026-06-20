@@ -157,6 +157,11 @@ export const updateMeal = createServerFn({ method: "POST" })
         carb_quality_score: null,
         timing_score: null,
         claude_score_status: "pending",
+        estimated_calories: null,
+        estimated_protein_g: null,
+        estimated_carbs_g: null,
+        estimated_fat_g: null,
+        calorie_estimate_status: "pending",
       })
       .eq("id", data.id)
       .eq("user_id", context.userId);
