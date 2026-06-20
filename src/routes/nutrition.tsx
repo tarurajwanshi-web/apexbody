@@ -73,7 +73,7 @@ function Nutrition() {
       }
 
       // 2) Persist meal row → triggers score-nutrition (which fills estimated_* and macros card).
-      try { await logMeal({ data: { meal_description: null, meal_photo_url: photoUrl } }); } catch {}
+      try { await logMealFn({ data: { meal_description: null, meal_photo_url: photoUrl } }); } catch {}
 
       // 3) Quick visual analysis for instant feedback.
       const r = await fn({
