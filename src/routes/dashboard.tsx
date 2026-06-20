@@ -1,10 +1,11 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState, useRef } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Sparkles, Dumbbell, Camera, Apple, Brain, Home as HomeIcon, Flame } from "lucide-react";
 import { useProfile } from "@/lib/store";
 import { generateDailyInsight } from "@/lib/coach.functions";
 import { getTodayReadiness, type TodayReadiness } from "@/lib/shield.functions";
+import { RecoveryLogModal, MealLogModal, WorkoutLogModal } from "@/components/LogModals";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — APEX" }] }),
