@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkoutsRouteImport } from './routes/workouts'
 import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as NutritionRouteImport } from './routes/nutrition'
 import { Route as MeetCoachRouteImport } from './routes/meet-coach'
 import { Route as HomeRouteImport } from './routes/home'
@@ -19,6 +18,7 @@ import { Route as DisclaimerRouteImport } from './routes/disclaimer'
 import { Route as CoachRouteImport } from './routes/coach'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authenticated/onboarding'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 
 const WorkoutsRoute = WorkoutsRouteImport.update({
@@ -29,11 +29,6 @@ const WorkoutsRoute = WorkoutsRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OnboardingRoute = OnboardingRouteImport.update({
-  id: '/onboarding',
-  path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NutritionRoute = NutritionRouteImport.update({
@@ -70,6 +65,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedOnboardingRoute = AuthenticatedOnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -83,10 +83,10 @@ export interface FileRoutesByFullPath {
   '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
   '/nutrition': typeof NutritionRoute
-  '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRoute
   '/workouts': typeof WorkoutsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/onboarding': typeof AuthenticatedOnboardingRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -95,10 +95,10 @@ export interface FileRoutesByTo {
   '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
   '/nutrition': typeof NutritionRoute
-  '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRoute
   '/workouts': typeof WorkoutsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/onboarding': typeof AuthenticatedOnboardingRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -109,10 +109,10 @@ export interface FileRoutesById {
   '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
   '/nutrition': typeof NutritionRoute
-  '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRoute
   '/workouts': typeof WorkoutsRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/onboarding': typeof AuthenticatedOnboardingRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -123,10 +123,10 @@ export interface FileRouteTypes {
     | '/home'
     | '/meet-coach'
     | '/nutrition'
-    | '/onboarding'
     | '/settings'
     | '/workouts'
     | '/dashboard'
+    | '/onboarding'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -135,10 +135,10 @@ export interface FileRouteTypes {
     | '/home'
     | '/meet-coach'
     | '/nutrition'
-    | '/onboarding'
     | '/settings'
     | '/workouts'
     | '/dashboard'
+    | '/onboarding'
   id:
     | '__root__'
     | '/'
@@ -148,10 +148,10 @@ export interface FileRouteTypes {
     | '/home'
     | '/meet-coach'
     | '/nutrition'
-    | '/onboarding'
     | '/settings'
     | '/workouts'
     | '/_authenticated/dashboard'
+    | '/_authenticated/onboarding'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -162,7 +162,6 @@ export interface RootRouteChildren {
   HomeRoute: typeof HomeRoute
   MeetCoachRoute: typeof MeetCoachRoute
   NutritionRoute: typeof NutritionRoute
-  OnboardingRoute: typeof OnboardingRoute
   SettingsRoute: typeof SettingsRoute
   WorkoutsRoute: typeof WorkoutsRoute
 }
@@ -181,13 +180,6 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/onboarding': {
-      id: '/onboarding'
-      path: '/onboarding'
-      fullPath: '/onboarding'
-      preLoaderRoute: typeof OnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/nutrition': {
@@ -239,6 +231,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/onboarding': {
+      id: '/_authenticated/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof AuthenticatedOnboardingRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
@@ -251,10 +250,12 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedOnboardingRoute: typeof AuthenticatedOnboardingRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedOnboardingRoute: AuthenticatedOnboardingRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
@@ -268,7 +269,6 @@ const rootRouteChildren: RootRouteChildren = {
   HomeRoute: HomeRoute,
   MeetCoachRoute: MeetCoachRoute,
   NutritionRoute: NutritionRoute,
-  OnboardingRoute: OnboardingRoute,
   SettingsRoute: SettingsRoute,
   WorkoutsRoute: WorkoutsRoute,
 }

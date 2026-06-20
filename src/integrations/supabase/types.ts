@@ -16,23 +16,59 @@ export type Database = {
     Tables: {
       profiles: {
         Row: {
+          body_data_type: string | null
           created_at: string
+          dexa_body_fat_pct: number | null
+          dexa_lean_mass_kg: number | null
+          equipment_access: string | null
+          goal: string | null
           id: string
           input_path_preference: string | null
+          measurement_height_cm: number | null
+          measurement_hip_cm: number | null
+          measurement_waist_cm: number | null
+          measurement_weight_kg: number | null
+          plan_unlock_date: string | null
+          profile_completed_at: string | null
+          training_days_per_week: number | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          body_data_type?: string | null
           created_at?: string
+          dexa_body_fat_pct?: number | null
+          dexa_lean_mass_kg?: number | null
+          equipment_access?: string | null
+          goal?: string | null
           id?: string
           input_path_preference?: string | null
+          measurement_height_cm?: number | null
+          measurement_hip_cm?: number | null
+          measurement_waist_cm?: number | null
+          measurement_weight_kg?: number | null
+          plan_unlock_date?: string | null
+          profile_completed_at?: string | null
+          training_days_per_week?: number | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          body_data_type?: string | null
           created_at?: string
+          dexa_body_fat_pct?: number | null
+          dexa_lean_mass_kg?: number | null
+          equipment_access?: string | null
+          goal?: string | null
           id?: string
           input_path_preference?: string | null
+          measurement_height_cm?: number | null
+          measurement_hip_cm?: number | null
+          measurement_waist_cm?: number | null
+          measurement_weight_kg?: number | null
+          plan_unlock_date?: string | null
+          profile_completed_at?: string | null
+          training_days_per_week?: number | null
           updated_at?: string
           user_id?: string
         }
