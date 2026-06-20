@@ -1,0 +1,1 @@
+ALTER TABLE public.shield_training_logs ADD CONSTRAINT shield_training_logs_user_date_unique UNIQUE (user_id, entry_date);

@@ -1,10 +1,11 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState, useRef } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Sparkles, Dumbbell, Camera, Apple, Brain, Home as HomeIcon, Flame } from "lucide-react";
 import { useProfile } from "@/lib/store";
 import { generateDailyInsight } from "@/lib/coach.functions";
 import { getTodayReadiness, type TodayReadiness } from "@/lib/shield.functions";
+import { RecoveryLogModal, MealLogModal, WorkoutLogModal } from "@/components/LogModals";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — APEX" }] }),
@@ -36,22 +37,36 @@ const PILLAR_META: { key: "recovery" | "sleep" | "nutrition" | "training" | "moo
 function Dashboard() {
   const { profile } = useProfile();
   const navigate = useNavigate();
-  const fileRef = useRef<HTMLInputElement>(null);
   const [day, setDay] = useState(1);
   const [greet, setGreet] = useState("Hello");
   const [insight, setInsight] = useState("Your recovery is strong. Ready to push intensity today.");
   const [insightTime] = useState("Just now");
   const [expanded, setExpanded] = useState(false);
   const [readiness, setReadiness] = useState<TodayReadiness>(null);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [mealOpen, setMealOpen] = useState(false);
+  const [workoutOpen, setWorkoutOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const fn = useServerFn(generateDailyInsight);
   const fetchReadiness = useServerFn(getTodayReadiness);
+
+  const reloadReadiness = () => {
+    fetchReadiness().then(setReadiness).catch(() => setReadiness(null));
+  };
 
   useEffect(() => {
     setDay(getDayOfJourney());
     const h = new Date().getHours();
     setGreet(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
-    fetchReadiness().then(setReadiness).catch(() => setReadiness(null));
-  }, [fetchReadiness]);
+    reloadReadiness();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 1800);
+  };
+
 
   useEffect(() => {
     let cancelled = false;
@@ -217,7 +232,7 @@ function Dashboard() {
                   </p>
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); navigate({ to: "/coach" }); }}
+                    onClick={(e) => { e.stopPropagation(); setRecoveryOpen(true); }}
                     className="mt-3 rounded-full px-3 py-1.5 text-[12px] font-semibold text-white gradient-brand active:scale-[0.98] transition"
                   >
                     Log recovery →
@@ -299,28 +314,20 @@ function Dashboard() {
 
         {/* Quick Actions */}
         <div className="grid grid-cols-2 gap-3">
-          <Link
-            to="/workouts"
-            className="flex items-center justify-center gap-2 rounded-[14px] h-14 text-[14px] font-semibold text-sleep"
+          <button
+            onClick={() => setWorkoutOpen(true)}
+            className="flex items-center justify-center gap-2 rounded-[14px] h-14 text-[14px] font-semibold text-sleep active:scale-[0.98] transition"
             style={{ background: "#0F1524", border: "1px solid rgba(59,130,246,0.35)" }}
           >
             <Dumbbell size={18} /> Log Workout
-          </Link>
+          </button>
           <button
-            onClick={() => fileRef.current?.click()}
-            className="flex items-center justify-center gap-2 rounded-[14px] h-14 text-[14px] font-semibold text-success"
+            onClick={() => setMealOpen(true)}
+            className="flex items-center justify-center gap-2 rounded-[14px] h-14 text-[14px] font-semibold text-success active:scale-[0.98] transition"
             style={{ background: "#0F1524", border: "1px solid rgba(16,185,129,0.35)" }}
           >
             <Camera size={18} /> Log Meal
           </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={() => navigate({ to: "/nutrition" })}
-          />
         </div>
 
         {/* Today's Plan */}
@@ -345,16 +352,29 @@ function Dashboard() {
               </li>
             ))}
           </ul>
-          <Link
-            to="/workouts"
-            className="mt-4 block rounded-2xl gradient-brand py-3 text-center text-[14px] font-semibold text-white"
+          <button
+            onClick={() => navigate({ to: "/workouts" })}
+            className="mt-4 w-full block rounded-2xl gradient-brand py-3 text-center text-[14px] font-semibold text-white active:scale-[0.98] transition"
           >
             Start Workout →
-          </Link>
+          </button>
         </div>
       </div>
 
-      <DashboardNav onCamera={() => fileRef.current?.click()} />
+      <DashboardNav onCamera={() => setMealOpen(true)} />
+
+      <RecoveryLogModal open={recoveryOpen} onClose={() => setRecoveryOpen(false)} onSaved={() => { showToast("Recovery logged"); reloadReadiness(); }} />
+      <MealLogModal open={mealOpen} onClose={() => setMealOpen(false)} onSaved={() => showToast("Meal logged")} />
+      <WorkoutLogModal open={workoutOpen} onClose={() => setWorkoutOpen(false)} onSaved={() => showToast("Workout logged")} />
+
+      {toast && (
+        <div
+          className="fixed left-1/2 -translate-x-1/2 bottom-28 z-[101] px-4 py-2 rounded-full text-[13px] text-white animate-fade-up"
+          style={{ background: "rgba(15,21,36,0.95)", border: "1px solid rgba(124,58,237,0.4)", backdropFilter: "blur(20px)" }}
+        >
+          ✓ {toast}
+        </div>
+      )}
     </div>
   );
 }
