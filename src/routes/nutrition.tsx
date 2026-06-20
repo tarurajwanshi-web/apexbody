@@ -34,7 +34,7 @@ function Nutrition() {
   const fn = useServerFn(analyzePhoto);
   const fetchMacros = useServerFn(getTodayMacroSummary);
   const fetchMeals = useServerFn(getTodayMeals);
-  const logMeal = useServerFn(logManualNutrition);
+  const logMealFn = useServerFn(logMeal);
 
   const reload = () => {
     fetchMacros().then(setMacros).catch(() => {});
