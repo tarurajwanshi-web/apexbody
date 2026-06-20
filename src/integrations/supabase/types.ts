@@ -157,33 +157,48 @@ export type Database = {
       }
       shield_nutrition_logs: {
         Row: {
+          carb_quality_score: number | null
           claude_quality_score: number | null
           claude_score_status: string
           created_at: string
+          deleted: boolean
           entry_date: string
           id: string
           meal_description: string | null
           meal_photo_url: string | null
+          protein_tier: number | null
+          timing_score: number | null
+          updated_at: string
           user_id: string
         }
         Insert: {
+          carb_quality_score?: number | null
           claude_quality_score?: number | null
           claude_score_status?: string
           created_at?: string
+          deleted?: boolean
           entry_date: string
           id?: string
           meal_description?: string | null
           meal_photo_url?: string | null
+          protein_tier?: number | null
+          timing_score?: number | null
+          updated_at?: string
           user_id: string
         }
         Update: {
+          carb_quality_score?: number | null
           claude_quality_score?: number | null
           claude_score_status?: string
           created_at?: string
+          deleted?: boolean
           entry_date?: string
           id?: string
           meal_description?: string | null
           meal_photo_url?: string | null
+          protein_tier?: number | null
+          timing_score?: number | null
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
@@ -220,7 +235,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      shield_dispatch_calculate_score: {
+        Args: { _entry_date: string; _user_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
