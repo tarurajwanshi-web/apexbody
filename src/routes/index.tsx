@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
 import { toast } from "sonner";
@@ -60,7 +60,7 @@ function AuthScreen() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-between bg-bg-0 px-6 py-12">
       <div className="flex-1 flex flex-col items-center justify-center w-full">
-        <AmbientRing />
+        <DemoRing />
         <p className="mt-10 text-center text-[15px] text-text-secondary max-w-[280px] leading-relaxed">
           Not just a number.<br />Know how much to trust it.
         </p>
@@ -93,40 +93,207 @@ function AuthScreen() {
   );
 }
 
-function AmbientRing() {
+type DemoState = {
+  score: number;
+  confidence: "HIGH" | "MEDIUM";
+  insight: string;
+};
+
+const DEMO_STATES: DemoState[] = [
+  { score: 74, confidence: "HIGH", insight: "Recovery's strong. Push today." },
+  { score: 52, confidence: "MEDIUM", insight: "Limited data. Log sleep to sharpen this." },
+  { score: 38, confidence: "HIGH", insight: "You're carrying fatigue. Recovery day recommended." },
+];
+
+const CYCLE = {
+  ambient: 1500,
+  countUp: 1500,
+  confidence: 500,
+  typewriter: 2500,
+  hold: 1500,
+  fadeOut: 1000,
+};
+const CYCLE_TOTAL =
+  CYCLE.ambient + CYCLE.countUp + CYCLE.confidence + CYCLE.typewriter + CYCLE.hold + CYCLE.fadeOut;
+
+function easeOutCubic(t: number) {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+function DemoRing() {
   const size = 220;
   const stroke = 10;
   const r = size / 2 - stroke / 2;
   const c = 2 * Math.PI * r;
-  // Incomplete/ambiguous arc — ~62% of circumference filled
-  const dash = c * 0.62;
+
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const [exampleIdx, setExampleIdx] = useState(0);
+  const [progress, setProgress] = useState(0); // 0..1 for score/arc fill
+  const [confidenceOpacity, setConfidenceOpacity] = useState(0);
+  const [typedLen, setTypedLen] = useState(0);
+  const [contentOpacity, setContentOpacity] = useState(1); // global fade for phase 6
+  const rafRef = useRef<number | null>(null);
+  const startRef = useRef<number | null>(null);
+  const idxRef = useRef(0);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReducedMotion(mq.matches);
+    const onChange = () => setReducedMotion(mq.matches);
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  }, []);
+
+  useEffect(() => {
+    if (reducedMotion) return;
+    const tick = (now: number) => {
+      if (startRef.current == null) startRef.current = now;
+      const elapsed = (now - startRef.current) % CYCLE_TOTAL;
+      const cycleNum = Math.floor((now - startRef.current) / CYCLE_TOTAL);
+      const targetIdx = cycleNum % DEMO_STATES.length;
+      if (targetIdx !== idxRef.current) {
+        idxRef.current = targetIdx;
+        setExampleIdx(targetIdx);
+      }
+      const state = DEMO_STATES[targetIdx];
+
+      const t1 = CYCLE.ambient;
+      const t2 = t1 + CYCLE.countUp;
+      const t3 = t2 + CYCLE.confidence;
+      const t4 = t3 + CYCLE.typewriter;
+      const t5 = t4 + CYCLE.hold;
+      const t6 = t5 + CYCLE.fadeOut;
+
+      if (elapsed < t1) {
+        setProgress(0);
+        setConfidenceOpacity(0);
+        setTypedLen(0);
+        setContentOpacity(1);
+      } else if (elapsed < t2) {
+        setProgress(easeOutCubic((elapsed - t1) / CYCLE.countUp));
+        setConfidenceOpacity(0);
+        setTypedLen(0);
+        setContentOpacity(1);
+      } else if (elapsed < t3) {
+        setProgress(1);
+        setConfidenceOpacity((elapsed - t2) / CYCLE.confidence);
+        setTypedLen(0);
+        setContentOpacity(1);
+      } else if (elapsed < t4) {
+        setProgress(1);
+        setConfidenceOpacity(1);
+        const frac = (elapsed - t3) / CYCLE.typewriter;
+        setTypedLen(Math.floor(frac * state.insight.length));
+        setContentOpacity(1);
+      } else if (elapsed < t5) {
+        setProgress(1);
+        setConfidenceOpacity(1);
+        setTypedLen(state.insight.length);
+        setContentOpacity(1);
+      } else if (elapsed < t6) {
+        const fade = 1 - (elapsed - t5) / CYCLE.fadeOut;
+        setContentOpacity(fade);
+        setProgress(fade);
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      startRef.current = null;
+    };
+  }, [reducedMotion]);
+
+  // Reduced-motion static state = example 1
+  const displayState = reducedMotion ? DEMO_STATES[0] : DEMO_STATES[exampleIdx];
+  const displayScore = reducedMotion ? displayState.score : Math.round(progress * displayState.score);
+  const arcFrac = reducedMotion ? displayState.score / 100 : (progress * displayState.score) / 100;
+  const dash = c * arcFrac;
+  const showScore = reducedMotion || progress > 0;
+  const showConfidence = reducedMotion ? true : confidenceOpacity > 0;
+  const insightText = reducedMotion ? displayState.insight : displayState.insight.slice(0, typedLen);
+
   return (
-    <div
-      className="relative ambient-ring"
-      style={{ width: size, height: size }}
-      aria-hidden
-    >
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="ambient-ring-rotate">
-        <defs>
-          <linearGradient id="ambientRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#7C3AED" />
-            <stop offset="55%" stopColor="#3B82F6" />
-            <stop offset="100%" stopColor="#10B981" />
-          </linearGradient>
-        </defs>
-        <circle
-          cx={size / 2} cy={size / 2} r={r}
-          fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={stroke}
-        />
-        <circle
-          className="ambient-ring-arc"
-          cx={size / 2} cy={size / 2} r={r}
-          fill="none" stroke="url(#ambientRingGrad)" strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={`${dash} ${c}`}
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        />
-      </svg>
+    <div className="flex flex-col items-center">
+      <div
+        className="relative ambient-ring"
+        style={{ width: size, height: size }}
+        aria-hidden
+      >
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="ambient-ring-rotate">
+          <defs>
+            <linearGradient id="ambientRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#7C3AED" />
+              <stop offset="55%" stopColor="#3B82F6" />
+              <stop offset="100%" stopColor="#10B981" />
+            </linearGradient>
+          </defs>
+          <circle
+            cx={size / 2} cy={size / 2} r={r}
+            fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={stroke}
+          />
+          <circle
+            cx={size / 2} cy={size / 2} r={r}
+            fill="none" stroke="url(#ambientRingGrad)" strokeWidth={stroke}
+            strokeLinecap="round"
+            strokeDasharray={`${dash} ${c}`}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+            style={{ transition: "stroke-dasharray 80ms linear" }}
+          />
+        </svg>
+
+        {/* Score + confidence inside the ring */}
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"
+          style={{ opacity: contentOpacity }}
+        >
+          <div
+            className="font-display font-semibold tabular-nums text-text-primary"
+            style={{
+              fontSize: 64,
+              lineHeight: 1,
+              opacity: showScore ? 1 : 0,
+              transition: "opacity 200ms ease",
+            }}
+          >
+            {displayScore}
+          </div>
+          <div
+            className="mt-2 flex items-center gap-1.5"
+            style={{
+              opacity: reducedMotion ? 1 : confidenceOpacity,
+              transition: "opacity 200ms ease",
+            }}
+          >
+            <span
+              className="inline-block rounded-full"
+              style={{
+                width: 7,
+                height: 7,
+                backgroundColor: displayState.confidence === "HIGH" ? "#10B981" : "#F59E0B",
+                boxShadow: `0 0 8px ${displayState.confidence === "HIGH" ? "rgba(16,185,129,0.6)" : "rgba(245,158,11,0.6)"}`,
+              }}
+            />
+            <span
+              className="text-[10px] font-semibold tracking-[0.12em]"
+              style={{ color: displayState.confidence === "HIGH" ? "#10B981" : "#F59E0B" }}
+            >
+              {displayState.confidence}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Insight beneath the ring */}
+      <div
+        className="mt-5 h-5 text-center text-[13px] text-text-secondary max-w-[300px] leading-snug"
+        style={{ opacity: contentOpacity }}
+      >
+        {insightText}
+        {!reducedMotion && typedLen > 0 && typedLen < displayState.insight.length && (
+          <span className="inline-block w-[1px] h-[12px] align-middle ml-[1px] bg-text-secondary animate-pulse" />
+        )}
+      </div>
     </div>
   );
 }
