@@ -87,7 +87,7 @@ function ProfileSetup() {
       const unlock = new Date(now.getTime() + 7 * 86400000);
       const unlockDate = unlock.toISOString().slice(0, 10);
 
-      const payload: Record<string, unknown> = {
+      const payload = {
         user_id: userId,
         goal: draft.goal,
         training_days_per_week: draft.days,
