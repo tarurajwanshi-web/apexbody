@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Sparkles, Dumbbell, Camera, Apple, Brain, Home as HomeIcon, Flame } from "lucide-react";
 import { useProfile } from "@/lib/store";
 import { generateDailyInsight } from "@/lib/coach.functions";
+import { getTodayReadiness, type TodayReadiness } from "@/lib/shield.functions";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — APEX" }] }),
@@ -24,17 +25,33 @@ function getDayOfJourney(): number {
   return Math.max(1, days);
 }
 
+const PILLAR_META: { key: "recovery" | "sleep" | "nutrition" | "training" | "mood"; label: string; color: string }[] = [
+  { key: "recovery", label: "Recovery", color: "#10B981" },
+  { key: "sleep", label: "Sleep", color: "#3B82F6" },
+  { key: "nutrition", label: "Nutrition", color: "#22C55E" },
+  { key: "training", label: "Training", color: "#F59E0B" },
+  { key: "mood", label: "Mood", color: "#8B5CF6" },
+];
+
 function Dashboard() {
   const { profile } = useProfile();
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
   const [day, setDay] = useState(1);
+  const [greet, setGreet] = useState("Hello");
   const [insight, setInsight] = useState("Your recovery is strong. Ready to push intensity today.");
   const [insightTime] = useState("Just now");
   const [expanded, setExpanded] = useState(false);
+  const [readiness, setReadiness] = useState<TodayReadiness>(null);
   const fn = useServerFn(generateDailyInsight);
+  const fetchReadiness = useServerFn(getTodayReadiness);
 
-  useEffect(() => { setDay(getDayOfJourney()); }, []);
+  useEffect(() => {
+    setDay(getDayOfJourney());
+    const h = new Date().getHours();
+    setGreet(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
+    fetchReadiness().then(setReadiness).catch(() => setReadiness(null));
+  }, [fetchReadiness]);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,33 +61,28 @@ function Dashboard() {
           name: profile.name,
           goal: profile.goal,
           day,
-          recovery: 68,
-          hrv: 81,
-          sleepHours: 7.2,
-          strain: 55,
-          score: 74,
+          score: readiness?.final_score ?? null,
         },
       },
     })
       .then((r) => { if (!cancelled && r.content) setInsight(r.content); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [fn, day, profile.name, profile.goal]);
+  }, [fn, day, profile.name, profile.goal, readiness?.final_score]);
 
-  const hour = new Date().getHours();
-  const greet = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const today = new Date().toISOString().slice(0, 10);
+  const hasToday = !!readiness && readiness.score_date === today;
   const inLearning = day <= LEARNING_DAYS;
   const week = Math.max(1, Math.ceil((day - LEARNING_DAYS) / 7));
   const subline = inLearning ? `Day ${day} of ${LEARNING_DAYS} — Learning phase` : `Week ${week} — Custom plan active`;
 
-  // Ring math — single circular ring with gradient stroke
+  // Ring math
   const ringSize = 90;
   const ringStroke = 8;
   const ringR = ringSize / 2 - ringStroke / 2;
   const ringC = 2 * Math.PI * ringR;
-  const recovery = 68;
-  const score = 74;
-  const fillPct = score / 100;
+  const score = hasToday ? readiness!.final_score : null;
+  const fillPct = score != null ? score / 100 : 0;
 
   return (
     <div className="min-h-screen pb-32 relative" style={{ backgroundColor: "#0A0E1A" }}>
@@ -113,7 +125,7 @@ function Dashboard() {
             <div className="flex items-start gap-3">
               <Sparkles size={18} className="text-ai shrink-0 mt-0.5" />
               <p className="text-[13px] text-text-primary leading-snug">
-                I'm learning about you. Log workouts, meals, and mood daily. Day {day} of {LEARNING_DAYS}.
+                Day {day} of {LEARNING_DAYS} — I'm learning your patterns to personalize your program.
               </p>
             </div>
             <div className="mt-3 h-1.5 w-full rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
@@ -174,27 +186,49 @@ function Dashboard() {
           <div className="flex items-center justify-between gap-6">
             {/* LEFT */}
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-medium text-text-tertiary uppercase" style={{ letterSpacing: "2px" }}>
-                APEX Score
-              </p>
-              <div className="mt-2 flex items-baseline gap-1">
-                <span
-                  className="text-white tabular-nums"
-                  style={{ fontSize: 56, fontWeight: 300, lineHeight: 1, textShadow: "0 0 20px rgba(124,58,237,0.3)" }}
-                >
-                  {score}
-                </span>
-                <span className="text-text-tertiary" style={{ fontSize: 18 }}>/100</span>
+              <div className="flex items-center gap-2">
+                <p className="text-[10px] font-medium text-text-tertiary uppercase" style={{ letterSpacing: "2px" }}>
+                  APEX Score
+                </p>
+                {hasToday && readiness?.confidence_level && (
+                  <ConfidenceBadge level={readiness.confidence_level} />
+                )}
               </div>
-              <div className="mt-3 inline-flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                <span className="text-[13px] text-success">On track for recomposition</span>
-              </div>
+              {score != null ? (
+                <>
+                  <div className="mt-2 flex items-baseline gap-1">
+                    <span
+                      className="text-white tabular-nums"
+                      style={{ fontSize: 56, fontWeight: 300, lineHeight: 1, textShadow: "0 0 20px rgba(124,58,237,0.3)" }}
+                    >
+                      {score}
+                    </span>
+                    <span className="text-text-tertiary" style={{ fontSize: 18 }}>/100</span>
+                  </div>
+                  <div className="mt-3 inline-flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                    <span className="text-[13px] text-success">Today's readiness</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="mt-3 text-[13px] text-text-secondary leading-snug">
+                    Log today's recovery to see your score
+                  </p>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); navigate({ to: "/coach" }); }}
+                    className="mt-3 rounded-full px-3 py-1.5 text-[12px] font-semibold text-white gradient-brand active:scale-[0.98] transition"
+                  >
+                    Log recovery →
+                  </button>
+                </>
+              )}
             </div>
 
-            {/* RIGHT — single animated gradient ring */}
+            {/* RIGHT — ring */}
             <div className="shrink-0 relative">
-              <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`} className="animate-pulse-ring">
+              <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`}>
                 <defs>
                   <linearGradient id="scoreRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
                     <stop offset="0%" stopColor="#7C3AED" />
@@ -206,22 +240,22 @@ function Dashboard() {
                   cx={ringSize / 2} cy={ringSize / 2} r={ringR}
                   fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={ringStroke}
                 />
-                <circle
-                  cx={ringSize / 2} cy={ringSize / 2} r={ringR}
-                  fill="none" stroke="url(#scoreRingGrad)" strokeWidth={ringStroke}
-                  strokeLinecap="round"
-                  strokeDasharray={ringC}
-                  strokeDashoffset={ringC * (1 - fillPct)}
-                  transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
-                  style={{ animation: "ring-draw 1.5s ease-out both" }}
-                />
+                {score != null && (
+                  <circle
+                    cx={ringSize / 2} cy={ringSize / 2} r={ringR}
+                    fill="none" stroke="url(#scoreRingGrad)" strokeWidth={ringStroke}
+                    strokeLinecap="round"
+                    strokeDasharray={ringC}
+                    strokeDashoffset={ringC * (1 - fillPct)}
+                    transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                  />
+                )}
                 <text
                   x="50%" y="50%" textAnchor="middle" dominantBaseline="central"
                   className="fill-white" style={{ fontSize: 16, fontWeight: 500 }}
                 >
-                  {score}
+                  {score ?? "—"}
                 </text>
-                <style>{`@keyframes ring-draw { from { stroke-dashoffset: ${ringC}; } to { stroke-dashoffset: ${ringC * (1 - fillPct)}; } }`}</style>
               </svg>
             </div>
           </div>
@@ -231,10 +265,34 @@ function Dashboard() {
               className="mt-5 overflow-hidden"
               style={{ animation: "fade-up 0.3s ease both" }}
             >
-              <MetricRow color="#10B981" name="Recovery" value="68%" trend="up" note="Trending up. Ready to push." />
-              <MetricRow color="#3B82F6" name="Sleep" value="7.2h" trend="stable" note="Consistent." />
-              <MetricRow color="#F59E0B" name="Strain" value="55%" trend="stable" note="Room to push." />
-              <MetricRow color="#8B5CF6" name="HRV" value="81ms" trend="up" note="Best in 14 days." last />
+              {PILLAR_META.map((p, i) => {
+                const raw = readiness?.pillar_breakdown?.[p.key];
+                const value = raw == null || raw === "" ? "—" : String(raw);
+                return (
+                  <MetricRow
+                    key={p.key}
+                    color={p.color}
+                    name={p.label}
+                    value={value}
+                    trend="stable"
+                    note=""
+                    hideNote
+                    last={i === PILLAR_META.length - 1}
+                  />
+                );
+              })}
+              {readiness?.nudge_message && (
+                <div
+                  className="mt-4 rounded-xl p-3 flex items-start gap-2"
+                  style={{
+                    background: "linear-gradient(135deg, rgba(124,58,237,0.08), rgba(59,130,246,0.08))",
+                    border: "1px solid rgba(124,58,237,0.25)",
+                  }}
+                >
+                  <Sparkles size={14} className="text-ai shrink-0 mt-0.5" />
+                  <p className="text-[12px] text-text-primary leading-snug">{readiness.nudge_message}</p>
+                </div>
+              )}
             </div>
           )}
         </button>
@@ -301,8 +359,21 @@ function Dashboard() {
   );
 }
 
+function ConfidenceBadge({ level }: { level: "HIGH" | "MEDIUM" | "LOW" }) {
+  const color = level === "HIGH" ? "#10B981" : level === "MEDIUM" ? "#F59E0B" : "#8892A4";
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase"
+      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color, letterSpacing: "1px" }}
+    >
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+      {level}
+    </span>
+  );
+}
+
 function MetricRow({
-  color, name, value, trend, note, last,
+  color, name, value, trend, note, last, hideNote,
 }: {
   color: string;
   name: string;
@@ -310,6 +381,7 @@ function MetricRow({
   trend: "up" | "stable" | "down";
   note: string;
   last?: boolean;
+  hideNote?: boolean;
 }) {
   const trendChar = trend === "up" ? "↑" : trend === "down" ? "↓" : "→";
   const trendColor = trend === "up" ? "#10B981" : trend === "down" ? "#EF4444" : "#F59E0B";
@@ -326,7 +398,7 @@ function MetricRow({
           {trendChar}
         </span>
       </div>
-      <p className="ml-[18px] mt-1 text-[11px] text-text-tertiary">{note}</p>
+      {!hideNote && note && <p className="ml-[18px] mt-1 text-[11px] text-text-tertiary">{note}</p>}
     </div>
   );
 }
