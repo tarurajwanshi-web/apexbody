@@ -399,6 +399,24 @@ function Dashboard() {
         {/* Macros (estimated from photos) */}
         <MacrosCard macros={macros} />
 
+        {/* Resource library — read-only browse */}
+        <button
+          onClick={() => navigate({ to: "/resources" })}
+          className="w-full flex items-center gap-3 rounded-2xl p-4 text-left active:scale-[0.99] transition"
+          style={{ background: "#0F1524", border: "1px solid rgba(255,255,255,0.06)" }}
+        >
+          <div className="h-10 w-10 rounded-xl gradient-brand flex items-center justify-center shrink-0">
+            <BookOpen size={18} className="text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[14px] font-semibold text-white">Resources</p>
+            <p className="text-[12px] text-text-secondary mt-0.5">Guides & ebooks from APEX</p>
+          </div>
+          <span className="text-text-tertiary">›</span>
+        </button>
+
+
+
 
 
 
