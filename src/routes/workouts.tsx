@@ -492,3 +492,194 @@ async function maybeWriteTrainingSummary(
       session_notes: dayPlan.session_name ?? "Session",
     }, { onConflict: "user_id,entry_date" });
 }
+
+// ----------------- Pre-workout readiness check -----------------
+// Single-tap 1-5 scale; saves to pre_session_checks.
+const READINESS_OPTIONS: { value: number; emoji: string; label: string }[] = [
+  { value: 1, emoji: "😞", label: "Poor" },
+  { value: 2, emoji: "😕", label: "Low" },
+  { value: 3, emoji: "😐", label: "OK" },
+  { value: 4, emoji: "🙂", label: "Good" },
+  { value: 5, emoji: "🤩", label: "Great" },
+];
+
+function PreWorkoutCheckSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [saving, setSaving] = useState(false);
+
+  const save = async (value: number) => {
+    setSaving(true);
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const uid = u.user?.id;
+      if (!uid) throw new Error("Not signed in");
+      const { error } = await supabase.from("pre_session_checks").insert({
+        user_id: uid,
+        entry_date: todayISO(),
+        session_readiness: value,
+      });
+      if (error) throw error;
+      toast.success("Logged - let's go.");
+      onSaved();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Could not save");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] bg-black/70 flex items-end" onClick={onClose}>
+      <div
+        className="w-full max-w-[480px] mx-auto bg-bg-2 rounded-t-3xl border-t border-white/10 p-6 animate-fade-up"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="h-1 w-12 rounded-full bg-white/20 mx-auto mb-4" />
+        <p className="text-[10px] uppercase tracking-wider text-text-tertiary text-center">Quick check</p>
+        <h3 className="mt-1 text-xl font-bold text-center">How do you feel right now?</h3>
+        <p className="mt-1 text-[12px] text-text-tertiary text-center">Helps me read today's session honestly.</p>
+        <div className="mt-6 grid grid-cols-5 gap-2">
+          {READINESS_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              disabled={saving}
+              onClick={() => save(opt.value)}
+              className="rounded-2xl bg-bg-3/50 border border-white/5 py-3 flex flex-col items-center gap-1 active:scale-95 disabled:opacity-40 transition"
+            >
+              <span className="text-2xl">{opt.emoji}</span>
+              <span className="text-[10px] text-text-tertiary">{opt.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ----------------- Body Scan (upload only — analysis unlocks Day 7) -----------------
+type BodyScan = { id: string; photo_url: string; captured_at: string };
+
+function BodyScanSection() {
+  const [scans, setScans] = useState<BodyScan[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data: u } = await supabase.auth.getUser();
+    const uid = u.user?.id;
+    if (!uid) { setLoading(false); return; }
+    const { data } = await supabase
+      .from("body_scan_photos")
+      .select("id, photo_url, captured_at")
+      .eq("user_id", uid)
+      .order("captured_at", { ascending: false })
+      .limit(12);
+    setScans((data as BodyScan[]) ?? []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const uid = u.user?.id;
+      if (!uid) throw new Error("Not signed in");
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `${uid}/${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from("body-scans").upload(path, file, {
+        contentType: file.type || "image/jpeg",
+      });
+      if (upErr) throw upErr;
+      const { error: insErr } = await supabase
+        .from("body_scan_photos")
+        .insert({ user_id: uid, photo_url: path });
+      if (insErr) throw insErr;
+      toast.success("Photo uploaded");
+      await load();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const remove = async (scan: BodyScan) => {
+    if (!confirm("Delete this photo?")) return;
+    await supabase.storage.from("body-scans").remove([scan.photo_url]);
+    await supabase.from("body_scan_photos").delete().eq("id", scan.id);
+    await load();
+  };
+
+  return (
+    <section className="mx-5 mt-6">
+      <div className="flex items-center justify-between mb-2 ml-1">
+        <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Body scan</p>
+        <button
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          className="flex items-center gap-1 text-[11px] text-text-accent font-semibold disabled:opacity-50"
+        >
+          {uploading ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} />}
+          {uploading ? "Uploading…" : "Add photo"}
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) upload(f);
+            e.target.value = "";
+          }}
+        />
+      </div>
+      <div className="rounded-2xl bg-bg-2 border border-white/5 p-4">
+        <p className="text-[12px] text-text-secondary leading-snug">
+          Upload photos anytime. Your AI body composition assessment unlocks with Intelligence on Day 7.
+        </p>
+        {loading ? (
+          <div className="mt-3 flex justify-center"><Loader2 size={14} className="animate-spin text-text-tertiary" /></div>
+        ) : scans.length === 0 ? null : (
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {scans.map((s) => (
+              <BodyScanThumb key={s.id} scan={s} onRemove={() => remove(s)} />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function BodyScanThumb({ scan, onRemove }: { scan: BodyScan; onRemove: () => void }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    supabase.storage.from("body-scans").createSignedUrl(scan.photo_url, 600).then(({ data }) => {
+      if (!cancelled && data?.signedUrl) setUrl(data.signedUrl);
+    });
+    return () => { cancelled = true; };
+  }, [scan.photo_url]);
+  return (
+    <div className="relative aspect-square rounded-xl overflow-hidden bg-bg-3/40">
+      {url ? (
+        <img src={url} alt="Body scan" className="absolute inset-0 h-full w-full object-cover" />
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <Loader2 size={14} className="animate-spin text-text-tertiary" />
+        </div>
+      )}
+      <button
+        onClick={onRemove}
+        className="absolute top-1 right-1 h-6 w-6 rounded-full bg-black/60 flex items-center justify-center text-white active:opacity-80"
+        aria-label="Delete photo"
+      >
+        <Trash2 size={11} />
+      </button>
+    </div>
+  );
+}
