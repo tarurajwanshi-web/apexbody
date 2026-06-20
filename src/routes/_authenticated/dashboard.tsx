@@ -51,6 +51,9 @@ function Dashboard() {
   const [toast, setToast] = useState<string | null>(null);
   const fn = useServerFn(generateDailyInsight);
   const fetchReadiness = useServerFn(getTodayReadiness);
+  const fetchMacros = useServerFn(getTodayMacroSummary);
+  const [macros, setMacros] = useState<MacroSummary | null>(null);
+  const reloadMacros = () => { fetchMacros().then(setMacros).catch(() => {}); };
 
   const reloadReadiness = () => {
     fetchReadiness().then(setReadiness).catch(() => setReadiness(null));
