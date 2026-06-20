@@ -7,6 +7,7 @@ import {
   upsertManualRecovery,
   upsertDeviceRecovery,
   logMeal,
+  updateMeal,
   upsertTraining,
 } from "@/lib/shield.functions";
 
@@ -203,22 +204,31 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
   );
 }
 
-export function MealLogModal({ open, onClose, onSaved }: Props) {
+type MealEditing = { id: string; meal_description: string | null; meal_photo_url: string | null } | null;
+type MealProps = Props & { editing?: MealEditing };
+
+export function MealLogModal({ open, onClose, onSaved, editing = null }: MealProps) {
   const [desc, setDesc] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const fn = useServerFn(logMeal);
+  const create = useServerFn(logMeal);
+  const update = useServerFn(updateMeal);
 
-  useEffect(() => { if (!open) { setDesc(""); setFile(null); setErr(null); } }, [open]);
+  useEffect(() => {
+    if (!open) { setDesc(""); setFile(null); setErr(null); return; }
+    setDesc(editing?.meal_description ?? "");
+    setFile(null);
+    setErr(null);
+  }, [open, editing]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!desc.trim()) return;
     setBusy(true); setErr(null);
     try {
-      let photoPath: string | null = null;
+      let photoPath: string | null = editing?.meal_photo_url ?? null;
       if (file) {
         const { data: u } = await supabase.auth.getUser();
         const uid = u.user?.id;
@@ -228,8 +238,15 @@ export function MealLogModal({ open, onClose, onSaved }: Props) {
         const { error: upErr } = await supabase.storage.from("shield-uploads").upload(photoPath, file);
         if (upErr) throw new Error(upErr.message);
       }
-      const { id } = await fn({ data: { meal_description: desc.trim(), meal_photo_url: photoPath } });
-      // Fire-and-forget scoring; ignore result and errors
+      let id: string;
+      if (editing) {
+        const r = await update({ data: { id: editing.id, meal_description: desc.trim(), meal_photo_url: photoPath } });
+        id = r.id;
+      } else {
+        const r = await create({ data: { meal_description: desc.trim(), meal_photo_url: photoPath } });
+        id = r.id;
+      }
+      // Fire-and-forget rescore; calculate-score is triggered via DB webhook.
       void supabase.functions.invoke("score-nutrition", { body: { nutrition_log_id: id } }).catch(() => {});
       onSaved?.();
       onClose();
@@ -239,7 +256,7 @@ export function MealLogModal({ open, onClose, onSaved }: Props) {
   };
 
   return (
-    <Sheet open={open} onClose={onClose} title="Log a meal">
+    <Sheet open={open} onClose={onClose} title={editing ? "Edit meal" : "Log a meal"}>
       <form onSubmit={submit} className="space-y-5">
         <div>
           <label className="text-[12px] uppercase text-text-tertiary tracking-wider">What did you eat?</label>
@@ -252,18 +269,20 @@ export function MealLogModal({ open, onClose, onSaved }: Props) {
           />
         </div>
         <div>
-          <label className="text-[12px] uppercase text-text-tertiary tracking-wider">Photo (optional)</label>
+          <label className="text-[12px] uppercase text-text-tertiary tracking-wider">
+            Photo {editing?.meal_photo_url ? "(replace optional)" : "(optional)"}
+          </label>
           <button type="button" onClick={() => inputRef.current?.click()}
             className="mt-3 w-full rounded-2xl py-5 flex flex-col items-center gap-2 text-text-secondary active:scale-[0.99] transition"
             style={{ background: "#0A0E1A", border: "1px dashed rgba(16,185,129,0.4)" }}>
             <Upload size={18} />
-            <span className="text-[13px]">{file ? file.name : "Tap to add photo"}</span>
+            <span className="text-[13px]">{file ? file.name : editing?.meal_photo_url ? "Photo on file — tap to replace" : "Tap to add photo"}</span>
           </button>
           <input ref={inputRef} type="file" accept="image/*" capture="environment" className="hidden"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         </div>
         {err && <p className="text-[12px] text-red-400">{err}</p>}
-        <SubmitBtn busy={busy} label="Log meal" disabled={!desc.trim()} />
+        <SubmitBtn busy={busy} label={editing ? "Save changes" : "Log meal"} disabled={!desc.trim()} />
       </form>
     </Sheet>
   );

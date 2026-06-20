@@ -107,6 +107,76 @@ export const logMeal = createServerFn({ method: "POST" })
     return { id: row.id };
   });
 
+export type TodayMeal = {
+  id: string;
+  meal_description: string | null;
+  meal_photo_url: string | null;
+  claude_score_status: string;
+  claude_quality_score: number | null;
+  created_at: string;
+};
+
+export const getTodayMeals = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<TodayMeal[]> => {
+    const { data, error } = await context.supabase
+      .from("shield_nutrition_logs")
+      .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, created_at, deleted, entry_date")
+      .eq("user_id", context.userId)
+      .eq("entry_date", today())
+      .eq("deleted", false)
+      .order("created_at", { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => ({
+      id: r.id,
+      meal_description: r.meal_description,
+      meal_photo_url: r.meal_photo_url,
+      claude_score_status: r.claude_score_status,
+      claude_quality_score: r.claude_quality_score,
+      created_at: r.created_at,
+    }));
+  });
+
+export const updateMeal = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      id: z.string().uuid(),
+      meal_description: z.string().min(1),
+      meal_photo_url: z.string().nullable().optional(),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    // Reset the three dimension scores + status so score-nutrition reruns clean.
+    const { error } = await context.supabase
+      .from("shield_nutrition_logs")
+      .update({
+        meal_description: data.meal_description,
+        meal_photo_url: data.meal_photo_url ?? null,
+        protein_tier: null,
+        carb_quality_score: null,
+        timing_score: null,
+        claude_score_status: "pending",
+      })
+      .eq("id", data.id)
+      .eq("user_id", context.userId);
+    if (error) throw new Error(error.message);
+    return { id: data.id };
+  });
+
+export const softDeleteMeal = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("shield_nutrition_logs")
+      .update({ deleted: true })
+      .eq("id", data.id)
+      .eq("user_id", context.userId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
 export const upsertTraining = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>

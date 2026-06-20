@@ -1,11 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Sparkles, Dumbbell, Camera, Apple, Brain, Home as HomeIcon, Flame } from "lucide-react";
 import { useProfile } from "@/lib/store";
 import { generateDailyInsight } from "@/lib/coach.functions";
 import { getTodayReadiness, type TodayReadiness } from "@/lib/shield.functions";
 import { RecoveryLogModal, MealLogModal, WorkoutLogModal } from "@/components/LogModals";
+import { MealHistoryList } from "@/components/MealHistoryList";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — APEX" }] }),
@@ -64,7 +65,30 @@ function Dashboard() {
 
   const showToast = (msg: string) => {
     setToast(msg);
-    setTimeout(() => setToast(null), 1800);
+    setTimeout(() => setToast(null), 2400);
+  };
+
+  // Capture score before a mutation; poll readiness for change for ~6s.
+  const preScoreRef = useRef<number | null>(null);
+  const captureScore = () => {
+    preScoreRef.current = readiness?.final_score != null ? Number(readiness.final_score) : null;
+  };
+  const pollScoreChange = () => {
+    const start = Date.now();
+    const tick = async () => {
+      try {
+        const r = await fetchReadiness();
+        setReadiness(r);
+        const newScore = r?.final_score != null ? Number(r.final_score) : null;
+        const prev = preScoreRef.current;
+        if (newScore != null && prev != null && newScore !== prev) {
+          showToast(`Score updated: ${prev} → ${newScore}`);
+          return;
+        }
+      } catch {}
+      if (Date.now() - start < 6000) setTimeout(tick, 1000);
+    };
+    setTimeout(tick, 1200);
   };
 
 
@@ -330,6 +354,14 @@ function Dashboard() {
           </button>
         </div>
 
+        {/* Today's meals — edit / delete */}
+        <MealHistoryList
+          onMutationStart={captureScore}
+          onMutationDone={pollScoreChange}
+        />
+
+
+
         {/* Today's Plan */}
         <div className="rounded-2xl p-5" style={{ background: "#0F1524", border: "1px solid rgba(255,255,255,0.06)" }}>
           <div className="flex items-center justify-between">
@@ -363,9 +395,10 @@ function Dashboard() {
 
       <DashboardNav onCamera={() => setMealOpen(true)} />
 
-      <RecoveryLogModal open={recoveryOpen} onClose={() => setRecoveryOpen(false)} onSaved={() => { showToast("Recovery logged"); reloadReadiness(); }} />
-      <MealLogModal open={mealOpen} onClose={() => setMealOpen(false)} onSaved={() => showToast("Meal logged")} />
-      <WorkoutLogModal open={workoutOpen} onClose={() => setWorkoutOpen(false)} onSaved={() => showToast("Workout logged")} />
+      <RecoveryLogModal open={recoveryOpen} onClose={() => setRecoveryOpen(false)} onSaved={() => { captureScore(); showToast("Recovery logged"); reloadReadiness(); pollScoreChange(); }} />
+      <MealLogModal open={mealOpen} onClose={() => setMealOpen(false)} onSaved={() => { captureScore(); showToast("Meal logged"); pollScoreChange(); }} />
+      <WorkoutLogModal open={workoutOpen} onClose={() => setWorkoutOpen(false)} onSaved={() => { captureScore(); showToast("Workout logged"); pollScoreChange(); }} />
+
 
       {toast && (
         <div
