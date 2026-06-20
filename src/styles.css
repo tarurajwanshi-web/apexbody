@@ -160,3 +160,17 @@
 .animate-breathe { animation: breathe 2.4s ease-in-out infinite; }
 .animate-pulse-glow { animation: pulse-glow 2.4s ease-in-out infinite; }
 .animate-fade-up { animation: fade-up 0.5s ease-out both; }
+
+@keyframes ambient-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes ambient-pulse {
+  0%, 100% { opacity: 0.95; filter: drop-shadow(0 0 18px rgba(124,58,237,0.35)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 36px rgba(59,130,246,0.55)); }
+}
+.ambient-ring { animation: ambient-pulse 4.5s ease-in-out infinite; }
+.ambient-ring-rotate { animation: ambient-rotate 22s linear infinite; transform-origin: 50% 50%; }
+@media (prefers-reduced-motion: reduce) {
+  .ambient-ring, .ambient-ring-rotate { animation: none; }
+}
