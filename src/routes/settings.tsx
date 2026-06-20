@@ -84,7 +84,7 @@ function Settings() {
   );
 }
 
-type ResourceFile = { name: string; id?: string; size?: number; updated_at?: string };
+type ResourceFile = { name: string; id?: string | null; size?: number; updated_at?: string };
 
 function ResourceLibrary() {
   const [files, setFiles] = useState<ResourceFile[]>([]);
