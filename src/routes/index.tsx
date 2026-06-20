@@ -20,21 +20,21 @@ async function routeAfterAuth(navigate: ReturnType<typeof useNavigate>, userId: 
   // STATE 1: no profile row → create it, then disclaimer
   if (!data) {
     await supabase.from("profiles").insert({ user_id: userId });
-    navigate({ to: "/disclaimer" });
+    navigate({ to: "/disclaimer", replace: true });
     return;
   }
 
   // STATE 3: fully onboarded
   if (data.profile_completed_at) {
-    navigate({ to: "/dashboard" });
+    navigate({ to: "/dashboard", replace: true });
     return;
   }
 
   // STATE 2: profile exists, onboarding incomplete
   if (data.disclaimer_accepted_at) {
-    navigate({ to: "/onboarding" });
+    navigate({ to: "/onboarding", replace: true });
   } else {
-    navigate({ to: "/disclaimer" });
+    navigate({ to: "/disclaimer", replace: true });
   }
 }
 
@@ -43,17 +43,30 @@ function AuthScreen() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState<"google" | "apple" | null>(null);
   const [checking, setChecking] = useState(true);
+  const redirectingRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
+
+    const handleUser = (userId: string) => {
+      if (redirectingRef.current) return;
+      redirectingRef.current = true;
+      routeAfterAuth(navigate, userId);
+    };
+
+    // Primary path: trust the persisted session once it's loaded.
     supabase.auth.getUser().then(({ data }) => {
       if (!mounted) return;
-      if (data.user) routeAfterAuth(navigate, data.user.id);
+      if (data.user) handleUser(data.user.id);
       else setChecking(false);
     });
+
+    // Backup path: catches SIGNED_IN if it lands before getUser() resolves.
+    // The ref guard ensures routeAfterAuth runs exactly once per mount.
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN" && session?.user) routeAfterAuth(navigate, session.user.id);
+      if (event === "SIGNED_IN" && session?.user) handleUser(session.user.id);
     });
+
     return () => {
       mounted = false;
       sub.subscription.unsubscribe();
