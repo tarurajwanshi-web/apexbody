@@ -76,11 +76,23 @@ function AuthScreen() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-between bg-bg-0 px-6 py-12">
       <div className="flex-1 flex flex-col items-center justify-center w-full">
+        <div className="flex flex-col items-center mb-8">
+          <h1
+            className="text-[34px] font-bold text-white leading-none"
+            style={{ letterSpacing: "4px" }}
+          >
+            APEX
+          </h1>
+          <p className="mt-2 text-[11px] font-medium tracking-[0.2em] uppercase text-text-tertiary">
+            Shield + Intelligence
+          </p>
+        </div>
         <DemoRing />
-        <p className="mt-10 text-center text-[15px] text-text-secondary max-w-[280px] leading-relaxed">
-          Not just a number.<br />Know how much to trust it.
+        <p className="mt-10 text-center text-[15px] text-text-secondary max-w-[300px] leading-relaxed">
+          Confidence isn't given.<br />It's calculated.
         </p>
       </div>
+
 
       <div className="w-full max-w-sm">
         <button
