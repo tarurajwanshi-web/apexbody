@@ -32,6 +32,8 @@ function WorkoutsPage() {
   const [weekLogs, setWeekLogs] = useState<SetLog[]>([]);
   const [cueEx, setCueEx] = useState<Exercise | null>(null);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  const [preCheckOpen, setPreCheckOpen] = useState(false);
+  const [sessionStarted, setSessionStarted] = useState(false);
   const todayIdx = todayMondayIndex();
 
   const loadAll = useCallback(async () => {
