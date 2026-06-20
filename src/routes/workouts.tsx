@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState, useCallback, type ReactNode } from "react";
-import { ChevronLeft, Lock, Check, Dumbbell, Sparkles, X, Info } from "lucide-react";
+import { useEffect, useState, useCallback, useMemo, type ReactNode } from "react";
+import { ChevronLeft, Lock, Check, Dumbbell, Sparkles, X, Info, ChevronDown, ChevronUp } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { BottomNav } from "@/components/BottomNav";
 import { AICard } from "@/components/AIOrb";
@@ -21,7 +21,6 @@ const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Satu
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 function todayMondayIndex(): number {
-  // Monday=0..Sunday=6
   const js = new Date().getDay(); // 0 Sun .. 6 Sat
   return (js + 6) % 7;
 }
@@ -32,6 +31,7 @@ function WorkoutsPage() {
   const [setLogs, setSetLogs] = useState<SetLog[]>([]);
   const [weekLogs, setWeekLogs] = useState<SetLog[]>([]);
   const [cueEx, setCueEx] = useState<Exercise | null>(null);
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const todayIdx = todayMondayIndex();
 
   const loadAll = useCallback(async () => {
@@ -48,6 +48,19 @@ function WorkoutsPage() {
         .limit(1)
         .maybeSingle();
       setPlan(planRow as any);
+
+      // If any exercise on this plan is missing a cue, fire a one-time backfill.
+      const days = (planRow as any)?.plan_data?.days ?? [];
+      const missingCues = days.some((d: DayPlan) =>
+        !d.rest && (d.exercises ?? []).some((ex) => !ex.cue || !ex.cue.trim()),
+      );
+      if (missingCues) {
+        void supabase.functions
+          .invoke("backfill-cues", { body: { user_id: uid } })
+          .then(({ data }) => { if (data?.ok) void reloadPlanOnly(uid); })
+          .catch(() => {});
+      }
+
       const { data: logs } = await supabase
         .from("workout_set_logs")
         .select("*")
@@ -55,7 +68,6 @@ function WorkoutsPage() {
         .eq("entry_date", todayISO());
       setSetLogs((logs as any) ?? []);
 
-      // Pull this week's logs (Monday → today) for the volume nudge.
       const weekStart = new Date();
       weekStart.setDate(weekStart.getDate() - todayMondayIndex());
       const weekStartISO = weekStart.toISOString().slice(0, 10);
@@ -71,9 +83,30 @@ function WorkoutsPage() {
     }
   }, []);
 
+  const reloadPlanOnly = useCallback(async (uid: string) => {
+    const { data: planRow } = await supabase
+      .from("weekly_plans")
+      .select("*")
+      .eq("user_id", uid)
+      .order("week_start_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (planRow) setPlan(planRow as any);
+  }, []);
+
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  const todaysDay: DayPlan | null = plan?.plan_data?.days?.[todayIdx] ?? null;
+  // Build display order: today first, then tomorrow..end-of-week, then earlier days of this week.
+  const orderedDays = useMemo(() => {
+    const days = plan?.plan_data?.days ?? [];
+    if (days.length === 0) return [] as { idx: number; day: DayPlan }[];
+    const order: number[] = [];
+    for (let offset = 0; offset < 7; offset++) {
+      const idx = (todayIdx + offset) % 7;
+      if (days[idx]) order.push(idx);
+    }
+    return order.map((idx) => ({ idx, day: days[idx] }));
+  }, [plan, todayIdx]);
 
   return (
     <div className="min-h-screen bg-bg-1 pb-32">
@@ -100,17 +133,22 @@ function WorkoutsPage() {
           <LockBanner plan={plan} />
           <VolumeNudge plan={plan} weekLogs={weekLogs} todayIdx={todayIdx} />
           <div className="mx-5 mt-4 space-y-3">
-            {plan.plan_data?.days?.map((d, i) => (
-              <DayCard
-                key={i}
-                dayIdx={i}
-                day={d}
-                isToday={i === todayIdx}
-                setLogs={setLogs}
-                onLogged={loadAll}
-                onShowCue={(ex) => setCueEx(ex)}
-              />
-            ))}
+            {orderedDays.map(({ idx, day }, position) => {
+              const isToday = position === 0;
+              return (
+                <DayCard
+                  key={idx}
+                  dayIdx={idx}
+                  day={day}
+                  isToday={isToday}
+                  expanded={isToday || !!expanded[idx]}
+                  onToggle={isToday ? undefined : () => setExpanded((m) => ({ ...m, [idx]: !m[idx] }))}
+                  setLogs={setLogs}
+                  onLogged={loadAll}
+                  onShowCue={(ex) => setCueEx(ex)}
+                />
+              );
+            })}
           </div>
         </>
       )}
@@ -123,7 +161,6 @@ function WorkoutsPage() {
 }
 
 function VolumeNudge({ plan, weekLogs, todayIdx }: { plan: WeeklyPlan; weekLogs: SetLog[]; todayIdx: number }) {
-  // Sum planned sets across days 0..todayIdx; sum completed sets logged so far.
   const days = plan.plan_data?.days ?? [];
   let plannedThroughToday = 0;
   for (let i = 0; i <= todayIdx; i++) {
@@ -134,7 +171,6 @@ function VolumeNudge({ plan, weekLogs, todayIdx }: { plan: WeeklyPlan; weekLogs:
   const completed = weekLogs.filter((l) => l.completed).length;
   if (plannedThroughToday === 0) return null;
   const gap = plannedThroughToday - completed;
-  // Find next non-rest training day after today for the suggestion.
   let nextDayLabel = "your next session";
   for (let i = todayIdx + 1; i < days.length; i++) {
     if (!days[i].rest) { nextDayLabel = days[i].day_name || DAY_NAMES[i]; break; }
@@ -172,7 +208,7 @@ function CueSheet({ exercise, onClose }: { exercise: Exercise; onClose: () => vo
             <p className="text-[13px] leading-relaxed">
               {exercise.cue && exercise.cue.trim().length > 0
                 ? exercise.cue
-                : "Guidance not available for this plan. New plans generated from now on will include execution cues."}
+                : "Guidance is being generated for this plan. Check back in a moment."}
             </p>
           </div>
         </div>
@@ -199,22 +235,47 @@ function LockBanner({ plan }: { plan: WeeklyPlan }) {
 }
 
 function DayCard({
-  dayIdx, day, isToday, setLogs, onLogged, onShowCue,
-}: { dayIdx: number; day: DayPlan; isToday: boolean; setLogs: SetLog[]; onLogged: () => void; onShowCue: (ex: Exercise) => void }) {
+  dayIdx, day, isToday, expanded, onToggle, setLogs, onLogged, onShowCue,
+}: {
+  dayIdx: number; day: DayPlan; isToday: boolean;
+  expanded: boolean; onToggle?: () => void;
+  setLogs: SetLog[]; onLogged: () => void; onShowCue: (ex: Exercise) => void;
+}) {
   const label = day.day_name || DAY_NAMES[dayIdx] || `Day ${dayIdx + 1}`;
+  const totalSets = day.rest ? 0 : (day.exercises ?? []).reduce((s, ex) => s + ex.sets, 0);
+  const titleText = day.rest ? "Rest day" : (day.session_name ?? "Training");
+  const collapsedHint = day.rest ? "Rest day" : `${titleText} — ${totalSets} sets`;
+
+  // Collapsed header (tap to expand for non-today days).
+  const Header = (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-[10px] uppercase tracking-wider text-text-tertiary">
+          {label}{isToday && " · Today"}
+        </p>
+        {expanded ? (
+          <p className="mt-1 font-semibold text-[15px] truncate">{titleText}</p>
+        ) : (
+          <p className="mt-1 text-[13px] text-text-secondary truncate">{collapsedHint}</p>
+        )}
+      </div>
+      {onToggle && (
+        <span className="text-text-tertiary shrink-0">
+          {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+        </span>
+      )}
+    </div>
+  );
+
   return (
     <div className={`rounded-2xl border p-4 ${isToday ? "border-ai/40" : "border-white/5"} bg-bg-2`}>
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-text-tertiary">{label}{isToday && " · Today"}</p>
-          <p className="mt-1 font-semibold text-[15px]">
-            {day.rest ? "Rest day" : (day.session_name ?? "Training")}
-          </p>
-        </div>
-        {day.rest && <span className="text-xs text-text-tertiary">—</span>}
-      </div>
+      {onToggle ? (
+        <button type="button" onClick={onToggle} className="w-full text-left active:opacity-80">
+          {Header}
+        </button>
+      ) : Header}
 
-      {!day.rest && day.exercises?.length > 0 && (
+      {expanded && !day.rest && day.exercises?.length > 0 && (
         <ul className="mt-3 space-y-1.5">
           {day.exercises.map((ex, i) => (
             <li key={i}>
@@ -317,7 +378,6 @@ function SetRow({
         .upsert(row, { onConflict: "user_id,entry_date,exercise_name,set_number" });
       if (error) throw error;
       onLogged();
-      // After save, check if today's session is fully complete → write summary strain.
       if (completed) await maybeWriteTrainingSummary(dayPlan, allLogs, row);
     } catch (e: any) {
       toast.error(e?.message ?? "Save failed");
@@ -352,20 +412,16 @@ function SetRow({
   );
 }
 
-// When all sets of today's session are marked completed, derive a simple strain value
-// from completed volume and upsert into shield_training_logs for today. The existing
-// Shield webhook on that table handles re-scoring.
 async function maybeWriteTrainingSummary(
   dayPlan: DayPlan,
-  priorLogs: SetLog[],
-  justSaved: SetLog,
+  _priorLogs: SetLog[],
+  _justSaved: SetLog,
 ) {
   const { data: u } = await supabase.auth.getUser();
   const uid = u.user?.id;
   if (!uid) return;
   const date = todayISO();
 
-  // Re-fetch fresh logs for today to be accurate.
   const { data: logs } = await supabase
     .from("workout_set_logs")
     .select("*")
@@ -377,8 +433,6 @@ async function maybeWriteTrainingSummary(
   const totalCompleted = list.filter((l) => l.completed).length;
   if (totalCompleted < totalRequired) return;
 
-  // Strain estimate: 0.5 per completed set + small bonus for weighted volume.
-  // Clamped to 0..21 (Whoop-ish scale) — purely additive, separate from Shield scoring math.
   let volume = 0;
   for (const l of list) {
     if (!l.completed) continue;
