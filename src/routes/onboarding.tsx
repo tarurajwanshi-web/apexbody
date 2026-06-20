@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import {
   ChevronLeft,
   Trophy,
@@ -12,6 +13,7 @@ import {
   Lock as LockIcon,
 } from "lucide-react";
 import { useProfile, type Profile } from "@/lib/store";
+import { setInputPathPreference } from "@/lib/shield.functions";
 
 export const Route = createFileRoute("/onboarding")({
   component: Onboarding,
