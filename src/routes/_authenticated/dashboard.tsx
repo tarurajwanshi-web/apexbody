@@ -1,11 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Sparkles, Dumbbell, Camera, Apple, Brain, Home as HomeIcon, Flame } from "lucide-react";
+import { Sparkles, Dumbbell, Camera, Apple, Brain, Home as HomeIcon, Flame, Heart } from "lucide-react";
 import { useProfile } from "@/lib/store";
 import { generateDailyInsight } from "@/lib/coach.functions";
-import { getTodayReadiness, type TodayReadiness } from "@/lib/shield.functions";
-import { RecoveryLogModal, MealLogModal, WorkoutLogModal } from "@/components/LogModals";
+import { getTodayReadiness, getActivityWeek, type TodayReadiness, type ActivityWeek } from "@/lib/shield.functions";
+import { RecoveryLogModal, MealLogModal } from "@/components/LogModals";
 import { MealHistoryList } from "@/components/MealHistoryList";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
 
@@ -47,13 +47,15 @@ function Dashboard() {
   const [readiness, setReadiness] = useState<TodayReadiness>(null);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [mealOpen, setMealOpen] = useState(false);
-  const [workoutOpen, setWorkoutOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const fn = useServerFn(generateDailyInsight);
   const fetchReadiness = useServerFn(getTodayReadiness);
   const fetchMacros = useServerFn(getTodayMacroSummary);
+  const fetchActivity = useServerFn(getActivityWeek);
   const [macros, setMacros] = useState<MacroSummary | null>(null);
+  const [activity, setActivity] = useState<ActivityWeek | null>(null);
   const reloadMacros = () => { fetchMacros().then(setMacros).catch(() => {}); };
+  const reloadActivity = () => { fetchActivity().then(setActivity).catch(() => {}); };
 
   const reloadReadiness = () => {
     fetchReadiness().then(setReadiness).catch(() => setReadiness(null));
@@ -65,6 +67,7 @@ function Dashboard() {
     setGreet(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
     reloadReadiness();
     reloadMacros();
+    reloadActivity();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
