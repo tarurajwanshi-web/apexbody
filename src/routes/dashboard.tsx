@@ -359,8 +359,21 @@ function Dashboard() {
   );
 }
 
+function ConfidenceBadge({ level }: { level: "HIGH" | "MEDIUM" | "LOW" }) {
+  const color = level === "HIGH" ? "#10B981" : level === "MEDIUM" ? "#F59E0B" : "#8892A4";
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase"
+      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color, letterSpacing: "1px" }}
+    >
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+      {level}
+    </span>
+  );
+}
+
 function MetricRow({
-  color, name, value, trend, note, last,
+  color, name, value, trend, note, last, hideNote,
 }: {
   color: string;
   name: string;
@@ -368,6 +381,7 @@ function MetricRow({
   trend: "up" | "stable" | "down";
   note: string;
   last?: boolean;
+  hideNote?: boolean;
 }) {
   const trendChar = trend === "up" ? "↑" : trend === "down" ? "↓" : "→";
   const trendColor = trend === "up" ? "#10B981" : trend === "down" ? "#EF4444" : "#F59E0B";
@@ -384,7 +398,7 @@ function MetricRow({
           {trendChar}
         </span>
       </div>
-      <p className="ml-[18px] mt-1 text-[11px] text-text-tertiary">{note}</p>
+      {!hideNote && note && <p className="ml-[18px] mt-1 text-[11px] text-text-tertiary">{note}</p>}
     </div>
   );
 }
