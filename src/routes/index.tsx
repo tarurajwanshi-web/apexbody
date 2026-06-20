@@ -2,10 +2,10 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
-import { AIOrb } from "@/components/AIOrb";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
+  ssr: false,
   head: () => ({ meta: [{ title: "Sign in — APEX" }] }),
   component: AuthScreen,
 });
@@ -13,11 +13,14 @@ export const Route = createFileRoute("/")({
 async function routeAfterAuth(navigate: ReturnType<typeof useNavigate>, userId: string) {
   const { data } = await supabase
     .from("profiles")
-    .select("id")
+    .select("profile_completed_at")
     .eq("user_id", userId)
     .maybeSingle();
-  if (data) navigate({ to: "/dashboard" });
-  else navigate({ to: "/onboarding" });
+  if (data?.profile_completed_at) {
+    navigate({ to: "/dashboard" });
+  } else {
+    navigate({ to: "/disclaimer" });
+  }
 }
 
 function AuthScreen() {
@@ -29,16 +32,11 @@ function AuthScreen() {
     let mounted = true;
     supabase.auth.getUser().then(({ data }) => {
       if (!mounted) return;
-      if (data.user) {
-        routeAfterAuth(navigate, data.user.id);
-      } else {
-        setChecking(false);
-      }
+      if (data.user) routeAfterAuth(navigate, data.user.id);
+      else setChecking(false);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN" && session?.user) {
-        routeAfterAuth(navigate, session.user.id);
-      }
+      if (event === "SIGNED_IN" && session?.user) routeAfterAuth(navigate, session.user.id);
     });
     return () => {
       mounted = false;
@@ -59,33 +57,20 @@ function AuthScreen() {
     if (result.redirected) return;
   };
 
-  if (checking) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-bg-0">
-        <AIOrb size={64} />
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen flex flex-col items-center justify-between bg-bg-0 px-6 py-12">
-      <div className="flex flex-col items-center mt-16">
-        <AIOrb size={88} />
-        <h1 className="mt-8 text-4xl font-extrabold tracking-[0.3em]">APEX</h1>
-        <p className="mt-2 text-[11px] uppercase tracking-[0.25em] text-text-tertiary">
-          Adaptive Performance Coach
+      <div className="flex-1 flex flex-col items-center justify-center w-full">
+        <AmbientRing />
+        <p className="mt-10 text-center text-[15px] text-text-secondary max-w-[280px] leading-relaxed">
+          Not just a number.<br />Know how much to trust it.
         </p>
       </div>
 
       <div className="w-full max-w-sm">
-        <p className="text-center text-sm text-text-secondary mb-6">
-          Train, eat and recover — guided by your data.
-        </p>
-
         <button
           onClick={() => signIn("google")}
-          disabled={loading !== null}
-          className="w-full flex items-center justify-center gap-3 rounded-2xl bg-white text-black py-3.5 text-sm font-semibold disabled:opacity-60 mb-3"
+          disabled={loading !== null || checking}
+          className="w-full flex items-center justify-center gap-3 rounded-2xl bg-white text-black py-3.5 text-sm font-semibold disabled:opacity-60 mb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-bg-0"
         >
           <GoogleIcon />
           {loading === "google" ? "Connecting…" : "Continue with Google"}
@@ -93,8 +78,8 @@ function AuthScreen() {
 
         <button
           onClick={() => signIn("apple")}
-          disabled={loading !== null}
-          className="w-full flex items-center justify-center gap-3 rounded-2xl bg-bg-2 border border-white/10 py-3.5 text-sm font-semibold disabled:opacity-60"
+          disabled={loading !== null || checking}
+          className="w-full flex items-center justify-center gap-3 rounded-2xl bg-bg-2 border border-white/10 py-3.5 text-sm font-semibold disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-bg-0"
         >
           <AppleIcon />
           {loading === "apple" ? "Connecting…" : "Continue with Apple"}
@@ -104,6 +89,43 @@ function AuthScreen() {
           By continuing you agree to our terms and privacy policy.
         </p>
       </div>
+    </div>
+  );
+}
+
+function AmbientRing() {
+  const size = 220;
+  const stroke = 10;
+  const r = size / 2 - stroke / 2;
+  const c = 2 * Math.PI * r;
+  // Incomplete/ambiguous arc — ~62% of circumference filled
+  const dash = c * 0.62;
+  return (
+    <div
+      className="relative ambient-ring"
+      style={{ width: size, height: size }}
+      aria-hidden
+    >
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="ambient-ring-rotate">
+        <defs>
+          <linearGradient id="ambientRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#7C3AED" />
+            <stop offset="55%" stopColor="#3B82F6" />
+            <stop offset="100%" stopColor="#10B981" />
+          </linearGradient>
+        </defs>
+        <circle
+          cx={size / 2} cy={size / 2} r={r}
+          fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={stroke}
+        />
+        <circle
+          cx={size / 2} cy={size / 2} r={r}
+          fill="none" stroke="url(#ambientRingGrad)" strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${c}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
     </div>
   );
 }
