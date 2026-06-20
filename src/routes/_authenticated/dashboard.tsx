@@ -48,7 +48,7 @@ function Dashboard() {
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [mealOpen, setMealOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const fn = useServerFn(generateDailyInsight);
+  const fn = useServerFn(getOrCreateDailyInsight);
   const fetchReadiness = useServerFn(getTodayReadiness);
   const fetchMacros = useServerFn(getTodayMacroSummary);
   const fetchActivity = useServerFn(getActivityWeek);
