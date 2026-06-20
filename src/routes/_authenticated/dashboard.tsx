@@ -7,6 +7,7 @@ import { generateDailyInsight } from "@/lib/coach.functions";
 import { getTodayReadiness, type TodayReadiness } from "@/lib/shield.functions";
 import { RecoveryLogModal, MealLogModal, WorkoutLogModal } from "@/components/LogModals";
 import { MealHistoryList } from "@/components/MealHistoryList";
+import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — APEX" }] }),
