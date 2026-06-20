@@ -99,7 +99,35 @@ function Coach() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unlockDate, setUnlockDate] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+
+  // Pull plan_unlock_date so we know whether to use personalized or general Q&A.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: u } = await supabase.auth.getUser();
+      if (!u.user) return;
+      const { data } = await supabase
+        .from("profiles")
+        .select("plan_unlock_date")
+        .eq("user_id", u.user.id)
+        .maybeSingle();
+      if (!cancelled) setUnlockDate(data?.plan_unlock_date ?? null);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const isLocked = (() => {
+    if (!unlockDate) return true; // no profile / unknown → treat as locked
+    return new Date(unlockDate).getTime() > Date.now();
+  })();
+
+  const daysUntilUnlock = (() => {
+    if (!unlockDate) return null;
+    const ms = new Date(unlockDate).getTime() - Date.now();
+    return Math.max(0, Math.ceil(ms / 86400000));
+  })();
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -108,27 +136,36 @@ function Coach() {
   const send = async (text: string) => {
     if (!text.trim() || loading) return;
     setError(null);
-    const context =
-      mode === "no-data"
-        ? `User just finished onboarding. No workouts, meals, or sleep logged yet. Goal: ${profile.goal ?? "recomposition"}, experience: ${profile.experience ?? "intermediate"}.`
-        : `User context — goal: ${profile.goal ?? "recomp"}, experience: ${profile.experience ?? "intermediate"}, APEX score: ${todayMetrics.apexScore}/100, recovery: ${todayMetrics.recovery}, HRV: ${todayMetrics.hrv}ms, sleep: ${todayMetrics.sleepHours}h, protein today: ${macroToday.p}g of ${macroTargets.p}g target, trained today: ${trainedToday ? "yes — " + todaySession.name : "no"}, days logged: ${loggedDays}.`;
 
     const userMsg: Msg = { role: "user", content: text };
     const next = [...messages, userMsg];
     setMessages(next);
     setInput("");
     setLoading(true);
+
     try {
-      const r = await fn({
-        data: {
-          messages: [
-            { role: "user", content: context },
-            { role: "assistant", content: "Understood. I'll use that data." },
-            ...next,
-          ],
-        },
-      });
-      setMessages((m) => [...m, { role: "assistant", content: r.content }]);
+      if (isLocked) {
+        // LOCKED → general Q&A edge function. NO personal data is sent.
+        const { data, error: invokeErr } = await supabase.functions.invoke("coach-general-qa", {
+          body: { messages: next.map((m) => ({ role: m.role, content: m.content })) },
+        });
+        if (invokeErr) throw new Error(invokeErr.message ?? "Coach unavailable");
+        const content = (data?.content as string) ?? "I couldn't generate a response.";
+        setMessages((m) => [...m, { role: "assistant", content }]);
+      } else {
+        // UNLOCKED → personalized coach (existing server fn).
+        const context = `User context — goal: ${profile.goal ?? "recomp"}, experience: ${profile.experience ?? "intermediate"}, APEX score: ${todayMetrics.apexScore}/100, recovery: ${todayMetrics.recovery}, HRV: ${todayMetrics.hrv}ms, sleep: ${todayMetrics.sleepHours}h, protein today: ${macroToday.p}g of ${macroTargets.p}g target, trained today: ${trainedToday ? "yes — " + todaySession.name : "no"}, days logged: ${loggedDays}.`;
+        const r = await fn({
+          data: {
+            messages: [
+              { role: "user", content: context },
+              { role: "assistant", content: "Understood. I'll use that data." },
+              ...next,
+            ],
+          },
+        });
+        setMessages((m) => [...m, { role: "assistant", content: r.content }]);
+      }
     } catch (e: any) {
       setError(e?.message ?? "Something went wrong.");
     } finally {
