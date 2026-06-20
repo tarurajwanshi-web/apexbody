@@ -187,16 +187,19 @@ function VolumeNudge({ plan, weekLogs, todayIdx }: { plan: WeeklyPlan; weekLogs:
 }
 
 function CueSheet({ exercise, onClose }: { exercise: Exercise; onClose: () => void }) {
+  // z-[120] sits above BottomNav (z-50) and standard modals (z-[100]).
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-end" onClick={onClose}>
+    <div className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center px-4" onClick={onClose}>
       <div
-        className="w-full max-w-[480px] mx-auto bg-bg-2 rounded-t-3xl border-t border-white/10 p-6 animate-fade-up"
+        className="w-full max-w-[420px] mx-auto bg-bg-2 rounded-3xl border border-white/10 p-6 animate-fade-up shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="h-1 w-12 rounded-full bg-white/20 mx-auto mb-4" />
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Exercise cue</p>
+            <div className="flex items-center gap-1.5">
+              <Zap size={12} className="text-ai" fill="currentColor" />
+              <p className="text-[10px] uppercase tracking-wider text-ai font-semibold">Exercise cue</p>
+            </div>
             <h3 className="mt-1 text-xl font-bold">{exercise.name}</h3>
             <p className="text-[12px] text-text-tertiary mt-0.5">{exercise.sets}×{exercise.reps} · {exercise.rest_seconds}s rest</p>
           </div>
