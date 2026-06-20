@@ -236,3 +236,62 @@ export const getTodayReadiness = createServerFn({ method: "GET" })
     if (!data) return null;
     return data as TodayReadiness;
   });
+
+// ---------- Activity / streak ----------
+//
+// "Activity" for a given date = at least one row exists for that date in ANY
+// of: shield_nutrition_logs, shield_training_logs, shield_manual_inputs,
+// workout_set_logs.
+// Returns: current consecutive streak ending today (0 if today not logged),
+// and last 7 days (oldest→today) booleans.
+
+export type ActivityWeek = {
+  streak: number;
+  last7: boolean[]; // length 7, index 0 = 6 days ago, index 6 = today
+};
+
+export const getActivityWeek = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<ActivityWeek> => {
+    const supa = context.supabase;
+    const uid = context.userId;
+    // Pull last 60 days of activity dates from all 4 sources.
+    const since = new Date();
+    since.setDate(since.getDate() - 60);
+    const sinceISO = since.toISOString().slice(0, 10);
+
+    const sources: Array<Promise<{ data: { entry_date: string }[] | null }>> = [
+      supa.from("shield_nutrition_logs").select("entry_date").eq("user_id", uid).gte("entry_date", sinceISO) as any,
+      supa.from("shield_training_logs").select("entry_date").eq("user_id", uid).gte("entry_date", sinceISO) as any,
+      supa.from("shield_manual_inputs").select("entry_date").eq("user_id", uid).gte("entry_date", sinceISO) as any,
+      supa.from("workout_set_logs").select("entry_date").eq("user_id", uid).gte("entry_date", sinceISO) as any,
+    ];
+    const results = await Promise.all(sources);
+    const days = new Set<string>();
+    for (const r of results) for (const row of r.data ?? []) if (row?.entry_date) days.add(row.entry_date);
+
+    const todayISO = new Date().toISOString().slice(0, 10);
+
+    // Streak ending today (or yesterday — grace so users don't lose streak
+    // before they've logged today's data).
+    let streak = 0;
+    const cursor = new Date();
+    // If today not logged, start counting from yesterday.
+    if (!days.has(todayISO)) cursor.setDate(cursor.getDate() - 1);
+    while (true) {
+      const iso = cursor.toISOString().slice(0, 10);
+      if (days.has(iso)) { streak++; cursor.setDate(cursor.getDate() - 1); }
+      else break;
+    }
+
+    // last 7 days oldest -> today
+    const last7: boolean[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      last7.push(days.has(d.toISOString().slice(0, 10)));
+    }
+
+    return { streak, last7 };
+  });
+

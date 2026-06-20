@@ -1,11 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { ChevronLeft, Sparkles, Send, CheckCircle2, Lock } from "lucide-react";
+import { ChevronLeft, Sparkles, Send, Lock, Flame } from "lucide-react";
 import { BottomNav } from "@/components/BottomNav";
 import { useProfile } from "@/lib/store";
-import { todayMetrics, todaySession, macroTargets, macroToday } from "@/lib/mock";
 import { askCoach } from "@/lib/coach.functions";
+import { getActivityWeek, type ActivityWeek } from "@/lib/shield.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/coach")({
@@ -15,111 +15,61 @@ export const Route = createFileRoute("/coach")({
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-type Mode = "no-data" | "ramping" | "trained-today" | "rest-day";
+// Generic, NOT personalized — these only appear in the locked state.
+const GENERIC_CHIPS = [
+  "How much protein do I need daily?",
+  "What's a good sleep routine?",
+  "How long should I rest between sets?",
+  "Best foods for recovery?",
+];
 
-function getLoggedDays(): number {
-  if (typeof window === "undefined") return 0;
-  return Number(localStorage.getItem("apex_logged_days") ?? "0");
-}
-function getTrainedToday(): boolean {
-  if (typeof window === "undefined") return false;
-  return localStorage.getItem("apex_trained_today") === "1";
-}
-function getJourneyDay(): number {
-  if (typeof window === "undefined") return 1;
-  const start = Number(localStorage.getItem("apex_journey_start") ?? Date.now());
-  return Math.max(1, Math.floor((Date.now() - start) / 86400000) + 1);
-}
+const UNLOCKED_CHIPS = [
+  "Should I push or recover today?",
+  "What should I eat?",
+  "Modify today's workout",
+  "Weekly assessment",
+];
+
+const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"]; // visual labels in locked streak strip
 
 function Coach() {
   const { profile } = useProfile();
-  const fn = useServerFn(askCoach);
+  const askFn = useServerFn(askCoach);
+  const fetchActivity = useServerFn(getActivityWeek);
 
-  const loggedDays = getLoggedDays();
-  const trainedToday = getTrainedToday();
+  const [unlockDate, setUnlockDate] = useState<string | null>(null);
+  const [unlockLoaded, setUnlockLoaded] = useState(false);
+  const [activity, setActivity] = useState<ActivityWeek | null>(null);
 
-  const mode: Mode = useMemo(() => {
-    if (loggedDays === 0) return "no-data";
-    if (loggedDays < 3) return "ramping";
-    return trainedToday ? "trained-today" : "rest-day";
-  }, [loggedDays, trainedToday]);
-
-  const callBadge =
-    mode === "trained-today"
-      ? { label: "RECOVER", color: "bg-sleep/20 text-sleep" }
-      : mode === "rest-day"
-      ? { label: "PUSH", color: "bg-success/20 text-success" }
-      : { label: "MAINTAIN", color: "bg-warning/20 text-warning" };
-
-  const contextText = (() => {
-    if (mode === "no-data")
-      return "I don't have enough data to coach you yet. Log a workout, meal, or your sleep and I'll start learning.";
-    if (mode === "ramping")
-      return `Your energy has been steady this week. Based on that + your training, here's what I think:`;
-    if (mode === "trained-today")
-      return `You did ${todaySession.name} today. Recovery is ${todayMetrics.recovery}. Prioritize sleep and protein tonight.`;
-    return `You rested yesterday. Recovery is ${todayMetrics.recovery} and HRV ${todayMetrics.hrv}ms. Push intensity today.`;
-  })();
-
-  const whyText = (() => {
-    if (mode === "trained-today")
-      return `Strain hit ${todayMetrics.strain} and you're ${macroTargets.p - macroToday.p}g short on protein. Eat, hydrate, sleep 8h.`;
-    if (mode === "rest-day")
-      return `HRV ${todayMetrics.hrv}ms is above your 7-day avg. Heavy compounds are green-lit.`;
-    return "";
-  })();
-
-  const journeyDay = getJourneyDay();
-  const isNewUser = journeyDay <= 5;
-  const daysLeft = Math.max(0, 5 - journeyDay + 1);
-
-  const chipSet: string[] = isNewUser
-    ? [
-        "What data do you need?",
-        "Set up my first workout",
-        "How does this work?",
-        "Log my sleep",
-      ]
-    : [
-        "Should I push or recover?",
-        "What should I eat?",
-        "Modify today's workout",
-        "Weekly assessment",
-      ];
-
-  const greeting = isNewUser
-    ? `I'm collecting data for the next ${daysLeft} day${daysLeft === 1 ? "" : "s"}. Log your workouts, snap your meals, and tell me how you feel. The more signal I get, the sharper your plan becomes.`
-    : mode === "trained-today"
-    ? `Nice work today, ${profile.name || "athlete"}.`
-    : `Ready when you are, ${profile.name || "athlete"}.`;
-
-  const [messages, setMessages] = useState<Msg[]>([
-    { role: "assistant", content: greeting },
-  ]);
+  const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [unlockDate, setUnlockDate] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  // Pull plan_unlock_date so we know whether to use personalized or general Q&A.
+  // Load profile (unlock date) + activity in parallel.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const { data: u } = await supabase.auth.getUser();
-      if (!u.user) return;
+      if (!u.user) { if (!cancelled) setUnlockLoaded(true); return; }
       const { data } = await supabase
         .from("profiles")
         .select("plan_unlock_date")
         .eq("user_id", u.user.id)
         .maybeSingle();
-      if (!cancelled) setUnlockDate(data?.plan_unlock_date ?? null);
+      if (!cancelled) {
+        setUnlockDate(data?.plan_unlock_date ?? null);
+        setUnlockLoaded(true);
+      }
     })();
+    fetchActivity().then((a) => { if (!cancelled) setActivity(a); }).catch(() => {});
     return () => { cancelled = true; };
-  }, []);
+  }, [fetchActivity]);
 
   const isLocked = (() => {
-    if (!unlockDate) return true; // no profile / unknown → treat as locked
+    if (!unlockLoaded) return true;
+    if (!unlockDate) return true;
     return new Date(unlockDate).getTime() > Date.now();
   })();
 
@@ -145,25 +95,17 @@ function Coach() {
 
     try {
       if (isLocked) {
-        // LOCKED → general Q&A edge function. NO personal data is sent.
+        // LOCKED → general Q&A edge function. NO personal data sent.
         const { data, error: invokeErr } = await supabase.functions.invoke("coach-general-qa", {
           body: { messages: next.map((m) => ({ role: m.role, content: m.content })) },
         });
         if (invokeErr) throw new Error(invokeErr.message ?? "Coach unavailable");
-        const content = (data?.content as string) ?? "I couldn't generate a response.";
+        if (data?.error) throw new Error(String(data.error));
+        const content = (data?.content as string) || "I couldn't generate a response. Try again in a moment.";
         setMessages((m) => [...m, { role: "assistant", content }]);
       } else {
-        // UNLOCKED → personalized coach (existing server fn).
-        const context = `User context — goal: ${profile.goal ?? "recomp"}, experience: ${profile.experience ?? "intermediate"}, APEX score: ${todayMetrics.apexScore}/100, recovery: ${todayMetrics.recovery}, HRV: ${todayMetrics.hrv}ms, sleep: ${todayMetrics.sleepHours}h, protein today: ${macroToday.p}g of ${macroTargets.p}g target, trained today: ${trainedToday ? "yes — " + todaySession.name : "no"}, days logged: ${loggedDays}.`;
-        const r = await fn({
-          data: {
-            messages: [
-              { role: "user", content: context },
-              { role: "assistant", content: "Understood. I'll use that data." },
-              ...next,
-            ],
-          },
-        });
+        // UNLOCKED → personalized coach (direct Anthropic via server fn).
+        const r = await askFn({ data: { messages: next } });
         setMessages((m) => [...m, { role: "assistant", content: r.content }]);
       }
     } catch (e: any) {
@@ -172,6 +114,8 @@ function Coach() {
       setLoading(false);
     }
   };
+
+  const chipSet = isLocked ? GENERIC_CHIPS : UNLOCKED_CHIPS;
 
   return (
     <div
@@ -184,91 +128,28 @@ function Coach() {
         <Link to="/settings" className="text-[11px] text-text-tertiary">Settings</Link>
       </header>
 
-      {/* LOCKED BADGE — personalized coaching gate */}
-      {isLocked && (
-        <div className="mx-5 mt-4 flex items-center gap-2 rounded-full border border-white/10 bg-bg-2 px-3 py-1.5 w-fit">
-          <Lock size={12} className="text-text-tertiary" />
-          <span className="text-[11px] font-semibold text-text-secondary">
-            {daysUntilUnlock != null
-              ? `Personalized coaching unlocks in ${daysUntilUnlock} day${daysUntilUnlock === 1 ? "" : "s"}`
-              : "Personalized coaching unlocks on Day 7"}
-          </span>
-        </div>
+      {isLocked ? (
+        <LockedHero
+          name={profile.name || "athlete"}
+          daysUntilUnlock={daysUntilUnlock}
+          activity={activity}
+        />
+      ) : (
+        <UnlockedHero name={profile.name || "athlete"} />
       )}
-
-      {/* SMART CONTEXT CARD */}
-      <div
-        className="mx-5 mt-5 rounded-2xl p-4 border"
-        style={{
-          background: "linear-gradient(135deg, rgba(124,58,237,0.06), rgba(59,130,246,0.06))",
-          borderColor: "rgba(124,58,237,0.25)",
-        }}
-      >
-        <div className="flex items-start gap-3">
-          <div className="h-8 w-8 rounded-full gradient-brand flex items-center justify-center shrink-0">
-            <Sparkles size={16} className="text-white" />
-          </div>
-          <div className="flex-1">
-            <p className="text-[11px] uppercase tracking-wider text-text-accent font-semibold">
-              APEX · {profile.coachName} Coach
-            </p>
-            <p className="mt-1 text-sm leading-relaxed text-text-primary">{contextText}</p>
-          </div>
-        </div>
-      </div>
-
-      {/* TODAY'S CALL CARD */}
-      <div
-        className="mx-5 mt-3 rounded-2xl bg-bg-2 p-4"
-        style={{ borderLeft: "4px solid var(--ai-purple)" }}
-      >
-        {mode === "no-data" || mode === "ramping" ? (
-          <>
-            <p className="text-[11px] uppercase tracking-wider text-text-tertiary font-semibold">
-              Unlock personalized coaching
-            </p>
-            <p className="mt-2 text-sm text-text-primary">
-              Log {Math.max(0, 3 - loggedDays)} more day{3 - loggedDays === 1 ? "" : "s"} of data to unlock personalized coaching.
-            </p>
-            <div className="mt-3 flex items-center gap-3">
-              <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                <div
-                  className="h-full gradient-brand transition-all"
-                  style={{ width: `${Math.min(100, (loggedDays / 5) * 100)}%` }}
-                />
-              </div>
-              <span className="text-[11px] text-text-secondary tabular-nums">
-                Day {loggedDays} of 5
-              </span>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] uppercase tracking-wider text-text-tertiary font-semibold">
-                Today's Call
-              </span>
-              <span className={`text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full ${callBadge.color}`}>
-                {callBadge.label}
-              </span>
-            </div>
-            <p className="mt-2 text-sm text-text-primary leading-relaxed">
-              <span className="text-text-secondary">Why: </span>
-              {whyText}
-            </p>
-          </>
-        )}
-      </div>
 
       {/* CONVERSATION */}
       <section className="mx-5 mt-5 flex-1 space-y-3">
+        {messages.length === 0 && (
+          <p className="text-[12px] text-text-tertiary text-center mt-2">
+            {isLocked ? "Ask a general fitness, nutrition, or sleep question below." : "What's on your mind?"}
+          </p>
+        )}
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
             <div
               className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
-                m.role === "user"
-                  ? "gradient-brand text-white"
-                  : "bg-bg-2 border border-white/5"
+                m.role === "user" ? "gradient-brand text-white" : "bg-bg-2 border border-white/5"
               }`}
             >
               {m.content}
@@ -278,7 +159,7 @@ function Coach() {
         {loading && (
           <div className="flex justify-start">
             <div className="rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "0ms" }} />
+              <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite" }} />
               <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "150ms" }} />
               <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "300ms" }} />
             </div>
@@ -295,7 +176,7 @@ function Coach() {
 
       <div className="h-4" />
 
-      {/* SMART CHIPS — horizontally scrollable above input */}
+      {/* SMART CHIPS */}
       <div className="fixed bottom-32 left-0 right-0 z-30 pointer-events-none">
         <div className="mx-auto max-w-[430px] px-5 pointer-events-auto">
           <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide">
@@ -316,7 +197,7 @@ function Coach() {
       {/* INPUT BAR */}
       <div className="fixed bottom-20 left-0 right-0 px-5 z-30">
         <div className="mx-auto max-w-[430px] flex items-center gap-2 rounded-full bg-bg-2 border border-white/10 px-4 py-2 backdrop-blur">
-          <CheckCircle2 size={16} className="text-success shrink-0" />
+          <Sparkles size={16} className="text-ai shrink-0" />
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -328,7 +209,6 @@ function Coach() {
             onClick={() => send(input)}
             disabled={loading || !input.trim()}
             className="h-8 w-8 rounded-full gradient-brand flex items-center justify-center text-white disabled:opacity-40"
-            style={{ backgroundColor: "#7C3AED" }}
           >
             <Send size={14} />
           </button>
@@ -337,5 +217,121 @@ function Coach() {
 
       <BottomNav />
     </div>
+  );
+}
+
+function LockedHero({
+  name, daysUntilUnlock, activity,
+}: { name: string; daysUntilUnlock: number | null; activity: ActivityWeek | null }) {
+  const last7 = activity?.last7 ?? Array.from({ length: 7 }, () => false);
+  const streak = activity?.streak ?? 0;
+
+  // Build labels: oldest..today. Index 6 = today.
+  const today = new Date();
+
+  return (
+    <>
+      <div className="mx-5 mt-4 flex items-center gap-2 rounded-full border border-white/10 bg-bg-2 px-3 py-1.5 w-fit">
+        <Lock size={12} className="text-text-tertiary" />
+        <span className="text-[11px] font-semibold text-text-secondary">
+          {daysUntilUnlock != null
+            ? `Personalized coaching unlocks in ${daysUntilUnlock} day${daysUntilUnlock === 1 ? "" : "s"}`
+            : "Personalized coaching unlocks soon"}
+        </span>
+      </div>
+
+      <section
+        className="mx-5 mt-4 rounded-2xl p-5 border"
+        style={{
+          background: "linear-gradient(135deg, rgba(124,58,237,0.10), rgba(59,130,246,0.08))",
+          borderColor: "rgba(124,58,237,0.25)",
+        }}
+      >
+        <div className="flex items-start gap-3">
+          <div className="h-10 w-10 rounded-full gradient-brand flex items-center justify-center shrink-0">
+            <Sparkles size={18} className="text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] uppercase tracking-wider text-text-accent font-semibold">
+              APEX Coach
+            </p>
+            <p className="mt-1 text-sm leading-relaxed text-text-primary">
+              Hey {name}, I'm collecting baseline data so my coaching is genuinely personalized — not generic. Keep logging recovery, meals, and workouts each day.
+            </p>
+          </div>
+        </div>
+
+        {/* Streak strip — last 7 days */}
+        <div className="mt-5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Last 7 days</p>
+            <span className="inline-flex items-center gap-1 text-[11px] text-text-secondary">
+              <Flame size={11} className="text-warning" />
+              <span className="tabular-nums">{streak}</span> day streak
+            </span>
+          </div>
+          <div className="grid grid-cols-7 gap-2">
+            {last7.map((logged, i) => {
+              const d = new Date(today);
+              d.setDate(d.getDate() - (6 - i));
+              const dow = (d.getDay() + 6) % 7; // 0=Mon..6=Sun
+              const letter = DAY_LETTERS[dow];
+              const isTodayCell = i === 6;
+              return (
+                <div key={i} className="flex flex-col items-center gap-1">
+                  <div
+                    className="h-9 w-9 rounded-xl flex items-center justify-center text-[11px] font-bold transition"
+                    style={
+                      logged
+                        ? {
+                            background: "linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%)",
+                            color: "white",
+                            boxShadow: "0 0 10px rgba(124,58,237,0.4)",
+                          }
+                        : {
+                            background: "rgba(255,255,255,0.04)",
+                            border: "1px solid rgba(255,255,255,0.08)",
+                            color: "#6B7280",
+                          }
+                    }
+                  >
+                    {letter}
+                  </div>
+                  {isTodayCell && (
+                    <span className="text-[9px] text-text-accent uppercase tracking-wider font-semibold">Today</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function UnlockedHero({ name }: { name: string }) {
+  return (
+    <section
+      className="mx-5 mt-5 rounded-2xl p-4 border"
+      style={{
+        background: "linear-gradient(135deg, rgba(124,58,237,0.06), rgba(59,130,246,0.06))",
+        borderColor: "rgba(124,58,237,0.25)",
+      }}
+    >
+      <div className="flex items-start gap-3">
+        <div className="h-8 w-8 rounded-full gradient-brand flex items-center justify-center shrink-0">
+          <Sparkles size={16} className="text-white" />
+        </div>
+        <div className="flex-1">
+          <p className="text-[11px] uppercase tracking-wider text-text-accent font-semibold">
+            APEX Coach
+          </p>
+          <p className="mt-1 text-sm leading-relaxed text-text-primary">
+            Ready when you are, {name}. Ask me anything about your training, recovery, or nutrition.
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
