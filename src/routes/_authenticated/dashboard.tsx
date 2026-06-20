@@ -510,3 +510,54 @@ function NavIcon({
     </button>
   );
 }
+
+function MacrosCard({ macros }: { macros: MacroSummary | null }) {
+  const target = macros?.target_calories ?? null;
+  const consumed = macros?.consumed_calories ?? 0;
+  const hasAny = (macros?.meals_estimated ?? 0) > 0;
+  const pct = target ? Math.min(100, Math.round((consumed / target) * 100)) : 0;
+
+  return (
+    <div className="rounded-2xl p-5" style={{ background: "#0F1524", border: "1px solid rgba(255,255,255,0.06)" }}>
+      <div className="flex items-center justify-between">
+        <h3 className="text-[16px] font-bold text-white">Macros</h3>
+        <span className="text-[10px] uppercase tracking-wider text-text-tertiary">Estimated</span>
+      </div>
+
+      {!hasAny ? (
+        <p className="mt-3 text-[13px] text-text-secondary">Log a meal to see your progress.</p>
+      ) : (
+        <>
+          <p className="mt-3 text-[14px] text-text-primary">
+            <span className="text-2xl font-semibold tabular-nums">{consumed.toLocaleString()}</span>
+            <span className="text-text-tertiary"> of {target ? target.toLocaleString() : "—"} kcal</span>
+          </p>
+          {target && (
+            <div className="mt-3 h-1.5 w-full rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+              <div className="h-full gradient-brand transition-all" style={{ width: `${pct}%` }} />
+            </div>
+          )}
+          <div className="mt-4 grid grid-cols-3 gap-3 text-[12px]">
+            <MacroLine label="Protein" v={macros!.consumed_protein_g} t={macros!.target_protein_g} color="#F59E0B" />
+            <MacroLine label="Carbs"   v={macros!.consumed_carbs_g}   t={macros!.target_carbs_g}   color="#10B981" />
+            <MacroLine label="Fat"     v={macros!.consumed_fat_g}     t={macros!.target_fat_g}     color="#3B82F6" />
+          </div>
+          <p className="mt-3 text-[11px] text-text-tertiary">
+            Estimates from photo analysis — useful for trends, not precise tracking.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MacroLine({ label, v, t, color }: { label: string; v: number; t: number | null; color: string }) {
+  return (
+    <div className="rounded-xl bg-bg-3/30 p-2.5">
+      <p className="text-[10px] text-text-tertiary uppercase tracking-wider">{label}</p>
+      <p className="mt-1 text-[13px] font-semibold tabular-nums" style={{ color }}>
+        {Math.round(v)}<span className="text-text-tertiary text-[11px]"> / {t ? Math.round(t) : "—"}g</span>
+      </p>
+    </div>
+  );
+}
