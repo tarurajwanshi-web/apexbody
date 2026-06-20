@@ -355,6 +355,14 @@ function Dashboard() {
           </button>
         </div>
 
+        {/* Today's meals — edit / delete */}
+        <MealHistoryList
+          onMutationStart={captureScore}
+          onMutationDone={pollScoreChange}
+        />
+
+
+
         {/* Today's Plan */}
         <div className="rounded-2xl p-5" style={{ background: "#0F1524", border: "1px solid rgba(255,255,255,0.06)" }}>
           <div className="flex items-center justify-between">
