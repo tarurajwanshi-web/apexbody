@@ -14,6 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      body_scan_photos: {
+        Row: {
+          captured_at: string
+          created_at: string
+          id: string
+          photo_url: string
+          user_id: string
+        }
+        Insert: {
+          captured_at?: string
+          created_at?: string
+          id?: string
+          photo_url: string
+          user_id: string
+        }
+        Update: {
+          captured_at?: string
+          created_at?: string
+          id?: string
+          photo_url?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      daily_ai_insights: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          insight_date: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          insight_date: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          insight_date?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       daily_macro_targets: {
         Row: {
           bmr: number
@@ -55,6 +103,30 @@ export type Database = {
           target_protein_g?: number
           tdee?: number
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      pre_session_checks: {
+        Row: {
+          created_at: string
+          entry_date: string
+          id: string
+          session_readiness: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          entry_date: string
+          id?: string
+          session_readiness: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          entry_date?: string
+          id?: string
+          session_readiness?: number
           user_id?: string
         }
         Relationships: []
@@ -140,6 +212,7 @@ export type Database = {
           input_path: string | null
           nudge_message: string | null
           pillar_breakdown: Json
+          pre_session_adjustment: number
           score_date: string
           user_id: string
         }
@@ -154,6 +227,7 @@ export type Database = {
           input_path?: string | null
           nudge_message?: string | null
           pillar_breakdown: Json
+          pre_session_adjustment?: number
           score_date: string
           user_id: string
         }
@@ -168,6 +242,7 @@ export type Database = {
           input_path?: string | null
           nudge_message?: string | null
           pillar_breakdown?: Json
+          pre_session_adjustment?: number
           score_date?: string
           user_id?: string
         }
