@@ -154,11 +154,12 @@ function ProfileSetup() {
       </div>
 
       <main className="px-5 mt-8 max-w-[480px] mx-auto">
-        {step === 1 && <GoalStep value={draft.goal} onChange={(goal) => patch({ goal })} />}
-        {step === 2 && <DaysStep value={draft.days} onChange={(days) => patch({ days })} />}
-        {step === 3 && <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />}
-        {step === 4 && <BodyStep draft={draft} patch={patch} />}
-        {step === 5 && <ReviewStep draft={draft} />}
+        {step === 1 && <AboutYouStep age={draft.age} sex={draft.sex} onAge={(age) => patch({ age })} onSex={(sex) => patch({ sex })} />}
+        {step === 2 && <GoalStep value={draft.goal} onChange={(goal) => patch({ goal })} />}
+        {step === 3 && <DaysStep value={draft.days} onChange={(days) => patch({ days })} />}
+        {step === 4 && <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />}
+        {step === 5 && <BodyStep draft={draft} patch={patch} />}
+        {step === 6 && <ReviewStep draft={draft} />}
       </main>
 
       <footer
