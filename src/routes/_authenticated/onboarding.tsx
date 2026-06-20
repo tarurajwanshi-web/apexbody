@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { ChevronLeft, Check, Trophy, Flame, Dumbbell, Zap, Activity } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronLeft, Check, Trophy, Flame, Dumbbell, Zap, Activity, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
