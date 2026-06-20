@@ -282,11 +282,20 @@ function DayCard({
               <button
                 type="button"
                 onClick={() => onShowCue(ex)}
-                className="w-full text-[13px] text-text-secondary flex justify-between items-center py-0.5 active:opacity-70"
+                className="w-full text-[13px] text-text-secondary flex justify-between items-center py-1 active:opacity-70"
               >
-                <span className="flex items-center gap-1.5 text-left">
-                  {ex.name}
-                  <Info size={11} className="text-text-tertiary shrink-0" />
+                <span className="flex items-center gap-2 text-left">
+                  <span
+                    className="inline-flex items-center justify-center h-5 w-5 rounded-full shrink-0"
+                    style={{
+                      background: "linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%)",
+                      boxShadow: "0 0 8px rgba(124,58,237,0.35)",
+                    }}
+                    aria-label="Tap for cue"
+                  >
+                    <Zap size={11} className="text-white" fill="white" strokeWidth={2.5} />
+                  </span>
+                  <span>{ex.name}</span>
                 </span>
                 <span className="text-text-tertiary tabular-nums">{ex.sets}×{ex.reps}</span>
               </button>
