@@ -396,9 +396,10 @@ function Dashboard() {
 
       <DashboardNav onCamera={() => setMealOpen(true)} />
 
-      <RecoveryLogModal open={recoveryOpen} onClose={() => setRecoveryOpen(false)} onSaved={() => { showToast("Recovery logged"); reloadReadiness(); }} />
-      <MealLogModal open={mealOpen} onClose={() => setMealOpen(false)} onSaved={() => showToast("Meal logged")} />
-      <WorkoutLogModal open={workoutOpen} onClose={() => setWorkoutOpen(false)} onSaved={() => showToast("Workout logged")} />
+      <RecoveryLogModal open={recoveryOpen} onClose={() => setRecoveryOpen(false)} onSaved={() => { captureScore(); showToast("Recovery logged"); reloadReadiness(); pollScoreChange(); }} />
+      <MealLogModal open={mealOpen} onClose={() => setMealOpen(false)} onSaved={() => { captureScore(); showToast("Meal logged"); pollScoreChange(); }} />
+      <WorkoutLogModal open={workoutOpen} onClose={() => setWorkoutOpen(false)} onSaved={() => { captureScore(); showToast("Workout logged"); pollScoreChange(); }} />
+
 
       {toast && (
         <div
