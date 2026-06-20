@@ -225,6 +225,24 @@ function Dashboard() {
           </div>
         </div>
 
+        {/* Pre-workout readiness adjustment note */}
+        {readiness?.pre_session_adjustment != null && Number(readiness.pre_session_adjustment) < 0 && (
+          <div
+            className="rounded-2xl p-3 flex items-start gap-2"
+            style={{
+              background: "rgba(245,158,11,0.08)",
+              border: "1px solid rgba(245,158,11,0.25)",
+            }}
+          >
+            <Sparkles size={14} className="text-warning shrink-0 mt-0.5" />
+            <p className="text-[12px] text-text-primary leading-snug">
+              Pre-workout check flagged low readiness - today's score reflects this.
+            </p>
+          </div>
+        )}
+
+
+
         {/* APEX Score Card */}
         <button
           onClick={() => setExpanded((v) => !v)}
