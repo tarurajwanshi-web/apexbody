@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Sparkles, Dumbbell, Camera, Apple, Brain, Home as HomeIcon, Flame } from "lucide-react";
 import { useProfile } from "@/lib/store";
 import { generateDailyInsight } from "@/lib/coach.functions";
+import { getTodayReadiness, type TodayReadiness } from "@/lib/shield.functions";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — APEX" }] }),
@@ -24,17 +25,33 @@ function getDayOfJourney(): number {
   return Math.max(1, days);
 }
 
+const PILLAR_META: { key: keyof NonNullable<TodayReadiness>["pillar_breakdown"] & string; label: string; color: string }[] = [
+  { key: "recovery", label: "Recovery", color: "#10B981" },
+  { key: "sleep", label: "Sleep", color: "#3B82F6" },
+  { key: "nutrition", label: "Nutrition", color: "#22C55E" },
+  { key: "training", label: "Training", color: "#F59E0B" },
+  { key: "mood", label: "Mood", color: "#8B5CF6" },
+];
+
 function Dashboard() {
   const { profile } = useProfile();
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
   const [day, setDay] = useState(1);
+  const [greet, setGreet] = useState("Hello");
   const [insight, setInsight] = useState("Your recovery is strong. Ready to push intensity today.");
   const [insightTime] = useState("Just now");
   const [expanded, setExpanded] = useState(false);
+  const [readiness, setReadiness] = useState<TodayReadiness>(null);
   const fn = useServerFn(generateDailyInsight);
+  const fetchReadiness = useServerFn(getTodayReadiness);
 
-  useEffect(() => { setDay(getDayOfJourney()); }, []);
+  useEffect(() => {
+    setDay(getDayOfJourney());
+    const h = new Date().getHours();
+    setGreet(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
+    fetchReadiness().then(setReadiness).catch(() => setReadiness(null));
+  }, [fetchReadiness]);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,33 +61,28 @@ function Dashboard() {
           name: profile.name,
           goal: profile.goal,
           day,
-          recovery: 68,
-          hrv: 81,
-          sleepHours: 7.2,
-          strain: 55,
-          score: 74,
+          score: readiness?.final_score ?? null,
         },
       },
     })
       .then((r) => { if (!cancelled && r.content) setInsight(r.content); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [fn, day, profile.name, profile.goal]);
+  }, [fn, day, profile.name, profile.goal, readiness?.final_score]);
 
-  const hour = new Date().getHours();
-  const greet = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const today = new Date().toISOString().slice(0, 10);
+  const hasToday = !!readiness && readiness.score_date === today;
   const inLearning = day <= LEARNING_DAYS;
   const week = Math.max(1, Math.ceil((day - LEARNING_DAYS) / 7));
   const subline = inLearning ? `Day ${day} of ${LEARNING_DAYS} — Learning phase` : `Week ${week} — Custom plan active`;
 
-  // Ring math — single circular ring with gradient stroke
+  // Ring math
   const ringSize = 90;
   const ringStroke = 8;
   const ringR = ringSize / 2 - ringStroke / 2;
   const ringC = 2 * Math.PI * ringR;
-  const recovery = 68;
-  const score = 74;
-  const fillPct = score / 100;
+  const score = hasToday ? readiness!.final_score : null;
+  const fillPct = score != null ? score / 100 : 0;
 
   return (
     <div className="min-h-screen pb-32 relative" style={{ backgroundColor: "#0A0E1A" }}>
