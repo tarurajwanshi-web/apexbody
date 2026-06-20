@@ -101,6 +101,8 @@ function ProfileSetup() {
 
       const payload = {
         user_id: userId,
+        age: Number(draft.age),
+        biological_sex: draft.sex,
         goal: draft.goal,
         training_days_per_week: draft.days,
         equipment_access: draft.equipment,
@@ -120,10 +122,13 @@ function ProfileSetup() {
         .upsert(payload, { onConflict: "user_id" });
       if (error) throw error;
 
-      const { error: fnErr } = await supabase.functions.invoke("generate-plan", {
-        body: { user_id: userId },
-      });
-      if (fnErr) console.warn("generate-plan failed", fnErr);
+      // Fire deterministic macro calc + Claude plan generation in parallel.
+      const [macroRes, planRes] = await Promise.allSettled([
+        supabase.functions.invoke("calculate-macros", { body: { user_id: userId } }),
+        supabase.functions.invoke("generate-plan", { body: { user_id: userId } }),
+      ]);
+      if (macroRes.status === "rejected") console.warn("calculate-macros failed", macroRes.reason);
+      if (planRes.status === "rejected") console.warn("generate-plan failed", planRes.reason);
 
       navigate({ to: "/dashboard" });
     } catch (e: any) {
