@@ -1,11 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { ChevronLeft, Sparkles, Send, CheckCircle2 } from "lucide-react";
+import { ChevronLeft, Sparkles, Send, CheckCircle2, Lock } from "lucide-react";
 import { BottomNav } from "@/components/BottomNav";
 import { useProfile } from "@/lib/store";
 import { todayMetrics, todaySession, macroTargets, macroToday } from "@/lib/mock";
 import { askCoach } from "@/lib/coach.functions";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/coach")({
   head: () => ({ meta: [{ title: "APEX Coach" }] }),
