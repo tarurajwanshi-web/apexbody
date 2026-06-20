@@ -232,7 +232,7 @@ function Dashboard() {
                   </p>
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); navigate({ to: "/coach" }); }}
+                    onClick={(e) => { e.stopPropagation(); setRecoveryOpen(true); }}
                     className="mt-3 rounded-full px-3 py-1.5 text-[12px] font-semibold text-white gradient-brand active:scale-[0.98] transition"
                   >
                     Log recovery →
