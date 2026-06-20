@@ -66,7 +66,30 @@ function Dashboard() {
 
   const showToast = (msg: string) => {
     setToast(msg);
-    setTimeout(() => setToast(null), 1800);
+    setTimeout(() => setToast(null), 2400);
+  };
+
+  // Capture score before a mutation; poll readiness for change for ~6s.
+  const preScoreRef = useRef<number | null>(null);
+  const captureScore = () => {
+    preScoreRef.current = readiness?.final_score != null ? Number(readiness.final_score) : null;
+  };
+  const pollScoreChange = () => {
+    const start = Date.now();
+    const tick = async () => {
+      try {
+        const r = await fetchReadiness();
+        setReadiness(r);
+        const newScore = r?.final_score != null ? Number(r.final_score) : null;
+        const prev = preScoreRef.current;
+        if (newScore != null && prev != null && newScore !== prev) {
+          showToast(`Score updated: ${prev} → ${newScore}`);
+          return;
+        }
+      } catch {}
+      if (Date.now() - start < 6000) setTimeout(tick, 1000);
+    };
+    setTimeout(tick, 1200);
   };
 
 
