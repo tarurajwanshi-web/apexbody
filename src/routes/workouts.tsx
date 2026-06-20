@@ -134,6 +134,24 @@ function WorkoutsPage() {
         <>
           <LockBanner plan={plan} />
           <VolumeNudge plan={plan} weekLogs={weekLogs} todayIdx={todayIdx} />
+
+          {/* Start Today's Workout — opens pre-workout readiness sheet */}
+          {(() => {
+            const todayDay = plan.plan_data?.days?.[todayIdx];
+            if (!todayDay || todayDay.rest) return null;
+            if (sessionStarted) return null;
+            return (
+              <div className="mx-5 mt-4">
+                <button
+                  onClick={() => setPreCheckOpen(true)}
+                  className="w-full rounded-2xl gradient-brand py-3.5 text-[14px] font-semibold text-white active:scale-[0.98] transition"
+                >
+                  Start workout →
+                </button>
+              </div>
+            );
+          })()}
+
           <div className="mx-5 mt-4 space-y-3">
             {orderedDays.map(({ idx, day }, position) => {
               const isToday = position === 0;
@@ -152,7 +170,16 @@ function WorkoutsPage() {
               );
             })}
           </div>
+
+          <BodyScanSection />
         </>
+      )}
+
+      {preCheckOpen && (
+        <PreWorkoutCheckSheet
+          onClose={() => setPreCheckOpen(false)}
+          onSaved={() => { setPreCheckOpen(false); setSessionStarted(true); }}
+        />
       )}
 
       {cueEx && <CueSheet exercise={cueEx} onClose={() => setCueEx(null)} />}
