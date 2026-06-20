@@ -1,7 +1,9 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw, LogOut } from "lucide-react";
 import { useProfile } from "@/lib/store";
 import { BottomNav } from "@/components/BottomNav";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({ meta: [{ title: "Settings — APEX" }] }),
@@ -11,6 +13,15 @@ export const Route = createFileRoute("/settings")({
 function Settings() {
   const { profile, reset } = useProfile();
   const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      toast.error(`Sign-out failed: ${error.message}`);
+      return;
+    }
+    navigate({ to: "/" });
+  };
 
   return (
     <div className="min-h-screen bg-bg-1 pb-32">
@@ -58,8 +69,15 @@ function Settings() {
       </Group>
 
       <button
+        onClick={handleSignOut}
+        className="mx-5 mt-6 w-[calc(100%-2.5rem)] flex items-center justify-center gap-2 rounded-2xl bg-bg-2 border border-white/10 py-3.5 text-sm font-semibold"
+      >
+        <LogOut size={16} /> Sign out
+      </button>
+
+      <button
         onClick={() => { reset(); navigate({ to: "/" }); }}
-        className="mx-5 mt-6 w-[calc(100%-2.5rem)] flex items-center justify-center gap-2 rounded-2xl bg-bg-2 border border-danger/30 text-danger py-3.5 text-sm font-semibold"
+        className="mx-5 mt-3 w-[calc(100%-2.5rem)] flex items-center justify-center gap-2 rounded-2xl bg-bg-2 border border-danger/30 text-danger py-3.5 text-sm font-semibold"
       >
         <RotateCcw size={16} /> Reset onboarding
       </button>
