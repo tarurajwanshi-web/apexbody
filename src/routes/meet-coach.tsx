@@ -80,7 +80,7 @@ function MeetCoach() {
         }}
       >
         <p className="text-[12px] font-medium uppercase" style={{ color: "#8892A4", letterSpacing: "1.5px" }}>
-          After 5 days of data, you unlock:
+          After 7 days of data, you unlock:
         </p>
         <div className="mt-3 space-y-2.5">
           {unlocks.map((u) => (
