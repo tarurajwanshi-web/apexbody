@@ -80,6 +80,13 @@ Deno.serve(async (req) => {
         status: 400, headers: { ...cors, "Content-Type": "application/json" },
       });
     }
+    // Audit #3: caller's JWT user.id must match body.user_id (or internal-secret).
+    const authz = await authorizeCaller(req, supa, user_id);
+    if (!authz.ok) {
+      return new Response(JSON.stringify({ error: authz.error }), {
+        status: authz.status, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
     const { data: p, error } = await supa.from("profiles").select("*").eq("user_id", user_id).maybeSingle();
     if (error || !p) {
       return new Response(JSON.stringify({ error: "profile not found" }), {
