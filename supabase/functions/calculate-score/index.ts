@@ -355,7 +355,7 @@ Deno.serve(async (req) => {
     };
 
     const byDate: Record<string, DayInputs> = {};
-    for (const d of dateList) byDate[d] = { meals: [] };
+    for (const d of dateList) byDate[d] = { meals: [], pathPref };
     for (const r of manualRes.data ?? []) byDate[r.entry_date].manual = r as any;
     for (const r of deviceRes.data ?? []) byDate[r.entry_date].device = r as any;
     for (const r of mealsRes.data ?? []) byDate[r.entry_date].meals.push({ claude_quality_score: r.claude_quality_score });
