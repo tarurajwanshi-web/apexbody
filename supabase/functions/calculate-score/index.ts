@@ -12,7 +12,16 @@ const W = { recovery: 30, sleep: 22, nutrition: 20, training: 15, mood: 13 } as 
 type PillarKey = keyof typeof W;
 const PILLAR_KEYS: PillarKey[] = ["recovery", "sleep", "nutrition", "training", "mood"];
 const NEUTRAL = 50;
-const ENGINE_VERSION = "v6.1";
+// v6.2: manual-path Nutrition pillar split into 70% meal-quality + 30% hydration.
+// Device-path Nutrition pillar unchanged (meal-quality only) — hydration
+// information is already physiologically captured by HRV/RHR via Recovery.
+// Hydration target = ACSM-aligned baseline: 30 ml/kg rest day, 40 ml/kg on
+// days with a logged training session.
+const ENGINE_VERSION = "v6.2";
+const HYDRATION_ML_PER_KG_REST = 30;
+const HYDRATION_ML_PER_KG_TRAIN = 40;
+const NUTRITION_MEAL_WEIGHT = 0.7;
+const NUTRITION_HYDRATION_WEIGHT = 0.3;
 
 // ---------------- core formulas (verbatim from spec) ----------------
 function manualSleepScore(hours: number): number {
