@@ -290,15 +290,16 @@ async function processUser(supa: SupabaseClient, p: Profile, force: boolean): Pr
   // insufficient_data on a downstream pass).
   const { data: kcalRows } = await supa
     .from("shield_nutrition_logs")
-    .select("entry_date, total_kcal")
+    .select("entry_date, estimated_calories, calorie_estimate_status")
     .eq("user_id", p.user_id)
     .eq("deleted", false)
+    .eq("calorie_estimate_status", "estimated")
     .gte("entry_date", week_start_date)
     .lt("entry_date", window_end_exclusive);
   // Sum kcal per local day, then average over days_logged
   const dayKcal = new Map<string, number>();
   for (const r of kcalRows ?? []) {
-    const k = Number((r as { total_kcal?: number | string | null }).total_kcal ?? 0);
+    const k = Number((r as { estimated_calories?: number | string | null }).estimated_calories ?? 0);
     if (!isFinite(k) || k <= 0) continue;
     dayKcal.set(r.entry_date as string, (dayKcal.get(r.entry_date as string) ?? 0) + k);
   }
