@@ -99,6 +99,54 @@ type DayInputs = {
   training?: { strain_value: number | null };
 };
 
+type RecoveryBaseline = { hrv: number | null; rhr: number | null };
+
+// Device-path recovery scoring (v1 — finishes the placeholder previously at
+// scores.recovery=55). HRV is the primary signal (higher=better, weight 0.7),
+// RHR is the confirming signal (lower=better, weight 0.3). Each sub-score is
+// a relative deviation against the user's own rolling baseline, or against a
+// population default for users with no history yet (HRV adults ~50 ms,
+// RHR adults ~60 bpm). We apply the same 0.75 deviation-cap damping used by
+// manualRecoveryScore so device and manual paths sit on the same scale, and
+// the existing confidence/cap system still bounds the pillar's net effect.
+const HRV_POP_BASELINE = 50;
+const RHR_POP_BASELINE = 60;
+function deviceRecoveryScore(
+  hrv: number | null,
+  rhr: number | null,
+  baseline: RecoveryBaseline,
+): number | null {
+  if (hrv == null && rhr == null) return null;
+  const hb = baseline.hrv && baseline.hrv > 0 ? baseline.hrv : HRV_POP_BASELINE;
+  const rb = baseline.rhr && baseline.rhr > 0 ? baseline.rhr : RHR_POP_BASELINE;
+  // ±30% HRV deviation maps to ±50 points around NEUTRAL.
+  const hrvSub = hrv != null
+    ? Math.max(10, Math.min(95, NEUTRAL + ((hrv - hb) / hb) * (50 / 0.3)))
+    : null;
+  // RHR: lower=better. ±15% deviation → ±50 points.
+  const rhrSub = rhr != null
+    ? Math.max(10, Math.min(95, NEUTRAL + ((rb - rhr) / rb) * (50 / 0.15)))
+    : null;
+  const raw = hrvSub != null && rhrSub != null
+    ? 0.7 * hrvSub + 0.3 * rhrSub
+    : (hrvSub ?? rhrSub) as number;
+  const damped = NEUTRAL + 0.75 * (raw - NEUTRAL);
+  return Math.min(100, Math.max(5, damped));
+}
+
+// Resolve effective bodyweight. MUST stay in lockstep with
+// src/lib/shield.functions.ts → getTodayHydration (same logic, ported here
+// for the Deno edge runtime). If you change one, change the other.
+function resolveEffectiveWeight(p: any): number | null {
+  let w: number | null = p?.measurement_weight_kg != null ? Number(p.measurement_weight_kg) : null;
+  if ((!w || w <= 0) && p?.dexa_lean_mass_kg != null && p?.dexa_body_fat_pct != null) {
+    const lean = Number(p.dexa_lean_mass_kg);
+    const bf = Number(p.dexa_body_fat_pct);
+    if (lean > 0 && bf >= 0 && bf < 95) w = Math.round((lean / (1 - bf / 100)) * 10) / 10;
+  }
+  return w && w > 0 ? w : null;
+}
+
 type PillarScores = Partial<Record<PillarKey, number>>;
 
 function scoreDay(d: DayInputs): {
