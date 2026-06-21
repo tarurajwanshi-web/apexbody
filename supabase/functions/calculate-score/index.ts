@@ -101,7 +101,17 @@ type DayInputs = {
 
 type PillarScores = Partial<Record<PillarKey, number>>;
 
-function scoreDay(d: DayInputs): { scores: PillarScores; present: Record<PillarKey, boolean>; sleepHours: number | null; strainNorm: number | null; usedDevice: boolean; usedManual: boolean } {
+function scoreDay(d: DayInputs): {
+  scores: PillarScores;
+  present: Record<PillarKey, boolean>;
+  sleepHours: number | null;
+  strainNorm: number | null;
+  usedDevice: boolean;
+  usedManual: boolean;
+  mealQuality: number | null;
+  hydrationMl: number | null;
+  hadTraining: boolean;
+} {
   const scores: PillarScores = {};
   let usedDevice = false;
   let usedManual = false;
@@ -123,24 +133,30 @@ function scoreDay(d: DayInputs): { scores: PillarScores; present: Record<PillarK
     scores.sleep = manualSleepScore(sleepHours);
     usedManual = true;
   } else if (d.device?.parsed_sleep_hours != null) {
-    // PLACEHOLDER — runs parsed_sleep_hours through manualSleepScore.
     sleepHours = Number(d.device.parsed_sleep_hours);
     scores.sleep = manualSleepScore(sleepHours);
     usedDevice = true;
   }
 
-  // nutrition — average non-null claude_quality_score across today's meals
+  // nutrition — split into meal-quality + hydration; final composition happens
+  // in the caller (path-dependent: manual users get 70/30 split, device users
+  // get meal-quality only since HRV/RHR already reflect hydration state).
   const scored = d.meals.map((m) => m.claude_quality_score).filter((v): v is number => v != null);
-  if (scored.length > 0) {
-    scores.nutrition = scored.reduce((a, b) => a + b, 0) / scored.length;
-  }
+  const mealQuality = scored.length > 0
+    ? scored.reduce((a, b) => a + b, 0) / scored.length
+    : null;
+  const hydrationMl = d.manual?.hydration_ml != null && d.manual.hydration_ml > 0
+    ? Number(d.manual.hydration_ml)
+    : null;
 
-  // training — PLACEHOLDER simple inverse-strain map
+  // training
   let strainNorm: number | null = null;
+  let hadTraining = false;
   if (d.training?.strain_value != null) {
     const s = Number(d.training.strain_value);
     scores.training = Math.max(0, 100 - s * 2);
-    strainNorm = Math.min(100, Math.max(0, s * 5)); // 0-21 strain → 0-100 normalized
+    strainNorm = Math.min(100, Math.max(0, s * 5));
+    hadTraining = true;
   }
 
   // mood
@@ -155,12 +171,46 @@ function scoreDay(d: DayInputs): { scores: PillarScores; present: Record<PillarK
   const present: Record<PillarKey, boolean> = {
     recovery: scores.recovery != null,
     sleep: scores.sleep != null,
-    nutrition: scores.nutrition != null,
+    nutrition: false, // filled in by caller
     training: scores.training != null,
     mood: scores.mood != null,
   };
 
-  return { scores, present, sleepHours, strainNorm, usedDevice, usedManual };
+  return { scores, present, sleepHours, strainNorm, usedDevice, usedManual, mealQuality, hydrationMl, hadTraining };
+}
+
+/** Compose the Nutrition pillar score per user path.
+ *  Manual path: 70% meal-quality + 30% hydration % vs ACSM target. Either
+ *    sub-input alone still produces a score (reweighted to 100%).
+ *  Device path: meal-quality only — hydration is excluded to avoid
+ *    double-counting with HRV/RHR-driven Recovery.
+ *  Returns null when no sub-input is available. */
+function composeNutrition(
+  mealQuality: number | null,
+  hydrationMl: number | null,
+  weightKg: number | null,
+  hadTraining: boolean,
+  path: "device" | "manual",
+): { score: number | null; hydrationPct: number | null; hydrationTargetMl: number | null } {
+  const targetMlPerKg = hadTraining ? HYDRATION_ML_PER_KG_TRAIN : HYDRATION_ML_PER_KG_REST;
+  const targetMl = weightKg && weightKg > 0 ? Math.round(weightKg * targetMlPerKg) : null;
+  const hydrationPct = targetMl && hydrationMl != null
+    ? Math.min(100, Math.round((hydrationMl / targetMl) * 100))
+    : null;
+
+  if (path === "device") {
+    return { score: mealQuality, hydrationPct, hydrationTargetMl: targetMl };
+  }
+  // manual path
+  const mealOk = mealQuality != null;
+  const hydOk = hydrationPct != null;
+  if (!mealOk && !hydOk) return { score: null, hydrationPct, hydrationTargetMl: targetMl };
+  if (mealOk && hydOk) {
+    const score = NUTRITION_MEAL_WEIGHT * mealQuality + NUTRITION_HYDRATION_WEIGHT * hydrationPct;
+    return { score, hydrationPct, hydrationTargetMl: targetMl };
+  }
+  // partial credit — single sub-input takes full weight rather than blanking the pillar
+  return { score: mealOk ? mealQuality : hydrationPct, hydrationPct, hydrationTargetMl: targetMl };
 }
 
 function nudgeMessageFor(pillar: PillarKey | null): string | null {
