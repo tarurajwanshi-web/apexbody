@@ -14,6 +14,7 @@ import {
   getTodayDeviceUploadStatus,
   supplementDeviceRhr,
   reassignDeviceUploadDate,
+  logBodyMeasurement,
   type DeviceUploadStatus,
 } from "@/lib/shield.functions";
 import { analyzePhoto } from "@/lib/coach.functions";
