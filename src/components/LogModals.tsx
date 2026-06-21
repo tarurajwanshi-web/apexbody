@@ -193,10 +193,12 @@ function ManualRecoveryForm({ onSaved }: { onSaved: () => void }) {
 function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
   const [source, setSource] = useState<"whoop" | "oura" | "garmin">("whoop");
   const [file, setFile] = useState<File | null>(null);
+  const [mood, setMood] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fn = useServerFn(upsertDeviceRecovery);
+  const moodFn = useServerFn(upsertMood);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -211,6 +213,9 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
       const { error: upErr } = await supabase.storage.from("shield-uploads").upload(path, file, { upsert: true });
       if (upErr) throw new Error(upErr.message);
       await fn({ data: { device_source: source, screenshot_url: path } });
+      if (mood) {
+        try { await moodFn({ data: { mood_emoji: mood } }); } catch { /* mood is optional */ }
+      }
       onSaved();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Upload failed. Try again.");
@@ -248,11 +253,64 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
           onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       </div>
 
+      <MoodPicker value={mood} onChange={setMood} />
+
       {err && <p className="text-[12px] text-red-400">{err}</p>}
       <SubmitBtn busy={busy} label="Upload screenshot" disabled={!file} />
     </form>
   );
 }
+
+/** Quick water-logging modal. Tap a preset volume; updates today's total. */
+export function HydrationLogModal({ open, onClose, onSaved }: Props) {
+  const [busy, setBusy] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const log = useServerFn(logHydration);
+
+  const add = async (ml: number) => {
+    setBusy(ml); setErr(null);
+    try {
+      await log({ data: { amount_ml: ml } });
+      onSaved?.();
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not log water.");
+    } finally { setBusy(null); }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Log water">
+      <div className="space-y-3">
+        <p className="text-[13px] text-text-secondary">How much did you drink?</p>
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { ml: 250, label: "Small glass", sub: "250 ml" },
+            { ml: 500, label: "Bottle", sub: "500 ml" },
+            { ml: 750, label: "Large bottle", sub: "750 ml" },
+            { ml: 1000, label: "Liter", sub: "1 L" },
+          ].map((opt) => (
+            <button
+              key={opt.ml}
+              type="button"
+              onClick={() => add(opt.ml)}
+              disabled={busy != null}
+              className="rounded-2xl p-4 text-left text-white active:scale-95 transition disabled:opacity-50"
+              style={{ background: "#0A0E1A", border: "1px solid rgba(59,130,246,0.35)" }}
+            >
+              <div className="text-[15px] font-semibold flex items-center gap-2">
+                {busy === opt.ml && <Loader2 size={14} className="animate-spin" />}
+                {opt.label}
+              </div>
+              <div className="text-[12px] text-text-tertiary mt-0.5">{opt.sub}</div>
+            </button>
+          ))}
+        </div>
+        {err && <p className="text-[12px] text-red-400">{err}</p>}
+      </div>
+    </Sheet>
+  );
+}
+
 
 type MealEditing = { id: string; meal_description: string | null; meal_photo_url: string | null } | null;
 type MealProps = Props & { editing?: MealEditing };
