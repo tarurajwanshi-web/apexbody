@@ -537,7 +537,7 @@ function Dashboard() {
         </div>
       </div>
 
-      <DashboardNav onCamera={() => setMealOpen(true)} />
+      <BottomNav onCenter={() => setMealOpen(true)} />
 
       <RecoveryLogModal open={recoveryOpen} onClose={() => setRecoveryOpen(false)} onSaved={() => { captureScore(); showToast("Recovery logged"); reloadReadiness(); reloadActivity(); pollScoreChange(); }} />
       <MealLogModal open={mealOpen} onClose={() => setMealOpen(false)} onSaved={() => { captureScore(); showToast("Meal logged"); pollScoreChange(); reloadActivity(); setTimeout(reloadMacros, 4000); }} />
@@ -599,50 +599,6 @@ function MetricRow({
   );
 }
 
-function DashboardNav({ onCamera }: { onCamera: () => void }) {
-  const navigate = useNavigate();
-  return (
-    <nav
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center justify-around"
-      style={{
-        width: 260,
-        height: 56,
-        borderRadius: 28,
-        background: "rgba(15,21,36,0.9)",
-        backdropFilter: "blur(20px)",
-        border: "1px solid rgba(255,255,255,0.1)",
-      }}
-    >
-      <NavIcon icon={HomeIcon} label="Home" active onClick={() => navigate({ to: "/dashboard" })} />
-      <NavIcon icon={Dumbbell} onClick={() => navigate({ to: "/workouts" })} />
-      <button
-        onClick={onCamera}
-        className="flex items-center justify-center rounded-full -mt-6 shrink-0 active:scale-95 transition"
-        style={{
-          width: 48, height: 48,
-          background: "linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%)",
-          boxShadow: "0 0 12px rgba(124,58,237,0.4), 0 8px 24px rgba(124,58,237,0.45)",
-        }}
-        aria-label="Camera"
-      >
-        <Camera size={22} color="#fff" />
-      </button>
-      <NavIcon icon={Apple} onClick={() => navigate({ to: "/nutrition" })} />
-      <NavIcon icon={Brain} onClick={() => navigate({ to: "/coach" })} />
-    </nav>
-  );
-}
-
-function NavIcon({
-  icon: Icon, label, active, onClick,
-}: { icon: any; label?: string; active?: boolean; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className="flex flex-col items-center justify-center gap-0.5 w-11">
-      <Icon size={20} color={active ? "#A78BFA" : "#8892A4"} fill={active ? "#A78BFA" : "none"} strokeWidth={active ? 2.5 : 2} />
-      {active && label && <span className="text-[9px] font-semibold text-text-accent">{label}</span>}
-    </button>
-  );
-}
 
 function MacrosCard({ macros }: { macros: MacroSummary | null }) {
   const target = macros?.target_calories ?? null;
