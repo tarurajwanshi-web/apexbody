@@ -183,7 +183,17 @@ function Nutrition() {
        *  For manual users this also feeds 30% of their Nutrition pillar score.
        *  Device users still see the same UI but it doesn't move their score
        *  (avoids double-counting with HRV/RHR-driven Recovery). */}
-      <HydrationCard hydration={hydration} onLog={() => setHydrationOpen(true)} />
+      <HydrationCard
+        hydration={hydration}
+        onLog={() => setHydrationOpen(true)}
+        onSetWeight={async (kg) => {
+          try {
+            await saveWeight({ data: { weight_kg: kg } });
+            toast.success("Weight saved");
+            await reload();
+          } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
+        }}
+      />
 
       {hasTarget && hasMeals && proteinShort >= 20 && (
         <div className="mx-5 mt-4">
@@ -193,50 +203,16 @@ function Nutrition() {
         </div>
       )}
 
-      {/* Hydration-aware insight — fires when meaningfully behind target after midday.
-       *  Framed as general guidance, not a clinical claim. */}
       <HydrationInsight hydration={hydration} />
-
-
 
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
-          <p className="text-xs uppercase tracking-wider text-text-tertiary">Meals today</p>
+          <p className="text-xs uppercase tracking-wider text-text-tertiary">Today</p>
           <p className="text-[11px] text-text-accent">Tap + below to log a meal</p>
         </div>
-        {meals == null ? (
-          <div className="rounded-2xl bg-bg-2 border border-white/5 p-5 flex justify-center">
-            <Loader2 size={16} className="animate-spin text-text-tertiary" />
-          </div>
-        ) : meals.length === 0 ? (
-          <div className="rounded-2xl bg-bg-2 border border-white/5 p-5">
-            <p className="text-sm text-text-secondary">No meals logged yet today. Tap the + in the nav below to log your first.</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {meals.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setOpenMeal(m)}
-                className="w-full text-left rounded-2xl bg-bg-2 border border-white/5 p-4 active:scale-[0.99] transition"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold truncate">{m.meal_description || "Photo meal"}</p>
-                    <p className="text-[11px] text-text-tertiary">
-                      {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      {m.estimated_calories != null ? ` · ${Math.round(m.estimated_calories)} kcal` : ""}
-                    </p>
-                  </div>
-                  <p className="font-mono text-sm tabular-nums text-text-secondary shrink-0">
-                    {m.claude_score_status === "scored" && m.claude_quality_score != null ? `${m.claude_quality_score}/100` : "scoring…"}
-                  </p>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
+        <UnifiedTimeline meals={meals} hydration={hydrationEvents} onOpenMeal={setOpenMeal} />
       </section>
+
 
       <BottomNav onLogged={reload} />
       <HydrationLogModal open={hydrationOpen} onClose={() => setHydrationOpen(false)} onSaved={reload} />
