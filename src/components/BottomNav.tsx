@@ -1,11 +1,12 @@
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { Home, Dumbbell, Apple, Brain, Camera } from "lucide-react";
+import { Home, Dumbbell, Apple, Camera } from "lucide-react";
+import { FloatingCoach } from "@/components/FloatingCoach";
 
 /**
- * Single, consistent bottom nav used on every screen.
- * - Same 5 icon glyphs everywhere; active style derives from the current route.
- * - Center button is a fixed quick-action (Camera → quick log a meal). Its
- *   glyph never changes; it does not auto-highlight any tab.
+ * Bottom nav: 3 flat tabs (Home / Train / Eat) + center launcher.
+ * Coach is intentionally NOT in the row — it lives as a separate floating
+ * launcher (FloatingCoach) so the AI assistant reads as its own surface,
+ * not a nav tab.
  */
 type Props = {
   /** Optional center action. Defaults to navigating to /nutrition. */
@@ -16,7 +17,6 @@ const TABS = [
   { to: "/dashboard", icon: Home, label: "Home" },
   { to: "/workouts", icon: Dumbbell, label: "Train" },
   { to: "/nutrition", icon: Apple, label: "Eat" },
-  { to: "/coach", icon: Brain, label: "Coach" },
 ] as const;
 
 export function BottomNav({ onCenter }: Props = {}) {
@@ -47,22 +47,26 @@ export function BottomNav({ onCenter }: Props = {}) {
   };
 
   return (
-    <nav
-      className="fixed left-1/2 -translate-x-1/2 z-50"
-      style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)" }}
-    >
-      <div className="flex items-center gap-1 rounded-full border border-white/10 bg-bg-2/85 backdrop-blur-xl px-2 py-2 card-shadow">
-        {TABS.slice(0, 2).map(renderTab)}
-        <button
-          type="button"
-          onClick={handleCenter}
-          aria-label="Quick log a meal"
-          className="mx-1 flex h-12 w-12 items-center justify-center rounded-full gradient-brand ai-glow text-white active:scale-95 transition"
-        >
-          <Camera size={22} />
-        </button>
-        {TABS.slice(2).map(renderTab)}
-      </div>
-    </nav>
+    <>
+      <nav
+        className="fixed left-1/2 -translate-x-1/2 z-50"
+        style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)" }}
+      >
+        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-bg-2/85 backdrop-blur-xl px-2 py-2 card-shadow">
+          {renderTab(TABS[0])}
+          {renderTab(TABS[1])}
+          <button
+            type="button"
+            onClick={handleCenter}
+            aria-label="Quick log a meal"
+            className="mx-1 flex h-12 w-12 items-center justify-center rounded-full gradient-brand ai-glow text-white active:scale-95 transition"
+          >
+            <Camera size={22} />
+          </button>
+          {renderTab(TABS[2])}
+        </div>
+      </nav>
+      <FloatingCoach />
+    </>
   );
 }
