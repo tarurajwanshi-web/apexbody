@@ -305,13 +305,17 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
 }
 
 
-/** Quick water-logging modal. Tap a preset volume; updates today's total. */
+/** Quick water-logging modal — icon-paired presets + custom stepper.
+ *  One-tap on a preset logs immediately; custom field is a secondary
+ *  always-available "+/-" stepper for off-preset amounts. */
 export function HydrationLogModal({ open, onClose, onSaved }: Props) {
   const [busy, setBusy] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [custom, setCustom] = useState<number>(300);
   const log = useServerFn(logHydration);
 
   const add = async (ml: number) => {
+    if (ml <= 0) return;
     setBusy(ml); setErr(null);
     try {
       await log({ data: { amount_ml: ml } });
@@ -322,38 +326,100 @@ export function HydrationLogModal({ open, onClose, onSaved }: Props) {
     } finally { setBusy(null); }
   };
 
+  const presets: Array<{ ml: number; label: string; icon: "small" | "glass" | "bottle" | "large" }> = [
+    { ml: 250, label: "Small glass", icon: "small" },
+    { ml: 500, label: "Bottle", icon: "glass" },
+    { ml: 750, label: "Large bottle", icon: "bottle" },
+    { ml: 1000, label: "1 Liter", icon: "large" },
+  ];
+
   return (
     <Sheet open={open} onClose={onClose} title="Log water">
-      <div className="space-y-3">
-        <p className="text-[13px] text-text-secondary">How much did you drink?</p>
+      <div className="space-y-4">
+        <p className="text-[13px] text-text-secondary">Tap to log — no confirm needed.</p>
         <div className="grid grid-cols-2 gap-3">
-          {[
-            { ml: 250, label: "Small glass", sub: "250 ml" },
-            { ml: 500, label: "Bottle", sub: "500 ml" },
-            { ml: 750, label: "Large bottle", sub: "750 ml" },
-            { ml: 1000, label: "Liter", sub: "1 L" },
-          ].map((opt) => (
+          {presets.map((opt) => (
             <button
               key={opt.ml}
               type="button"
               onClick={() => add(opt.ml)}
               disabled={busy != null}
-              className="rounded-2xl p-4 text-left text-white active:scale-95 transition disabled:opacity-50"
+              className="rounded-2xl p-4 text-left text-white active:scale-95 transition disabled:opacity-50 flex items-center gap-3"
               style={{ background: "#0A0E1A", border: "1px solid rgba(59,130,246,0.35)" }}
             >
-              <div className="text-[15px] font-semibold flex items-center gap-2">
-                {busy === opt.ml && <Loader2 size={14} className="animate-spin" />}
-                {opt.label}
+              <WaterIcon kind={opt.icon} />
+              <div className="min-w-0 flex-1">
+                <div className="text-[15px] font-semibold flex items-center gap-2">
+                  {busy === opt.ml && <Loader2 size={14} className="animate-spin" />}
+                  {opt.ml} ml
+                </div>
+                <div className="text-[11px] text-text-tertiary mt-0.5 truncate">{opt.label}</div>
               </div>
-              <div className="text-[12px] text-text-tertiary mt-0.5">{opt.sub}</div>
             </button>
           ))}
         </div>
+
+        <div className="rounded-2xl p-4" style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <p className="text-[11px] uppercase tracking-wider text-text-tertiary">Custom amount</p>
+          <div className="mt-2 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setCustom((c) => Math.max(50, c - 50))}
+              className="h-9 w-9 rounded-full border border-white/15 text-white text-lg leading-none active:scale-95"
+              aria-label="Decrease"
+            >−</button>
+            <div className="flex-1 text-center">
+              <p className="text-2xl font-bold tabular-nums">{custom} <span className="text-sm text-text-tertiary font-normal">ml</span></p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCustom((c) => Math.min(3000, c + 50))}
+              className="h-9 w-9 rounded-full border border-white/15 text-white text-lg leading-none active:scale-95"
+              aria-label="Increase"
+            >+</button>
+          </div>
+          <button
+            type="button"
+            onClick={() => add(custom)}
+            disabled={busy != null}
+            className="mt-3 w-full rounded-xl py-2.5 text-[13px] font-semibold text-white active:scale-95 disabled:opacity-50"
+            style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.85), rgba(6,182,212,0.85))" }}
+          >
+            {busy === custom ? "Logging…" : `Log ${custom} ml`}
+          </button>
+        </div>
+
         {err && <p className="text-[12px] text-red-400">{err}</p>}
       </div>
     </Sheet>
   );
 }
+
+function WaterIcon({ kind }: { kind: "small" | "glass" | "bottle" | "large" }) {
+  // Size scales with volume so options are visually scannable.
+  const h = kind === "small" ? 22 : kind === "glass" ? 28 : kind === "bottle" ? 34 : 38;
+  const w = kind === "small" ? 16 : kind === "glass" ? 18 : kind === "bottle" ? 18 : 20;
+  const isBottle = kind === "bottle" || kind === "large";
+  return (
+    <svg width={w} height={h} viewBox="0 0 24 36" className="shrink-0">
+      {isBottle ? (
+        <>
+          <rect x="9" y="1" width="6" height="4" rx="1" fill="rgba(255,255,255,0.3)" />
+          <path d="M9 5 L9 8 Q5 10 5 14 L5 32 Q5 35 8 35 L16 35 Q19 35 19 32 L19 14 Q19 10 15 8 L15 5 Z"
+            fill="rgba(59,130,246,0.18)" stroke="rgba(59,130,246,0.7)" strokeWidth="1" />
+          <path d="M6.5 20 L6.5 31 Q6.5 33.5 9 33.5 L15 33.5 Q17.5 33.5 17.5 31 L17.5 20 Z" fill="rgba(59,130,246,0.55)" />
+        </>
+      ) : (
+        <>
+          <path d="M5 4 L19 4 L17 33 Q17 35 15 35 L9 35 Q7 35 7 33 Z"
+            fill="rgba(59,130,246,0.18)" stroke="rgba(59,130,246,0.7)" strokeWidth="1" />
+          <path d="M6 18 L18 18 L16.6 32.5 Q16.6 34 15 34 L9 34 Q7.4 34 7.4 32.5 Z" fill="rgba(59,130,246,0.55)" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 
 
 type MealEditing = { id: string; meal_description: string | null; meal_photo_url: string | null } | null;

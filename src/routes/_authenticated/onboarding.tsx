@@ -117,7 +117,12 @@ function ProfileSetup() {
         dexa_lean_mass_kg: draft.bodyDataType === "dexa" ? Number(draft.dexaLean) : null,
         measurement_waist_cm: draft.bodyDataType === "measurements" ? Number(draft.waist) : null,
         measurement_hip_cm: draft.bodyDataType === "measurements" ? Number(draft.hip) : null,
-        measurement_weight_kg: draft.bodyDataType === "measurements" ? Number(draft.weight) : null,
+        // Weight is captured in either body-data path now (DEXA users still
+        // need it for hydration targets / macro recalcs); the form on the
+        // measurements path collects it directly, and the DEXA path will fall
+        // back to deriving from lean mass / body-fat if the user didn't enter
+        // weight. We always persist whatever weight the user typed if any.
+        measurement_weight_kg: draft.weight ? Number(draft.weight) : null,
         measurement_height_cm: draft.bodyDataType === "measurements" ? Number(draft.height) : null,
         profile_completed_at: now.toISOString(),
         plan_unlock_date: unlockDate,

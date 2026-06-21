@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChevronLeft, Loader2, RefreshCw, Droplet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
 import { AICard } from "@/components/AIOrb";
 import { RingChart } from "@/components/RingChart";
 import { BottomNav } from "@/components/BottomNav";
@@ -10,7 +11,15 @@ import { HydrationLogModal } from "@/components/LogModals";
 import { MealDetailModal } from "@/components/MealDetailModal";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
-import { getTodayMeals, getTodayHydration, type TodayMeal, type HydrationSummary } from "@/lib/shield.functions";
+import {
+  getTodayMeals,
+  getTodayHydration,
+  getTodayHydrationEvents,
+  setBodyweightKg,
+  type TodayMeal,
+  type HydrationSummary,
+  type HydrationEvent,
+} from "@/lib/shield.functions";
 
 export const Route = createFileRoute("/nutrition")({
   head: () => ({ meta: [{ title: "Nutrition — APEX" }] }),
@@ -29,6 +38,7 @@ function Nutrition() {
   const [macros, setMacros] = useState<MacroSummary | null>(null);
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
   const [hydration, setHydration] = useState<HydrationSummary | null>(null);
+  const [hydrationEvents, setHydrationEvents] = useState<HydrationEvent[]>([]);
   const [hydrationOpen, setHydrationOpen] = useState(false);
   const [openMeal, setOpenMeal] = useState<TodayMeal | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -39,6 +49,8 @@ function Nutrition() {
   const fetchMacros = useServerFn(getTodayMacroSummary);
   const fetchMeals = useServerFn(getTodayMeals);
   const fetchHydration = useServerFn(getTodayHydration);
+  const fetchHydrationEvents = useServerFn(getTodayHydrationEvents);
+  const saveWeight = useServerFn(setBodyweightKg);
 
   const reload = async () => {
     setRefreshing(true);
@@ -46,6 +58,7 @@ function Nutrition() {
       fetchMacros().then(setMacros),
       fetchMeals().then(setMeals).catch(() => setMeals([])),
       fetchHydration().then(setHydration).catch(() => {}),
+      fetchHydrationEvents().then(setHydrationEvents).catch(() => setHydrationEvents([])),
     ]);
     setLastUpdatedAt(Date.now());
     setRefreshing(false);
@@ -170,7 +183,17 @@ function Nutrition() {
        *  For manual users this also feeds 30% of their Nutrition pillar score.
        *  Device users still see the same UI but it doesn't move their score
        *  (avoids double-counting with HRV/RHR-driven Recovery). */}
-      <HydrationCard hydration={hydration} onLog={() => setHydrationOpen(true)} />
+      <HydrationCard
+        hydration={hydration}
+        onLog={() => setHydrationOpen(true)}
+        onSetWeight={async (kg) => {
+          try {
+            await saveWeight({ data: { weight_kg: kg } });
+            toast.success("Weight saved");
+            await reload();
+          } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
+        }}
+      />
 
       {hasTarget && hasMeals && proteinShort >= 20 && (
         <div className="mx-5 mt-4">
@@ -180,50 +203,16 @@ function Nutrition() {
         </div>
       )}
 
-      {/* Hydration-aware insight — fires when meaningfully behind target after midday.
-       *  Framed as general guidance, not a clinical claim. */}
       <HydrationInsight hydration={hydration} />
-
-
 
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
-          <p className="text-xs uppercase tracking-wider text-text-tertiary">Meals today</p>
+          <p className="text-xs uppercase tracking-wider text-text-tertiary">Today</p>
           <p className="text-[11px] text-text-accent">Tap + below to log a meal</p>
         </div>
-        {meals == null ? (
-          <div className="rounded-2xl bg-bg-2 border border-white/5 p-5 flex justify-center">
-            <Loader2 size={16} className="animate-spin text-text-tertiary" />
-          </div>
-        ) : meals.length === 0 ? (
-          <div className="rounded-2xl bg-bg-2 border border-white/5 p-5">
-            <p className="text-sm text-text-secondary">No meals logged yet today. Tap the + in the nav below to log your first.</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {meals.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setOpenMeal(m)}
-                className="w-full text-left rounded-2xl bg-bg-2 border border-white/5 p-4 active:scale-[0.99] transition"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold truncate">{m.meal_description || "Photo meal"}</p>
-                    <p className="text-[11px] text-text-tertiary">
-                      {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      {m.estimated_calories != null ? ` · ${Math.round(m.estimated_calories)} kcal` : ""}
-                    </p>
-                  </div>
-                  <p className="font-mono text-sm tabular-nums text-text-secondary shrink-0">
-                    {m.claude_score_status === "scored" && m.claude_quality_score != null ? `${m.claude_quality_score}/100` : "scoring…"}
-                  </p>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
+        <UnifiedTimeline meals={meals} hydration={hydrationEvents} onOpenMeal={setOpenMeal} />
       </section>
+
 
       <BottomNav onLogged={reload} />
       <HydrationLogModal open={hydrationOpen} onClose={() => setHydrationOpen(false)} onSaved={reload} />
@@ -243,48 +232,211 @@ function Macro({ label, v, t, color, hasMeals }: { label: string; v: number; t: 
   );
 }
 
-function HydrationCard({ hydration, onLog }: { hydration: HydrationSummary | null; onLog: () => void }) {
+function HydrationCard({
+  hydration,
+  onLog,
+  onSetWeight,
+}: {
+  hydration: HydrationSummary | null;
+  onLog: () => void;
+  onSetWeight: (kg: number) => void | Promise<void>;
+}) {
   const consumed = hydration?.consumed_ml ?? 0;
   const target = hydration?.target_ml ?? null;
   const pct = target ? Math.min(100, Math.round((consumed / target) * 100)) : 0;
   const liters = (ml: number) => (ml / 1000).toFixed(ml >= 1000 ? 1 : 2);
+  const [editingWeight, setEditingWeight] = useState(false);
+  const [w, setW] = useState("");
+  const [unit, setUnit] = useState<"kg" | "lb">("kg");
+
   return (
     <section className="mx-5 mt-4 rounded-3xl bg-bg-2 border border-white/5 p-5">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="h-9 w-9 rounded-xl flex items-center justify-center" style={{ background: "rgba(59,130,246,0.18)", border: "1px solid rgba(59,130,246,0.35)" }}>
-            <Droplet size={16} className="text-sleep" />
-          </div>
-          <div>
+      <div className="flex items-center gap-4">
+        {/* Bottle-shaped fill indicator, sized to match the macro rings above. */}
+        <BottleFill pct={pct} disabled={!target} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <Droplet size={14} className="text-sleep" />
             <p className="text-[15px] font-semibold text-white">Hydration</p>
-            <p className="text-[11px] text-text-tertiary">
-              {target ? `${liters(consumed)}L / ${liters(target)}L today` : "Add your weight in settings to see a target"}
-              {hydration?.had_training_today && target ? " · training day (+10 ml/kg)" : ""}
-            </p>
           </div>
+          {target ? (
+            <>
+              <p className="mt-1 text-[20px] font-bold tabular-nums">
+                {liters(consumed)}<span className="text-text-tertiary text-sm font-normal"> / {liters(target)}L</span>
+              </p>
+              <p className="text-[11px] text-text-tertiary">
+                {pct}% of today's target
+                {hydration?.had_training_today ? " · training day (+10 ml/kg)" : ""}
+              </p>
+            </>
+          ) : (
+            <p className="mt-1 text-[12px] text-text-secondary">Add your weight to see a target.</p>
+          )}
         </div>
-        <button
-          onClick={onLog}
-          aria-label="Log water"
-          className="rounded-full px-3 py-1.5 text-[12px] font-semibold text-white active:scale-95 transition"
-          style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.85), rgba(124,58,237,0.85))" }}
-        >
-          + Log water
-        </button>
+        {target ? (
+          <button
+            onClick={onLog}
+            aria-label="Log water"
+            className="rounded-full px-3 py-1.5 text-[12px] font-semibold text-white active:scale-95 transition shrink-0"
+            style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.85), rgba(6,182,212,0.85))" }}
+          >+ Log</button>
+        ) : null}
       </div>
-      {target && (
-        <div className="mt-4 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
-          <div className="h-full" style={{ width: `${pct}%`, background: "linear-gradient(90deg, #3B82F6, #06B6D4)" }} />
+
+      {!target && !editingWeight && (
+        <button
+          onClick={() => setEditingWeight(true)}
+          className="mt-4 w-full rounded-xl py-2.5 text-[13px] font-semibold text-white active:scale-95"
+          style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.85), rgba(6,182,212,0.85))" }}
+        >Add weight</button>
+      )}
+      {!target && editingWeight && (
+        <div className="mt-4 rounded-xl p-3 flex items-center gap-2" style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <input
+            type="number" inputMode="decimal"
+            value={w} onChange={(e) => setW(e.target.value)}
+            placeholder="Weight" autoFocus
+            className="flex-1 bg-transparent text-base text-white focus:outline-none px-2"
+          />
+          <div className="inline-flex rounded-full bg-bg-1 border border-white/10 p-0.5">
+            {(["kg", "lb"] as const).map((u) => (
+              <button key={u} onClick={() => setUnit(u)} className={`px-2.5 py-1 text-[11px] rounded-full ${unit === u ? "gradient-brand text-white" : "text-text-tertiary"}`}>{u}</button>
+            ))}
+          </div>
+          <button
+            onClick={() => {
+              const n = Number(w);
+              if (!isFinite(n) || n <= 0) return;
+              const kg = unit === "kg" ? n : n * 0.45359237;
+              setEditingWeight(false);
+              setW("");
+              void onSetWeight(Math.round(kg * 10) / 10);
+            }}
+            className="rounded-full px-3 py-1.5 text-[12px] font-semibold text-white gradient-brand active:scale-95"
+          >Save</button>
         </div>
       )}
-      {hydration?.path === "device" && (
+
+      {hydration?.path === "device" && target && (
         <p className="mt-3 text-[10px] text-text-tertiary">
-          Tracked for your own awareness — your device's HRV/RHR already reflects hydration in Recovery.
+          Tracked for awareness — your device's HRV/RHR already reflects hydration in Recovery.
         </p>
       )}
     </section>
   );
 }
+
+/** Glass/bottle silhouette that visually fills based on % of daily target.
+ *  Sized to feel like a peer to the macro rings above. */
+function BottleFill({ pct, disabled }: { pct: number; disabled?: boolean }) {
+  const fillH = Math.max(0, Math.min(100, pct));
+  return (
+    <div className="relative h-16 w-12 shrink-0">
+      <svg viewBox="0 0 48 64" className="absolute inset-0 h-full w-full">
+        <defs>
+          <clipPath id="bottle-clip">
+            <path d="M16 4 H32 V12 Q42 16 42 28 V54 Q42 60 36 60 H12 Q6 60 6 54 V28 Q6 16 16 12 Z" />
+          </clipPath>
+        </defs>
+        <path
+          d="M16 4 H32 V12 Q42 16 42 28 V54 Q42 60 36 60 H12 Q6 60 6 54 V28 Q6 16 16 12 Z"
+          fill="rgba(59,130,246,0.10)"
+          stroke={disabled ? "rgba(255,255,255,0.18)" : "rgba(59,130,246,0.6)"}
+          strokeWidth="1.5"
+        />
+        <g clipPath="url(#bottle-clip)">
+          <rect
+            x="0" y={64 - (fillH * 0.6)}
+            width="48" height={fillH * 0.6}
+            fill={disabled ? "rgba(255,255,255,0.06)" : "url(#bottle-grad)"}
+          />
+        </g>
+        <linearGradient id="bottle-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.55" />
+          <stop offset="100%" stopColor="#06B6D4" stopOpacity="0.85" />
+        </linearGradient>
+      </svg>
+      {!disabled && (
+        <p className="absolute inset-0 flex items-center justify-center text-[11px] font-semibold text-white drop-shadow">{pct}%</p>
+      )}
+    </div>
+  );
+}
+
+/** Chronological "Today" timeline: meals + hydration interleaved by timestamp. */
+function UnifiedTimeline({
+  meals, hydration, onOpenMeal,
+}: {
+  meals: TodayMeal[] | null;
+  hydration: HydrationEvent[];
+  onOpenMeal: (m: TodayMeal) => void;
+}) {
+  if (meals == null) {
+    return (
+      <div className="rounded-2xl bg-bg-2 border border-white/5 p-5 flex justify-center">
+        <Loader2 size={16} className="animate-spin text-text-tertiary" />
+      </div>
+    );
+  }
+  if (meals.length === 0 && hydration.length === 0) {
+    return (
+      <div className="rounded-2xl bg-bg-2 border border-white/5 p-5">
+        <p className="text-sm text-text-secondary">Nothing logged yet today. Tap the + in the nav below to log a meal, or use Log water above.</p>
+      </div>
+    );
+  }
+  type Row =
+    | { kind: "meal"; ts: number; meal: TodayMeal }
+    | { kind: "water"; ts: number; ev: HydrationEvent };
+  const rows: Row[] = [
+    ...meals.map<Row>((m) => ({ kind: "meal", ts: new Date(m.created_at).getTime(), meal: m })),
+    ...hydration.map<Row>((ev) => ({ kind: "water", ts: new Date(ev.created_at).getTime(), ev })),
+  ].sort((a, b) => a.ts - b.ts);
+  const fmtTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return (
+    <div className="space-y-2">
+      {rows.map((r) =>
+        r.kind === "meal" ? (
+          <button
+            key={`m-${r.meal.id}`}
+            onClick={() => onOpenMeal(r.meal)}
+            className="w-full text-left rounded-2xl bg-bg-2 border border-white/5 p-4 active:scale-[0.99] transition"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold truncate">{r.meal.meal_description || "Photo meal"}</p>
+                <p className="text-[11px] text-text-tertiary">
+                  {fmtTime(r.ts)}
+                  {r.meal.estimated_calories != null ? ` · ${Math.round(r.meal.estimated_calories)} kcal` : ""}
+                </p>
+              </div>
+              <p className="font-mono text-sm tabular-nums text-text-secondary shrink-0">
+                {r.meal.claude_score_status === "scored" && r.meal.claude_quality_score != null
+                  ? `${r.meal.claude_quality_score}/100`
+                  : "scoring…"}
+              </p>
+            </div>
+          </button>
+        ) : (
+          <div
+            key={`w-${r.ev.id}`}
+            className="rounded-2xl p-3 flex items-center gap-3"
+            style={{ background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.20)" }}
+          >
+            <div className="h-8 w-8 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(59,130,246,0.20)" }}>
+              <Droplet size={14} className="text-sleep" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-white">Water — {r.ev.amount_ml} ml</p>
+              <p className="text-[11px] text-text-tertiary">{fmtTime(r.ts)}</p>
+            </div>
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
 
 function HydrationInsight({ hydration }: { hydration: HydrationSummary | null }) {
   if (!hydration?.target_ml) return null;

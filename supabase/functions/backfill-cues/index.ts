@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
     }
     const supa = createClient(url, key);
 
-    const { user_id } = await req.json();
+    const { user_id, force } = await req.json();
     if (!user_id) {
       return new Response(JSON.stringify({ error: "user_id required" }), {
         status: 400, headers: { ...cors, "Content-Type": "application/json" },
@@ -52,11 +52,14 @@ Deno.serve(async (req) => {
 
     const plan = planRow.plan_data as any;
     const days = Array.isArray(plan?.days) ? plan.days : [];
+    // cue_version 2 = sharp single-correction cues (D+E). Force regen older plans.
+    const currentVer = Number(plan?.cue_version ?? 1);
+    const needsUpgrade = force === true || currentVer < 2;
     const names = new Set<string>();
     for (const d of days) {
       if (d?.rest) continue;
       for (const ex of d.exercises ?? []) {
-        if (!ex?.cue || !String(ex.cue).trim()) names.add(ex.name);
+        if (needsUpgrade || !ex?.cue || !String(ex.cue).trim()) names.add(ex.name);
       }
     }
     if (names.size === 0) {
@@ -67,8 +70,14 @@ Deno.serve(async (req) => {
 
     const list = Array.from(names);
     const prompt =
-      `For each exercise name below, write a beginner-friendly execution cue (1-2 short sentences, plain language, no jargon). ` +
-      `Respond with ONLY a single JSON object mapping exact exercise name → cue string. No prose, no fences.\n\n` +
+      `For each exercise below, write ONE sharp coaching cue — the single correction an experienced strength coach would shout mid-set to fix that exercise's most common failure point. ` +
+      `Not a description of correct form. Not a checklist. A real spoken correction. ` +
+      `One sentence, max ~18 words, second person, plain English. Lead with the action, not the body part. ` +
+      `Examples of the bar: ` +
+      `"Send your hips back first — if your knees lead, you'll lose your chest." ` +
+      `"Pull the bar into you, don't reach for it — lats stay tight the whole way." ` +
+      `"Squeeze your glutes at the top before you even think about lowering." ` +
+      `Respond with ONLY a single JSON object mapping the exact exercise name → cue string. No prose, no fences.\n\n` +
       JSON.stringify(list);
 
     const aRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -82,9 +91,10 @@ Deno.serve(async (req) => {
         model: "claude-haiku-4-5-20251001",
         max_tokens: 2000,
         system:
-          "You write beginner-friendly strength-training execution cues. " +
-          "Respond with ONLY a single JSON object mapping the exact exercise name to a 1-2 sentence cue. " +
-          "Plain language, no jargon.",
+          "You are a veteran strength coach giving real, in-the-room corrections. " +
+          "For each exercise, return the ONE cue that fixes its single most common failure point — " +
+          "what you'd shout mid-set, not a textbook description of form. " +
+          "Respond with ONLY a single JSON object mapping the exact exercise name to a single short cue.",
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -107,12 +117,14 @@ Deno.serve(async (req) => {
     for (const d of days) {
       if (d?.rest) continue;
       for (const ex of d.exercises ?? []) {
-        if ((!ex.cue || !String(ex.cue).trim()) && typeof cueMap[ex.name] === "string") {
+        const shouldUpdate = needsUpgrade || !ex.cue || !String(ex.cue).trim();
+        if (shouldUpdate && typeof cueMap[ex.name] === "string") {
           ex.cue = cueMap[ex.name];
           updated++;
         }
       }
     }
+    plan.cue_version = 2;
 
     const { error: upErr } = await supa
       .from("weekly_plans")
