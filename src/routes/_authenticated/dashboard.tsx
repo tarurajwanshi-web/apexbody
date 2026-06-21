@@ -574,41 +574,6 @@ function Dashboard() {
           <span className="text-text-tertiary">›</span>
         </button>
 
-
-
-
-
-
-
-        {/* Today's Plan */}
-        <div className="rounded-2xl p-5" style={{ background: "#0F1524", border: "1px solid rgba(255,255,255,0.06)" }}>
-          <div className="flex items-center justify-between">
-            <h3 className="text-[16px] font-bold text-white">Today's Workout</h3>
-            <span
-              className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
-              style={{ background: "rgba(124,58,237,0.15)", color: "#A78BFA", border: "1px solid rgba(124,58,237,0.30)" }}
-            >
-              Day 2: Upper Push
-            </span>
-          </div>
-          <ul className="mt-4 space-y-2">
-            {[
-              "Bench Press — 4x8 @ 80kg",
-              "Incline DB Press — 3x10 @ 30kg",
-              "Cable Flyes — 3x12",
-            ].map((ex) => (
-              <li key={ex} className="text-[13px] text-text-secondary flex gap-2">
-                <span className="text-text-tertiary">•</span> {ex}
-              </li>
-            ))}
-          </ul>
-          <button
-            onClick={() => navigate({ to: "/workouts" })}
-            className="mt-4 w-full block rounded-2xl gradient-brand py-3 text-center text-[14px] font-semibold text-white active:scale-[0.98] transition"
-          >
-            Start Workout →
-          </button>
-        </div>
       </div>
 
       <BottomNav onCenter={() => setMealOpen(true)} />
