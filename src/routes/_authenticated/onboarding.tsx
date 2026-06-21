@@ -45,22 +45,25 @@ type Draft = {
   goal: Goal | null;
   days: number;
   equipment: Equipment | null;
-  bodyDataType: BodyDataType;
-  dexaBf: string;
-  dexaLean: string;
-  dexaFileName: string | null;
-  waist: string;
-  hip: string;
-  weight: string;
-  height: string;
+  bodyDataType: BodyDataType;       // "dexa" | "measurements" | null  (null = skipped)
+  dexaBf: string;                   // body-fat %  (path-agnostic; named for legacy column)
+  dexaLean: string;                 // lean mass kg (device path only)
+  dexaFileName: null;               // legacy; always null now
+  waist: string;                    // cm canonical
+  hip: string;                      // cm canonical
+  arm: string;                      // cm canonical
+  thigh: string;                    // cm canonical
+  weight: string;                   // kg canonical
+  height: string;                   // cm canonical
 };
 
 const EMPTY: Draft = {
   name: "", age: "", sex: null, inputPath: null,
   goal: null, days: 3, equipment: null, bodyDataType: null,
   dexaBf: "", dexaLean: "", dexaFileName: null,
-  waist: "", hip: "", weight: "", height: "",
+  waist: "", hip: "", arm: "", thigh: "", weight: "", height: "",
 };
+
 
 function ProfileSetup() {
   const navigate = useNavigate();
