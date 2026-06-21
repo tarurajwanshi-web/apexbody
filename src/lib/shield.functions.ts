@@ -250,21 +250,14 @@ export const upsertDeviceRecovery = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
 
-    // Fire-and-forget vision parse. On success it flips parse_status='parsed',
-    // which triggers calculate-score via the DB webhook.
-    try {
-      const fnUrl = `${process.env.SUPABASE_URL}/functions/v1/parse-device-upload`;
-      void fetch(fnUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({ upload_id: row?.id, user_id: context.userId, entry_date }),
-      }).catch(() => {});
-    } catch { /* ignore */ }
-
-    return { ok: true };
+    // Dispatch of parse-device-upload is handled by the
+    // `shield_device_uploads_parse_dispatch` DB trigger on insert/update.
+    // On success the parser flips parse_status='parsed', which triggers
+    // calculate-score via the existing shield_device_uploads_webhook.
+    // We deliberately do NOT fire-and-forget from here: the Cloudflare
+    // Worker terminates the request context on response and cancels
+    // un-awaited fetches.
+    return { ok: true, upload_id: row?.id };
   });
 
 export const logMeal = createServerFn({ method: "POST" })
