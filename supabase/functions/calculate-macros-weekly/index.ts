@@ -454,6 +454,16 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { /* empty body OK for cron */ }
   const force = body.force_recalculate === true;
 
+  // Audit #3: gate the function. Cron path → x-internal-secret header.
+  // Manual force-recalc for a specific user → JWT bearer matching body.user_id.
+  // Unauthenticated calls (no internal secret AND no valid JWT) are rejected.
+  const authz = await authorizeCaller(req, supa, body.user_id);
+  if (!authz.ok) {
+    return new Response(JSON.stringify({ error: authz.error }), {
+      status: authz.status, headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+
   let profiles: Profile[];
   try {
     if (body.user_id) {
