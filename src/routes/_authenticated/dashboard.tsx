@@ -1,12 +1,11 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Sparkles, Flame, Heart, BookOpen, RefreshCw } from "lucide-react";
+import { Sparkles, Flame, Heart, BookOpen, RefreshCw, Dumbbell, Droplet } from "lucide-react";
 import { useProfile } from "@/lib/store";
 import { getOrCreateDailyInsight } from "@/lib/coach.functions";
-import { getTodayReadiness, getActivityWeek, type TodayReadiness, type ActivityWeek } from "@/lib/shield.functions";
+import { getTodayReadiness, getActivityWeek, getTodayHydration, type TodayReadiness, type ActivityWeek, type HydrationSummary } from "@/lib/shield.functions";
 import { RecoveryLogModal, MealLogModal } from "@/components/LogModals";
-import { MealHistoryList } from "@/components/MealHistoryList";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
 import { BottomNav } from "@/components/BottomNav";
 import { RefreshStamp } from "@/components/RefreshStamp";
@@ -68,13 +67,36 @@ function Dashboard() {
   const fetchReadiness = useServerFn(getTodayReadiness);
   const fetchMacros = useServerFn(getTodayMacroSummary);
   const fetchActivity = useServerFn(getActivityWeek);
+  const fetchHydration = useServerFn(getTodayHydration);
   const [macros, setMacros] = useState<MacroSummary | null>(null);
   const [activity, setActivity] = useState<ActivityWeek | null>(null);
+  const [hydration, setHydration] = useState<HydrationSummary | null>(null);
+  const [todaySession, setTodaySession] = useState<{ rest: boolean; session_name: string | null; doneSets: number; totalSets: number } | null>(null);
   const reloadMacros = () => { fetchMacros().then(setMacros).catch(() => {}); };
   const reloadActivity = () => { fetchActivity().then(setActivity).catch(() => {}); };
 
   const reloadReadiness = () => {
     fetchReadiness().then(setReadiness).catch(() => setReadiness(null));
+  };
+
+  const reloadTodaySession = async () => {
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      if (!u.user) return;
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const jsDay = new Date().getDay();
+      const todayIdx = (jsDay + 6) % 7;
+      const [planRes, logsRes] = await Promise.all([
+        supabase.from("weekly_plans").select("plan_data").eq("user_id", u.user.id).order("week_start_date", { ascending: false }).limit(1).maybeSingle(),
+        supabase.from("workout_set_logs").select("completed").eq("user_id", u.user.id).eq("entry_date", todayIso),
+      ]);
+      const days = (planRes.data?.plan_data as any)?.days ?? [];
+      const today = days[todayIdx];
+      if (!today) { setTodaySession(null); return; }
+      const totalSets = today.rest ? 0 : (today.exercises ?? []).reduce((s: number, ex: any) => s + (ex.sets ?? 0), 0);
+      const doneSets = (logsRes.data ?? []).filter((l: any) => l.completed).length;
+      setTodaySession({ rest: !!today.rest, session_name: today.session_name ?? null, doneSets, totalSets });
+    } catch { setTodaySession(null); }
   };
 
   const reloadAll = async () => {
@@ -83,6 +105,8 @@ function Dashboard() {
       fetchReadiness().then(setReadiness),
       fetchMacros().then(setMacros),
       fetchActivity().then(setActivity),
+      fetchHydration().then(setHydration).catch(() => {}),
+      reloadTodaySession(),
     ]);
     setLastUpdatedAt(Date.now());
     setRefreshing(false);
@@ -442,11 +466,10 @@ function Dashboard() {
             <div className="shrink-0 relative">
               <div
                 aria-hidden
-                className="absolute inset-0 rounded-full"
+                className="absolute inset-0 rounded-full score-halo-breathe"
                 style={{
                   background:
-                    "radial-gradient(circle, rgba(124,58,237,0.35) 0%, rgba(59,130,246,0.18) 45%, transparent 70%)",
-                  filter: "blur(8px)",
+                    "radial-gradient(circle, rgba(124,58,237,0.45) 0%, rgba(59,130,246,0.22) 45%, transparent 70%)",
                 }}
               />
               <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`} className="relative">
@@ -489,39 +512,23 @@ function Dashboard() {
             </div>
           </div>
 
-          {expanded && (
+          {/* Score explainability — ALWAYS visible (collapsed view).
+              Surfaces pillar contributions plainly so a LOW-confidence score
+              never reads as "all clear". Pillars that haven't been logged
+              today show "not logged yet" rather than silently disappearing,
+              with one-line framing that the score is incomplete, not okay. */}
+          <PillarExplainer readiness={readiness} expanded={expanded} />
+
+          {expanded && readiness?.nudge_message && (
             <div
-              className="mt-5 overflow-hidden"
-              style={{ animation: "fade-up 0.3s ease both" }}
+              className="mt-4 rounded-xl p-3 flex items-start gap-2"
+              style={{
+                background: "linear-gradient(135deg, rgba(124,58,237,0.08), rgba(59,130,246,0.08))",
+                border: "1px solid rgba(124,58,237,0.25)",
+              }}
             >
-              {PILLAR_META.map((p, i) => {
-                const raw = readiness?.pillar_breakdown?.[p.key];
-                const value = raw == null || raw === "" ? "—" : String(raw);
-                return (
-                  <MetricRow
-                    key={p.key}
-                    color={p.color}
-                    name={p.label}
-                    value={value}
-                    trend="stable"
-                    note=""
-                    hideNote
-                    last={i === PILLAR_META.length - 1}
-                  />
-                );
-              })}
-              {readiness?.nudge_message && (
-                <div
-                  className="mt-4 rounded-xl p-3 flex items-start gap-2"
-                  style={{
-                    background: "linear-gradient(135deg, rgba(124,58,237,0.08), rgba(59,130,246,0.08))",
-                    border: "1px solid rgba(124,58,237,0.25)",
-                  }}
-                >
-                  <Sparkles size={14} className="text-ai shrink-0 mt-0.5" />
-                  <p className="text-[12px] text-text-primary leading-snug">{readiness.nudge_message}</p>
-                </div>
-              )}
+              <Sparkles size={14} className="text-ai shrink-0 mt-0.5" />
+              <p className="text-[12px] text-text-primary leading-snug">{readiness.nudge_message}</p>
             </div>
           )}
         </button>
@@ -549,14 +556,14 @@ function Dashboard() {
           <span className="text-text-tertiary">›</span>
         </button>
 
-        {/* Today's meals — edit / delete */}
-        <MealHistoryList
-          onMutationStart={captureScore}
-          onMutationDone={() => { pollScoreChange(); reloadMacros(); }}
-        />
+        {/* Two parallel status cards: training + macros (glanceable only —
+            details live on their respective tabs). */}
+        <WorkoutStatusCard session={todaySession} onNav={() => navigate({ to: "/workouts" })} />
 
-        {/* Macros (estimated from photos) */}
-        <MacrosCard macros={macros} />
+        {/* Macros (estimated from photos) — Home shows aggregate only.
+            The per-meal list lives exclusively on the Nutrition tab. */}
+        <MacrosCard macros={macros} hydration={hydration} onHydrationTap={() => navigate({ to: "/nutrition" })} />
+
 
         {/* Resource library — read-only browse */}
         <button
@@ -649,7 +656,7 @@ function MetricRow({
 }
 
 
-function MacrosCard({ macros }: { macros: MacroSummary | null }) {
+function MacrosCard({ macros, hydration, onHydrationTap }: { macros: MacroSummary | null; hydration: HydrationSummary | null; onHydrationTap: () => void }) {
   const target = macros?.target_calories ?? null;
   const consumed = macros?.consumed_calories ?? 0;
   const hasAny = (macros?.meals_estimated ?? 0) > 0;
@@ -685,9 +692,134 @@ function MacrosCard({ macros }: { macros: MacroSummary | null }) {
           </p>
         </>
       )}
+
+      {/* Inline hydration indicator — display only; tap routes to Nutrition.
+          Chose inline-on-Macros (vs separate card) to avoid crowding Home. */}
+      {hydration && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onHydrationTap(); }}
+          className="mt-4 w-full flex items-center justify-between rounded-xl px-3 py-2 active:scale-[0.99] transition"
+          style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.25)" }}
+          aria-label="Hydration today — open Nutrition"
+        >
+          <span className="flex items-center gap-2 text-[12px] text-text-primary">
+            <Droplet size={13} className="text-sleep" />
+            <span className="tabular-nums">
+              {(hydration.consumed_ml / 1000).toFixed(hydration.consumed_ml >= 1000 ? 1 : 2)}L
+              {hydration.target_ml ? ` / ${(hydration.target_ml / 1000).toFixed(1)}L` : ""}
+            </span>
+            <span className="text-text-tertiary">water</span>
+          </span>
+          <span className="text-text-tertiary text-[12px]">›</span>
+        </button>
+      )}
     </div>
   );
 }
+
+/** Glanceable training status. Mirrors MacrosCard's weight; never shows
+ *  exercise lists or set/rep detail (that's the Training tab's job). */
+function WorkoutStatusCard({ session, onNav }: { session: { rest: boolean; session_name: string | null; doneSets: number; totalSets: number } | null; onNav: () => void }) {
+  let title = "Today: Training";
+  let sub = "Open the training tab to start.";
+  if (!session) {
+    title = "Today: Training";
+    sub = "Open the training tab to start.";
+  } else if (session.rest) {
+    title = "Today: Rest day";
+    sub = "Want to train anyway?";
+  } else {
+    const name = session.session_name || "Session";
+    const status = session.totalSets === 0 ? "" : session.doneSets === 0 ? "not started" : session.doneSets >= session.totalSets ? "complete" : `in progress · ${session.doneSets}/${session.totalSets} sets`;
+    title = `Today: ${name}`;
+    sub = status || "Open the training tab.";
+  }
+  return (
+    <button
+      onClick={onNav}
+      className="w-full flex items-center gap-3 rounded-2xl p-4 text-left active:scale-[0.99] transition"
+      style={{ background: "#0F1524", border: "1px solid rgba(255,255,255,0.06)" }}
+    >
+      <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)" }}>
+        <Dumbbell size={16} className="text-warning" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[14px] font-semibold text-white truncate">{title}</p>
+        <p className="text-[12px] text-text-secondary mt-0.5 truncate">{sub}</p>
+      </div>
+      <span className="text-text-tertiary">›</span>
+    </button>
+  );
+}
+
+/** Always-visible pillar breakdown. For each pillar we either show today's
+ *  contribution OR an explicit "not logged yet" framing — so a LOW-confidence
+ *  score reads as incomplete, not reassuring. Tapping the card still expands
+ *  the wider readout with the nudge message. */
+function PillarExplainer({ readiness, expanded }: { readiness: TodayReadiness; expanded: boolean }) {
+  const breakdown = readiness?.pillar_breakdown ?? null;
+  const conf = readiness?.confidence_level ?? null;
+  const status = PILLAR_META.map((p) => {
+    const v = breakdown?.[p.key];
+    const has = typeof v === "number" || (typeof v === "string" && v !== "" && v !== "—");
+    return { ...p, value: has ? String(v) : null, logged: has };
+  });
+  const missing = status.filter((s) => !s.logged).map((s) => s.label);
+  const incompleteFraming =
+    missing.length === 0
+      ? null
+      : conf === "LOW" || missing.length >= 3
+        ? `${missing.slice(0, 2).join(" and ")}${missing.length > 2 ? ` (+${missing.length - 2} more)` : ""} haven't been logged yet — your score will get more accurate as you log them.`
+        : `Still missing today: ${missing.join(", ")}.`;
+
+  if (!expanded) {
+    return (
+      <div className="mt-4">
+        <div className="flex flex-wrap gap-1.5">
+          {status.map((s) => (
+            <span
+              key={s.key}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
+              style={{
+                background: s.logged ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.02)",
+                border: `1px solid ${s.logged ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.05)"}`,
+                color: s.logged ? "#F0F4FF" : "#4A566A",
+              }}
+            >
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.logged ? s.color : "#4A566A" }} />
+              {s.label}
+              {s.logged ? <span className="tabular-nums opacity-70">{s.value}</span> : <span className="opacity-70">— not logged</span>}
+            </span>
+          ))}
+        </div>
+        {incompleteFraming && (
+          <p className="mt-2 text-[11px] text-text-tertiary leading-snug">{incompleteFraming}</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-5 overflow-hidden" style={{ animation: "fade-up 0.3s ease both" }}>
+      {status.map((s, i) => (
+        <MetricRow
+          key={s.key}
+          color={s.color}
+          name={s.label}
+          value={s.logged ? s.value! : "not logged yet"}
+          trend="stable"
+          note=""
+          hideNote
+          last={i === status.length - 1}
+        />
+      ))}
+      {incompleteFraming && (
+        <p className="mt-3 text-[12px] text-text-tertiary leading-snug">{incompleteFraming}</p>
+      )}
+    </div>
+  );
+}
+
 
 function MacroLine({ label, v, t, color }: { label: string; v: number; t: number | null; color: string }) {
   return (

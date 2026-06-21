@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, Plus, Sparkles, X, Loader2, RefreshCw, Droplet } from "lucide-react";
+import { ChevronLeft, Loader2, RefreshCw, Droplet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { AICard } from "@/components/AIOrb";
@@ -7,11 +7,10 @@ import { RingChart } from "@/components/RingChart";
 import { BottomNav } from "@/components/BottomNav";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { HydrationLogModal } from "@/components/LogModals";
+import { MealDetailModal } from "@/components/MealDetailModal";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
-import { analyzePhoto } from "@/lib/coach.functions";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
-import { getTodayMeals, getTodayHydration, logMeal, type TodayMeal, type HydrationSummary } from "@/lib/shield.functions";
-import { supabase } from "@/integrations/supabase/client";
+import { getTodayMeals, getTodayHydration, type TodayMeal, type HydrationSummary } from "@/lib/shield.functions";
 
 export const Route = createFileRoute("/nutrition")({
   head: () => ({ meta: [{ title: "Nutrition — APEX" }] }),
@@ -27,25 +26,19 @@ const GOAL_LABEL: Record<string, string> = {
 };
 
 function Nutrition() {
-  const [analysis, setAnalysis] = useState<string | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [macros, setMacros] = useState<MacroSummary | null>(null);
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
   const [hydration, setHydration] = useState<HydrationSummary | null>(null);
   const [hydrationOpen, setHydrationOpen] = useState(false);
+  const [openMeal, setOpenMeal] = useState<TodayMeal | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [ptrDelta, setPtrDelta] = useState(0);
   const ptrRef = useRef<HTMLDivElement>(null);
   const ptrStart = useRef<number | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const fn = useServerFn(analyzePhoto);
   const fetchMacros = useServerFn(getTodayMacroSummary);
   const fetchMeals = useServerFn(getTodayMeals);
   const fetchHydration = useServerFn(getTodayHydration);
-  const logMealFn = useServerFn(logMeal);
 
   const reload = async () => {
     setRefreshing(true);
@@ -92,56 +85,7 @@ function Nutrition() {
 
   const pct = (a: number, b: number) => (b > 0 ? Math.min(100, Math.round((a / b) * 100)) : 0);
 
-  const onPhoto = async (file: File) => {
-    setError(null);
-    setAnalysis(null);
-    setAnalyzing(true);
-    try {
-      const reader = new FileReader();
-      const dataUrl: string = await new Promise((res, rej) => {
-        reader.onload = () => res(reader.result as string);
-        reader.onerror = () => rej(reader.error);
-        reader.readAsDataURL(file);
-      });
-      setPreview(dataUrl);
 
-      // 1) Upload to storage so score-nutrition can re-fetch via signed URL.
-      const { data: u } = await supabase.auth.getUser();
-      const uid = u.user?.id;
-      let photoUrl: string | null = null;
-      if (uid) {
-        const ext = (file.type.split("/")[1] || "jpg").replace("jpeg", "jpg");
-        const path = `${uid}/${Date.now()}.${ext}`;
-        const up = await supabase.storage.from("shield-uploads").upload(path, file, { contentType: file.type });
-        if (!up.error) {
-          const { data: signed } = await supabase.storage.from("shield-uploads").createSignedUrl(path, 60 * 60 * 24 * 30);
-          photoUrl = signed?.signedUrl ?? null;
-        }
-      }
-
-      // 2) Persist meal row → triggers score-nutrition (which fills estimated_* and macros card).
-      try { await logMealFn({ data: { meal_description: null, meal_photo_url: photoUrl } }); } catch {}
-
-      // 3) Quick visual analysis for instant feedback.
-      const r = await fn({
-        data: {
-          base64Image: dataUrl,
-          mediaType: file.type || "image/jpeg",
-          prompt:
-            "Identify the food in this image. Estimate portion size and macros (calories, protein, carbs, fat). Format: short food name, then 'Est: XXX kcal · Pg / Cg / Fg', then a 1-sentence note. Be concise.",
-        },
-      });
-      setAnalysis(r.content);
-
-      // Reload after scoring has had a moment.
-      reload();
-      setTimeout(reload, 4000);
-    } catch (e: any) {
-      setError(e?.message ?? "Could not analyze photo.");
-    } finally {
-      setAnalyzing(false);
-    }
-  };
 
   const tCal = macros?.target_calories ?? null;
   const cCal = macros?.consumed_calories ?? 0;
@@ -241,29 +185,11 @@ function Nutrition() {
       <HydrationInsight hydration={hydration} />
 
 
-      {(analyzing || analysis || error) && (
-        <section className="mx-5 mt-4 rounded-2xl border border-ai/30 bg-gradient-to-br from-ai/10 to-sleep/5 p-4 animate-fade-up">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Sparkles size={14} className={`text-ai ${analyzing ? "animate-pulse" : ""}`} />
-              <p className="text-[10px] uppercase tracking-wider text-text-accent font-semibold">
-                {analyzing ? "Analyzing photo…" : "Photo analysis"}
-              </p>
-            </div>
-            <button onClick={() => { setAnalysis(null); setPreview(null); setError(null); }} className="text-text-tertiary">
-              <X size={14} />
-            </button>
-          </div>
-          {preview && <img src={preview} alt="meal" className="mt-3 max-h-44 w-full object-cover rounded-xl" />}
-          {error && <p className="mt-3 text-sm text-danger">{error}</p>}
-          {analysis && <p className="mt-3 text-sm leading-relaxed whitespace-pre-wrap">{analysis}</p>}
-        </section>
-      )}
 
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs uppercase tracking-wider text-text-tertiary">Meals today</p>
-          <p className="text-[11px] text-text-accent">Tap + to snap a photo and track your macros</p>
+          <p className="text-[11px] text-text-accent">Tap + below to log a meal</p>
         </div>
         {meals == null ? (
           <div className="rounded-2xl bg-bg-2 border border-white/5 p-5 flex justify-center">
@@ -271,52 +197,37 @@ function Nutrition() {
           </div>
         ) : meals.length === 0 ? (
           <div className="rounded-2xl bg-bg-2 border border-white/5 p-5">
-            <p className="text-sm text-text-secondary">No meals logged yet today. Tap the + button to snap your first.</p>
+            <p className="text-sm text-text-secondary">No meals logged yet today. Tap the + in the nav below to log your first.</p>
           </div>
         ) : (
           <div className="space-y-2">
             {meals.map((m) => (
-              <div key={m.id} className="rounded-2xl bg-bg-2 border border-white/5 p-4">
-                <div className="flex items-center justify-between">
+              <button
+                key={m.id}
+                onClick={() => setOpenMeal(m)}
+                className="w-full text-left rounded-2xl bg-bg-2 border border-white/5 p-4 active:scale-[0.99] transition"
+              >
+                <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold truncate">{m.meal_description || "Photo meal"}</p>
                     <p className="text-[11px] text-text-tertiary">
                       {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      {m.estimated_calories != null ? ` · ${Math.round(m.estimated_calories)} kcal` : ""}
                     </p>
                   </div>
-                  <p className="font-mono text-sm tabular-nums text-text-secondary">
+                  <p className="font-mono text-sm tabular-nums text-text-secondary shrink-0">
                     {m.claude_score_status === "scored" && m.claude_quality_score != null ? `${m.claude_quality_score}/100` : "scoring…"}
                   </p>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
       </section>
 
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) onPhoto(f);
-          e.target.value = "";
-        }}
-      />
-
-      <button
-        onClick={() => fileRef.current?.click()}
-        className="fixed bottom-28 right-6 z-40 h-14 w-14 rounded-full gradient-brand ai-glow flex items-center justify-center text-white"
-        aria-label="Snap a photo to log a meal"
-      >
-        <Plus size={26} />
-      </button>
-
       <BottomNav onLogged={reload} />
       <HydrationLogModal open={hydrationOpen} onClose={() => setHydrationOpen(false)} onSaved={reload} />
+      <MealDetailModal meal={openMeal} onClose={() => setOpenMeal(null)} />
     </div>
   );
 }
@@ -379,7 +290,31 @@ function HydrationInsight({ hydration }: { hydration: HydrationSummary | null })
   if (!hydration?.target_ml) return null;
   const pct = hydration.target_ml > 0 ? hydration.consumed_ml / hydration.target_ml : 0;
   const hourLocal = new Date().getHours();
-  if (hourLocal < 13 || pct >= 0.55) return null;
+  const underTarget = pct < 0.55;
+
+  // Device-path causal insight: only fires when hydration is meaningfully
+  // under target AND the user's Recovery pillar today dipped vs. their recent
+  // baseline by a real amount. Deterministic comparison — no LLM, no causal
+  // claim, framed as "likely contributor".
+  if (hydration.path === "device" && underTarget) {
+    const today = hydration.recovery_today;
+    const base = hydration.recovery_baseline;
+    const yest = hydration.recovery_yesterday;
+    const ref = today ?? yest;
+    if (ref != null && base != null && base - ref >= 8) {
+      const drop = Math.round(base - ref);
+      return (
+        <div className="mx-5 mt-4">
+          <AICard>
+            Your recovery dipped about <span className="text-text-primary font-semibold">{drop} pts</span> below your recent baseline today — you're also under your water target, which is a likely contributor. Informational guidance, not medical advice.
+          </AICard>
+        </div>
+      );
+    }
+    // Fall through to the generic late-day callout if no observed correlation.
+  }
+
+  if (hourLocal < 13 || !underTarget) return null;
   const shortMl = Math.max(0, hydration.target_ml - hydration.consumed_ml);
   return (
     <div className="mx-5 mt-4">
@@ -389,3 +324,4 @@ function HydrationInsight({ hydration }: { hydration: HydrationSummary | null })
     </div>
   );
 }
+

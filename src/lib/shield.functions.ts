@@ -96,13 +96,27 @@ export type HydrationSummary = {
   had_training_today: boolean;
   weight_kg: number | null;
   path: "device" | "manual";
+  /** Recent recovery context for the causally-aware device-path insight.
+   *  All optional; populated when readiness_scores rows exist. */
+  recovery_today: number | null;
+  recovery_yesterday: number | null;
+  /** Mean of recovery pillar over prior 7 days (excluding today). */
+  recovery_baseline: number | null;
 };
 
 export const getTodayHydration = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<HydrationSummary> => {
     const date = today();
-    const [profileRes, manualRes, trainingRes] = await Promise.all([
+    const yesterday = (() => {
+      const d = new Date(date + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 1);
+      return d.toISOString().slice(0, 10);
+    })();
+    const baselineFrom = (() => {
+      const d = new Date(date + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 8);
+      return d.toISOString().slice(0, 10);
+    })();
+    const [profileRes, manualRes, trainingRes, scoresRes] = await Promise.all([
       context.supabase
         .from("profiles")
         .select("input_path_preference, measurement_weight_kg")
@@ -120,6 +134,13 @@ export const getTodayHydration = createServerFn({ method: "GET" })
         .eq("user_id", context.userId)
         .eq("entry_date", date)
         .maybeSingle(),
+      context.supabase
+        .from("readiness_scores")
+        .select("score_date, pillar_breakdown")
+        .eq("user_id", context.userId)
+        .gte("score_date", baselineFrom)
+        .lte("score_date", date)
+        .order("score_date", { ascending: false }),
     ]);
     const weight = profileRes.data?.measurement_weight_kg != null
       ? Number(profileRes.data.measurement_weight_kg) : null;
@@ -128,12 +149,30 @@ export const getTodayHydration = createServerFn({ method: "GET" })
     const target = weight && weight > 0
       ? Math.round(weight * (hadTraining ? 40 : 30))
       : null;
+
+    const scoreRows = (scoresRes.data ?? []) as Array<{ score_date: string; pillar_breakdown: any }>;
+    const recoveryOf = (iso: string): number | null => {
+      const row = scoreRows.find((r) => r.score_date === iso);
+      const v = row?.pillar_breakdown?.recovery;
+      return typeof v === "number" ? v : null;
+    };
+    const recovery_today = recoveryOf(date);
+    const recovery_yesterday = recoveryOf(yesterday);
+    const priors = scoreRows
+      .filter((r) => r.score_date !== date)
+      .map((r) => r.pillar_breakdown?.recovery)
+      .filter((v): v is number => typeof v === "number");
+    const recovery_baseline = priors.length ? priors.reduce((a, b) => a + b, 0) / priors.length : null;
+
     return {
       consumed_ml: Number(manualRes.data?.hydration_ml ?? 0),
       target_ml: target,
       had_training_today: hadTraining,
       weight_kg: weight,
       path,
+      recovery_today,
+      recovery_yesterday,
+      recovery_baseline,
     };
   });
 
@@ -211,6 +250,10 @@ export type TodayMeal = {
   meal_photo_url: string | null;
   claude_score_status: string;
   claude_quality_score: number | null;
+  estimated_calories: number | null;
+  estimated_protein_g: number | null;
+  estimated_carbs_g: number | null;
+  estimated_fat_g: number | null;
   created_at: string;
 };
 
@@ -219,7 +262,7 @@ export const getTodayMeals = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<TodayMeal[]> => {
     const { data, error } = await context.supabase
       .from("shield_nutrition_logs")
-      .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, created_at, deleted, entry_date")
+      .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, created_at, deleted, entry_date")
       .eq("user_id", context.userId)
       .eq("entry_date", today())
       .eq("deleted", false)
@@ -231,9 +274,14 @@ export const getTodayMeals = createServerFn({ method: "GET" })
       meal_photo_url: r.meal_photo_url,
       claude_score_status: r.claude_score_status,
       claude_quality_score: r.claude_quality_score,
+      estimated_calories: r.estimated_calories,
+      estimated_protein_g: r.estimated_protein_g,
+      estimated_carbs_g: r.estimated_carbs_g,
+      estimated_fat_g: r.estimated_fat_g,
       created_at: r.created_at,
     }));
   });
+
 
 export const updateMeal = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

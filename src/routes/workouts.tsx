@@ -7,6 +7,7 @@ import { AICard } from "@/components/AIOrb";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { toast } from "sonner";
+import { WorkoutLogModal } from "@/components/LogModals";
 
 export const Route = createFileRoute("/workouts")({
   head: () => ({ meta: [{ title: "Workouts — APEX" }] }),
@@ -36,6 +37,7 @@ function WorkoutsPage() {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [preCheckOpen, setPreCheckOpen] = useState(false);
   const [sessionStarted, setSessionStarted] = useState(false);
+  const [freeformOpen, setFreeformOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [ptrDelta, setPtrDelta] = useState(0);
@@ -191,11 +193,31 @@ function WorkoutsPage() {
           <LockBanner plan={plan} />
           <VolumeNudge plan={plan} weekLogs={weekLogs} todayIdx={todayIdx} />
 
-          {/* Start Today's Workout — opens pre-workout readiness sheet */}
+          {/* Start Today's Workout — opens pre-workout readiness sheet.
+              Rest days still expose an opt-in "Train anyway" path so users
+              who want to lift on a scheduled off day aren't blocked. The
+              freeform path reuses the same pre-check + set-logger flow; sets
+              get logged under the generic "Freeform session" name so the
+              weekly-plan structure isn't disturbed. */}
           {(() => {
             const todayDay = plan.plan_data?.days?.[todayIdx];
-            if (!todayDay || todayDay.rest) return null;
+            if (!todayDay) return null;
             if (sessionStarted) return null;
+            if (todayDay.rest) {
+              return (
+                <div className="mx-5 mt-4 rounded-2xl p-4" style={{ background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.25)" }}>
+                  <p className="text-[13px] text-text-primary">Today is a scheduled rest day.</p>
+                  <p className="text-[11px] text-text-tertiary mt-1">Listening to your body matters more than the calendar — train anyway if you're feeling it.</p>
+                  <button
+                    onClick={() => setFreeformOpen(true)}
+                    className="mt-3 w-full rounded-2xl py-3 text-[13px] font-semibold text-white active:scale-[0.98] transition"
+                    style={{ background: "linear-gradient(90deg, #7C3AED, #3B82F6)" }}
+                  >
+                    Train anyway →
+                  </button>
+                </div>
+              );
+            }
             return (
               <div className="mx-5 mt-4">
                 <button
@@ -239,6 +261,12 @@ function WorkoutsPage() {
       )}
 
       {cueEx && <CueSheet exercise={cueEx} onClose={() => setCueEx(null)} />}
+
+      {/* Rest-day "Train anyway" → reuses the existing strain logger so the
+          session still feeds the Training pillar without disturbing the
+          weekly plan structure. Chose freeform-logging over borrowing
+          another day's plan to keep this a one-tap path. */}
+      <WorkoutLogModal open={freeformOpen} onClose={() => setFreeformOpen(false)} onSaved={() => { setFreeformOpen(false); loadAll(); }} />
 
       <BottomNav />
     </div>

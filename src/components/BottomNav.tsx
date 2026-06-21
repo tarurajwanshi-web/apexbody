@@ -34,8 +34,13 @@ export function BottomNav({ onCenter, onLogged }: Props = {}) {
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const isActive = (to: string) => pathname === to || pathname.startsWith(to + "/");
 
+  const onNutritionTab = pathname === "/nutrition" || pathname.startsWith("/nutrition/");
+
   const handleCenter = () => {
     if (onCenter) return onCenter();
+    // On the Nutrition tab, the center + is unambiguously "log a meal" so we
+    // skip the action-sheet detour (recovery already has its own surfaces).
+    if (onNutritionTab) { setMealOpen(true); return; }
     setSheetOpen(true);
   };
 
