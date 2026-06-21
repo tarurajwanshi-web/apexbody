@@ -67,19 +67,37 @@ export const upsertDeviceRecovery = createServerFn({ method: "POST" })
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
+    const entry_date = today();
+    const { data: row, error } = await context.supabase
       .from("shield_device_uploads")
       .upsert(
         {
           user_id: context.userId,
-          entry_date: today(),
+          entry_date,
           device_source: data.device_source,
           screenshot_url: data.screenshot_url,
           parse_status: "pending",
         },
         { onConflict: "user_id,entry_date" },
-      );
+      )
+      .select("id")
+      .single();
     if (error) throw new Error(error.message);
+
+    // Fire-and-forget vision parse. On success it flips parse_status='parsed',
+    // which triggers calculate-score via the DB webhook.
+    try {
+      const fnUrl = `${process.env.SUPABASE_URL}/functions/v1/parse-device-upload`;
+      void fetch(fnUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ upload_id: row?.id, user_id: context.userId, entry_date }),
+      }).catch(() => {});
+    } catch { /* ignore */ }
+
     return { ok: true };
   });
 
