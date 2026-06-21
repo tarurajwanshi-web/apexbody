@@ -14,6 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      body_measurement_events: {
+        Row: {
+          arm_cm: number | null
+          body_fat_pct: number | null
+          created_at: string
+          entry_date: string
+          hip_cm: number | null
+          id: string
+          lean_mass_kg: number | null
+          notes: string | null
+          source: string
+          thigh_cm: number | null
+          user_id: string
+          waist_cm: number | null
+          weight_kg: number | null
+        }
+        Insert: {
+          arm_cm?: number | null
+          body_fat_pct?: number | null
+          created_at?: string
+          entry_date?: string
+          hip_cm?: number | null
+          id?: string
+          lean_mass_kg?: number | null
+          notes?: string | null
+          source?: string
+          thigh_cm?: number | null
+          user_id: string
+          waist_cm?: number | null
+          weight_kg?: number | null
+        }
+        Update: {
+          arm_cm?: number | null
+          body_fat_pct?: number | null
+          created_at?: string
+          entry_date?: string
+          hip_cm?: number | null
+          id?: string
+          lean_mass_kg?: number | null
+          notes?: string | null
+          source?: string
+          thigh_cm?: number | null
+          user_id?: string
+          waist_cm?: number | null
+          weight_kg?: number | null
+        }
+        Relationships: []
+      }
       body_scan_photos: {
         Row: {
           captured_at: string
@@ -401,6 +449,7 @@ export type Database = {
           estimated_calories: number | null
           estimated_carbs_g: number | null
           estimated_fat_g: number | null
+          estimated_items: Json | null
           estimated_protein_g: number | null
           id: string
           meal_description: string | null
@@ -421,6 +470,7 @@ export type Database = {
           estimated_calories?: number | null
           estimated_carbs_g?: number | null
           estimated_fat_g?: number | null
+          estimated_items?: Json | null
           estimated_protein_g?: number | null
           id?: string
           meal_description?: string | null
@@ -441,6 +491,7 @@ export type Database = {
           estimated_calories?: number | null
           estimated_carbs_g?: number | null
           estimated_fat_g?: number | null
+          estimated_items?: Json | null
           estimated_protein_g?: number | null
           id?: string
           meal_description?: string | null
