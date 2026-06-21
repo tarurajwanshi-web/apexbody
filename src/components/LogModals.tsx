@@ -475,7 +475,7 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
               className="mt-3 w-full rounded-2xl py-7 flex flex-col items-center gap-2 text-white active:scale-[0.99] transition"
               style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.18), rgba(59,130,246,0.12))", border: "1px solid rgba(16,185,129,0.5)" }}>
               <Upload size={22} />
-              <span className="text-[14px] font-semibold">{file ? file.name : "Tap to add a photo"}</span>
+              <span className="text-[14px] font-semibold">{file ? "Photo ready" : "Tap to add a photo"}</span>
               <span className="text-[11px] text-text-tertiary">We'll identify the food, then you confirm</span>
             </button>
             <input ref={inputRef} type="file" accept="image/*" capture="environment" className="hidden"
