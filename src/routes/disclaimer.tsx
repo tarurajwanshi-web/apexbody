@@ -69,11 +69,15 @@ function Disclaimer() {
         </div>
 
         <div className="mt-10 text-center text-[11px] text-text-tertiary">
-          <span className="underline">Terms of Service</span> · <span className="underline">Privacy Policy</span> · <span className="underline">Health Data Policy</span>
+          <a href="/terms" className="underline">Terms of Service</a>
+          {" · "}
+          <a href="/privacy" className="underline">Privacy Policy</a>
+          {" · "}
+          <a href="/health-data" className="underline">Health Data Policy</a>
         </div>
       </div>
 
-      <div className="pt-8 space-y-4">
+      <div className="pt-8 space-y-4" style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 8px)" }}>
         <label className="flex w-full items-center gap-3 rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 cursor-pointer">
           <input
             type="checkbox"
@@ -93,7 +97,7 @@ function Disclaimer() {
           {saving ? "Saving…" : "I Understand, Let's Begin"}
         </button>
 
-        <p className="text-center text-[10px] text-text-tertiary">Powered by Claude AI</p>
+        <p className="text-center text-[10px] text-text-tertiary">Powered by Anthropic</p>
       </div>
     </div>
   );
