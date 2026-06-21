@@ -44,13 +44,13 @@ export const upsertManualRecovery = createServerFn({ method: "POST" })
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const payload: Record<string, unknown> = {
+    const payload = {
       user_id: context.userId,
       entry_date: today(),
       recovery_self_rating: data.recovery_self_rating,
       sleep_hours: data.sleep_hours,
+      ...(data.mood_emoji != null ? { mood_emoji: data.mood_emoji } : {}),
     };
-    if (data.mood_emoji != null) payload.mood_emoji = data.mood_emoji;
     const { error } = await context.supabase
       .from("shield_manual_inputs")
       .upsert(payload, { onConflict: "user_id,entry_date" });
