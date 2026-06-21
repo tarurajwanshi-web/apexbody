@@ -57,18 +57,32 @@ async function fetchAllImages(): Promise<WgerImg[]> {
   return out;
 }
 
+// Equipment / qualifier tokens that wger names often omit. Used as
+// non-required tokens when matching — they boost confidence when present,
+// but a wger name doesn't have to contain them.
+const OPTIONAL = new Set([
+  "barbell","dumbbell","cable","machine","kettlebell","band","resistance",
+  "single","arm","leg","floor","incline","decline","weighted",
+]);
+
 function pickBestExerciseId(userName: string, translations: WgerTr[]): number | null {
   const wantLc = userName.trim().toLowerCase();
   for (const t of translations) if (t.name.trim().toLowerCase() === wantLc) return t.exercise;
   const want = tokens(userName);
   if (want.length === 0) return null;
-  // Score by token overlap (need all required tokens to appear).
-  let best: { id: number; len: number } | null = null;
+  const required = want.filter((w) => !OPTIONAL.has(w));
+  const targetTokens = required.length >= 1 ? required : want;
+  let best: { id: number; score: number; len: number } | null = null;
   for (const t of translations) {
     const tn = t.name.toLowerCase();
-    if (!want.every((w) => tn.includes(w))) continue;
-    // Prefer shorter wger names (tighter match).
-    if (!best || t.name.length < best.len) best = { id: t.exercise, len: t.name.length };
+    // All required tokens must appear in the wger name.
+    if (!targetTokens.every((w) => tn.includes(w))) continue;
+    // Score: # of total user tokens (incl. optional) appearing in wger name.
+    let score = 0;
+    for (const w of want) if (tn.includes(w)) score++;
+    if (!best || score > best.score || (score === best.score && t.name.length < best.len)) {
+      best = { id: t.exercise, score, len: t.name.length };
+    }
   }
   return best?.id ?? null;
 }
