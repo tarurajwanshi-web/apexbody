@@ -93,10 +93,11 @@ function dateOffset(iso: string, daysBack: number): string {
 }
 
 type DayInputs = {
-  manual?: { recovery_self_rating: number | null; sleep_hours: number | null; mood_emoji: string | null; hydration_ml: number | null };
+  manual?: { recovery_self_rating: number | null; sleep_hours: number | null; mood_emoji: string | null; hydration_ml: number | null; recovery_source?: string | null };
   device?: { parsed_hrv: number | null; parsed_rhr: number | null; parsed_sleep_hours: number | null };
   meals: Array<{ claude_quality_score: number | null }>;
   training?: { strain_value: number | null };
+  pathPref?: "device" | "manual";
 };
 
 type RecoveryBaseline = { hrv: number | null; rhr: number | null };
