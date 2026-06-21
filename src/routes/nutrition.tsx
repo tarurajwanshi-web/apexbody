@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChevronLeft, Loader2, RefreshCw, Droplet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
 import { AICard } from "@/components/AIOrb";
 import { RingChart } from "@/components/RingChart";
 import { BottomNav } from "@/components/BottomNav";
@@ -10,7 +11,15 @@ import { HydrationLogModal } from "@/components/LogModals";
 import { MealDetailModal } from "@/components/MealDetailModal";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
-import { getTodayMeals, getTodayHydration, type TodayMeal, type HydrationSummary } from "@/lib/shield.functions";
+import {
+  getTodayMeals,
+  getTodayHydration,
+  getTodayHydrationEvents,
+  setBodyweightKg,
+  type TodayMeal,
+  type HydrationSummary,
+  type HydrationEvent,
+} from "@/lib/shield.functions";
 
 export const Route = createFileRoute("/nutrition")({
   head: () => ({ meta: [{ title: "Nutrition — APEX" }] }),
@@ -29,6 +38,7 @@ function Nutrition() {
   const [macros, setMacros] = useState<MacroSummary | null>(null);
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
   const [hydration, setHydration] = useState<HydrationSummary | null>(null);
+  const [hydrationEvents, setHydrationEvents] = useState<HydrationEvent[]>([]);
   const [hydrationOpen, setHydrationOpen] = useState(false);
   const [openMeal, setOpenMeal] = useState<TodayMeal | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -39,6 +49,8 @@ function Nutrition() {
   const fetchMacros = useServerFn(getTodayMacroSummary);
   const fetchMeals = useServerFn(getTodayMeals);
   const fetchHydration = useServerFn(getTodayHydration);
+  const fetchHydrationEvents = useServerFn(getTodayHydrationEvents);
+  const saveWeight = useServerFn(setBodyweightKg);
 
   const reload = async () => {
     setRefreshing(true);
@@ -46,6 +58,7 @@ function Nutrition() {
       fetchMacros().then(setMacros),
       fetchMeals().then(setMeals).catch(() => setMeals([])),
       fetchHydration().then(setHydration).catch(() => {}),
+      fetchHydrationEvents().then(setHydrationEvents).catch(() => setHydrationEvents([])),
     ]);
     setLastUpdatedAt(Date.now());
     setRefreshing(false);

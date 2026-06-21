@@ -119,7 +119,14 @@ export const getTodayHydration = createServerFn({ method: "GET" })
     const [profileRes, manualRes, trainingRes, scoresRes] = await Promise.all([
       context.supabase
         .from("profiles")
-        .select("input_path_preference, measurement_weight_kg")
+        // Read BOTH the measurement weight AND the DEXA lean-mass/bodyfat — we
+        // derive a weight fallback from DEXA for users whose onboarding body
+        // path was DEXA-only (and therefore never wrote measurement_weight_kg).
+        // Root cause of the "Add your weight in settings" bug: only the
+        // measurements-path branch of onboarding wrote measurement_weight_kg,
+        // so DEXA users and "Skip for now" users had a NULL weight even
+        // though their DEXA report contained enough info to derive it.
+        .select("input_path_preference, measurement_weight_kg, dexa_lean_mass_kg, dexa_body_fat_pct")
         .eq("user_id", context.userId)
         .maybeSingle(),
       context.supabase
@@ -142,9 +149,17 @@ export const getTodayHydration = createServerFn({ method: "GET" })
         .lte("score_date", date)
         .order("score_date", { ascending: false }),
     ]);
-    const weight = profileRes.data?.measurement_weight_kg != null
-      ? Number(profileRes.data.measurement_weight_kg) : null;
-    const path: "device" | "manual" = profileRes.data?.input_path_preference === "device" ? "device" : "manual";
+    const p = profileRes.data ?? {} as any;
+    let weight: number | null = p.measurement_weight_kg != null ? Number(p.measurement_weight_kg) : null;
+    // Derive from DEXA: total weight = lean_mass / (1 - bodyfat/100)
+    if ((!weight || weight <= 0) && p.dexa_lean_mass_kg != null && p.dexa_body_fat_pct != null) {
+      const lean = Number(p.dexa_lean_mass_kg);
+      const bf = Number(p.dexa_body_fat_pct);
+      if (lean > 0 && bf >= 0 && bf < 95) {
+        weight = Math.round((lean / (1 - bf / 100)) * 10) / 10;
+      }
+    }
+    const path: "device" | "manual" = p.input_path_preference === "device" ? "device" : "manual";
     const hadTraining = !!trainingRes.data;
     const target = weight && weight > 0
       ? Math.round(weight * (hadTraining ? 40 : 30))
@@ -174,6 +189,38 @@ export const getTodayHydration = createServerFn({ method: "GET" })
       recovery_yesterday,
       recovery_baseline,
     };
+  });
+
+/** Inline weight setter used by the hydration card when no weight is on file.
+ *  Persists to profiles.measurement_weight_kg regardless of body_data_type. */
+export const setBodyweightKg = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ weight_kg: z.number().min(25).max(400) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("profiles")
+      .upsert(
+        { user_id: context.userId, measurement_weight_kg: data.weight_kg },
+        { onConflict: "user_id" },
+      );
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export type HydrationEvent = { id: string; amount_ml: number; created_at: string };
+export const getTodayHydrationEvents = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<HydrationEvent[]> => {
+    const { data, error } = await context.supabase
+      .from("hydration_events")
+      .select("id, amount_ml, created_at")
+      .eq("user_id", context.userId)
+      .eq("entry_date", today())
+      .order("created_at", { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data ?? []) as HydrationEvent[];
   });
 
 

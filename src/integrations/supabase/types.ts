@@ -107,6 +107,63 @@ export type Database = {
         }
         Relationships: []
       }
+      exercise_image_cache: {
+        Row: {
+          exercise_name: string
+          exercise_name_key: string
+          fetched_at: string
+          license: string | null
+          license_author: string | null
+          original_url: string | null
+          storage_path: string
+          wger_exercise_id: number | null
+        }
+        Insert: {
+          exercise_name: string
+          exercise_name_key: string
+          fetched_at?: string
+          license?: string | null
+          license_author?: string | null
+          original_url?: string | null
+          storage_path: string
+          wger_exercise_id?: number | null
+        }
+        Update: {
+          exercise_name?: string
+          exercise_name_key?: string
+          fetched_at?: string
+          license?: string | null
+          license_author?: string | null
+          original_url?: string | null
+          storage_path?: string
+          wger_exercise_id?: number | null
+        }
+        Relationships: []
+      }
+      hydration_events: {
+        Row: {
+          amount_ml: number
+          created_at: string
+          entry_date: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          amount_ml: number
+          created_at?: string
+          entry_date?: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          amount_ml?: number
+          created_at?: string
+          entry_date?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       pre_session_checks: {
         Row: {
           created_at: string

@@ -61,15 +61,26 @@ function WorkoutsPage() {
         .maybeSingle();
       setPlan(planRow as any);
 
-      // If any exercise on this plan is missing a cue, fire a one-time backfill.
+      // Cue upgrade: backfill if any cue missing OR plan still on cue_version<2
+      // (sharp single-correction cues, Prompt D+E). Then fire a one-time wger
+      // image sync so the cue card can render a reference image.
       const days = (planRow as any)?.plan_data?.days ?? [];
+      const cueVer = Number((planRow as any)?.plan_data?.cue_version ?? 1);
       const missingCues = days.some((d: DayPlan) =>
         !d.rest && (d.exercises ?? []).some((ex) => !ex.cue || !ex.cue.trim()),
       );
-      if (missingCues) {
+      if (missingCues || cueVer < 2) {
         void supabase.functions
-          .invoke("backfill-cues", { body: { user_id: uid } })
+          .invoke("backfill-cues", { body: { user_id: uid, force: cueVer < 2 } })
           .then(({ data }) => { if (data?.ok) void reloadPlanOnly(uid); })
+          .catch(() => {});
+      }
+      // Collect unique exercise names and trigger a (no-op if already cached) sync.
+      const allNames = new Set<string>();
+      for (const d of days) for (const ex of d?.exercises ?? []) if (ex?.name) allNames.add(ex.name);
+      if (allNames.size > 0) {
+        void supabase.functions
+          .invoke("sync-exercise-images", { body: { names: Array.from(allNames) } })
           .catch(() => {});
       }
 
@@ -304,7 +315,7 @@ function CueSheet({ exercise, onClose }: { exercise: Exercise; onClose: () => vo
   return (
     <div className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center px-4" onClick={onClose}>
       <div
-        className="w-full max-w-[420px] mx-auto bg-bg-2 rounded-3xl border border-white/10 p-6 animate-fade-up shadow-2xl"
+        className="w-full max-w-[420px] mx-auto bg-bg-2 rounded-3xl border border-white/10 p-6 animate-fade-up shadow-2xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3">
@@ -318,6 +329,9 @@ function CueSheet({ exercise, onClose }: { exercise: Exercise; onClose: () => vo
           </div>
           <button onClick={onClose} className="text-text-tertiary p-1"><X size={18} /></button>
         </div>
+        {/* wger reference image, lazily resolved per exercise. Missing image
+         *  renders nothing (no broken-icon placeholder). */}
+        <ExerciseRefImage exerciseName={exercise.name} />
         <div className="mt-4 rounded-xl p-4" style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.10), rgba(59,130,246,0.08))", border: "1px solid rgba(124,58,237,0.25)" }}>
           <div className="flex items-start gap-2">
             <Sparkles size={14} className="text-ai shrink-0 mt-0.5" />
@@ -329,6 +343,44 @@ function CueSheet({ exercise, onClose }: { exercise: Exercise; onClose: () => vo
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ExerciseRefImage({ exerciseName }: { exerciseName: string }) {
+  const [state, setState] = useState<{ url: string; author: string | null; license: string | null } | null>(null);
+  const [tried, setTried] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const key = exerciseName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+      const { data: row } = await supabase
+        .from("exercise_image_cache")
+        .select("storage_path, license, license_author")
+        .eq("exercise_name_key", key)
+        .maybeSingle();
+      if (!row?.storage_path) { if (!cancelled) setTried(true); return; }
+      const { data: signed } = await supabase.storage.from("exercise-images").createSignedUrl(row.storage_path, 3600);
+      if (cancelled) return;
+      if (signed?.signedUrl) {
+        setState({ url: signed.signedUrl, author: row.license_author ?? null, license: row.license ?? "CC BY-SA 4.0" });
+      }
+      setTried(true);
+    })();
+    return () => { cancelled = true; };
+  }, [exerciseName]);
+  if (!state) return tried ? null : <div className="mt-4 h-32 rounded-xl bg-white/[0.03] animate-pulse" />;
+  return (
+    <div className="mt-4">
+      <img
+        src={state.url}
+        alt={`Reference image for ${exerciseName}`}
+        className="w-full max-h-56 object-contain rounded-xl bg-white"
+        loading="lazy"
+      />
+      <p className="mt-1 text-[10px] text-text-tertiary text-right">
+        Image: wger.de{state.author ? `, ${state.author}` : ""} · {state.license ?? "CC BY-SA 4.0"}
+      </p>
     </div>
   );
 }

@@ -44,9 +44,9 @@ async function callClaude(apiKey: string, prompt: string) {
         "Respond with ONLY a single JSON object, no prose, no markdown fences. " +
         "Schema: { \"days\": [ { \"day\": 1-7, \"day_name\": \"Monday\"...\"Sunday\", \"session_name\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string } ] } ] }. " +
         "Always return exactly 7 days starting Monday. Rest days have rest=true, session_name=null, exercises=[]. " +
-        "Every exercise MUST include a 'cue' field: 1-2 short beginner-friendly sentences of execution guidance " +
-        "(e.g. \"Keep your chest up and drive through your heels as you stand. Brace your core throughout.\"). " +
-        "Cues are plain language, not jargon.",
+        "The 'cue' field is ONE sharp coaching correction — the single thing you'd shout mid-set to fix that exercise's most common failure point. " +
+        "Not a checklist. Not a description of correct form. One real spoken sentence, max ~18 words, second person, lead with the action. " +
+        "Examples of the bar: \"Send your hips back first — if your knees lead, you'll lose your chest.\" / \"Pull the bar into you, don't reach for it.\" / \"Squeeze your glutes at the top before you even think about lowering.\"",
       messages: [{ role: "user", content: prompt }],
     }),
   });
