@@ -210,13 +210,6 @@ function Nutrition() {
       <HydrationCard
         hydration={hydration}
         onLog={() => setHydrationOpen(true)}
-        onSetWeight={async (kg) => {
-          try {
-            await saveWeight({ data: { weight_kg: kg } });
-            toast.success("Weight saved");
-            await reload();
-          } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
-        }}
       />
 
       {hasTarget && hasMeals && proteinShort >= 20 && (
@@ -268,19 +261,14 @@ function Macro({ label, v, t, color: _color, hasMeals }: { label: string; v: num
 function HydrationCard({
   hydration,
   onLog,
-  onSetWeight,
 }: {
   hydration: HydrationSummary | null;
   onLog: () => void;
-  onSetWeight: (kg: number) => void | Promise<void>;
 }) {
   const consumed = hydration?.consumed_ml ?? 0;
   const target = hydration?.target_ml ?? null;
   const pct = target ? Math.min(100, Math.round((consumed / target) * 100)) : 0;
   const liters = (ml: number) => (ml / 1000).toFixed(ml >= 1000 ? 1 : 2);
-  const [editingWeight, setEditingWeight] = useState(false);
-  const [w, setW] = useState("");
-  const [unit, setUnit] = useState<"kg" | "lb">("kg");
 
   return (
     <section className="mx-5 mt-4 rounded-3xl bg-bg-2 border border-white/5 p-5">
@@ -303,7 +291,21 @@ function HydrationCard({
               </p>
             </>
           ) : (
-            <p className="mt-1 text-[12px] text-text-secondary">Add your weight to see a target.</p>
+            // Weight is captured in onboarding and resolved server-side by the
+            // same source-of-truth used by BMR/TDEE and calculate-score. If it
+            // ever resolves to null here, send the user to Settings to correct
+            // it rather than offering a one-off override on the Nutrition tab.
+            <>
+              <p className="mt-1 text-[12px] text-text-secondary">
+                Weight missing — add it once in Settings to see your hydration target.
+              </p>
+              <Link
+                to="/settings"
+                className="mt-2 inline-block text-[12px] font-semibold text-text-accent"
+              >
+                Open Settings →
+              </Link>
+            </>
           )}
         </div>
         {target ? (
@@ -315,40 +317,6 @@ function HydrationCard({
           >+ Log</button>
         ) : null}
       </div>
-
-      {!target && !editingWeight && (
-        <button
-          onClick={() => setEditingWeight(true)}
-          className="mt-4 w-full rounded-xl py-2.5 text-[13px] font-semibold text-white active:scale-95"
-          style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.85), rgba(6,182,212,0.85))" }}
-        >Add weight</button>
-      )}
-      {!target && editingWeight && (
-        <div className="mt-4 rounded-xl p-3 flex items-center gap-2" style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.06)" }}>
-          <input
-            type="number" inputMode="decimal"
-            value={w} onChange={(e) => setW(e.target.value)}
-            placeholder="Weight" autoFocus
-            className="flex-1 bg-transparent text-base text-white focus:outline-none px-2"
-          />
-          <div className="inline-flex rounded-full bg-bg-1 border border-white/10 p-0.5">
-            {(["kg", "lb"] as const).map((u) => (
-              <button key={u} onClick={() => setUnit(u)} className={`px-2.5 py-1 text-[11px] rounded-full ${unit === u ? "gradient-brand text-white" : "text-text-tertiary"}`}>{u}</button>
-            ))}
-          </div>
-          <button
-            onClick={() => {
-              const n = Number(w);
-              if (!isFinite(n) || n <= 0) return;
-              const kg = unit === "kg" ? n : n * 0.45359237;
-              setEditingWeight(false);
-              setW("");
-              void onSetWeight(Math.round(kg * 10) / 10);
-            }}
-            className="rounded-full px-3 py-1.5 text-[12px] font-semibold text-white gradient-brand active:scale-95"
-          >Save</button>
-        </div>
-      )}
 
       {hydration?.path === "device" && target && (
         <p className="mt-3 text-[10px] text-text-tertiary">
