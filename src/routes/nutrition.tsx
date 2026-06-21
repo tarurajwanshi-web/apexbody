@@ -16,7 +16,6 @@ import {
   getTodayMeals,
   getTodayHydration,
   getTodayHydrationEvents,
-  setBodyweightKg,
   type TodayMeal,
   type HydrationSummary,
   type HydrationEvent,
@@ -51,7 +50,6 @@ function Nutrition() {
   const fetchMeals = useServerFn(getTodayMeals);
   const fetchHydration = useServerFn(getTodayHydration);
   const fetchHydrationEvents = useServerFn(getTodayHydrationEvents);
-  const saveWeight = useServerFn(setBodyweightKg);
 
   const reload = async () => {
     setRefreshing(true);

@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, RotateCcw, LogOut, Upload, FileText, Trash2, Download, Loader2, FileLock, ShieldCheck, Heart } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, RotateCcw, LogOut, FileText, FileLock, ShieldCheck, Heart } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useProfile } from "@/lib/store";
 import { BottomNav } from "@/components/BottomNav";
 import { supabase } from "@/integrations/supabase/client";
