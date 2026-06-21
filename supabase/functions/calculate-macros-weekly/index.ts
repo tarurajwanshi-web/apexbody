@@ -413,7 +413,7 @@ async function processUser(supa: SupabaseClient, p: Profile, force: boolean): Pr
     p_user_id: p.user_id,
     p_week_start_date: week_start_date,
     p_week_end_date: week_end_date,
-    p_effective_start_date: week_start_date,
+    p_effective_start_date: new_effective_start_date,
     p_weigh_in_count: weigh_in_count,
     p_days_logged: days_logged,
     p_adherence_pct: adherence_pct,
