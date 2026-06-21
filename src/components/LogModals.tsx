@@ -592,12 +592,18 @@ function JourneyCFallback({ onDone, deviceSource }: { onDone: () => void; device
     } finally { setBusy(false); }
   };
 
+  const deviceLabel =
+    deviceSource === "whoop" ? "WHOOP" :
+    deviceSource === "oura" ? "Oura" :
+    deviceSource === "garmin" ? "Garmin" :
+    "device";
+
   return (
     <div className="space-y-4">
       <div>
         <p className="text-[14px] font-semibold text-white">Couldn't read that one</p>
         <p className="text-[13px] text-text-secondary mt-1">
-          We couldn't pull recovery numbers out of your {deviceSource} screenshot today.
+          We couldn't pull recovery numbers out of your {deviceLabel} screenshot today.
           Want to log how recovered you feel manually instead, just for today?
         </p>
       </div>
