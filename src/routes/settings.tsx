@@ -144,13 +144,6 @@ function Settings() {
         <LinkRow to="/health-data" label="Health Data Policy" Icon={ShieldCheck} />
       </Group>
 
-      <p className="mx-5 mt-3 text-[11px] text-text-tertiary leading-relaxed">
-        Exercise reference images provided by the <a href="https://wger.de" target="_blank" rel="noreferrer" className="underline">wger project</a> (wger.de), licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer" className="underline">CC BY-SA 4.0</a>. Per-image attribution shown alongside each image.
-      </p>
-
-
-
-
       <button
         onClick={handleSignOut}
         className="mx-5 mt-6 w-[calc(100%-2.5rem)] flex items-center justify-center gap-2 rounded-2xl bg-bg-2 border border-white/10 py-3.5 text-sm font-semibold"
@@ -186,6 +179,17 @@ function Settings() {
           </div>
         </div>
       )}
+
+      <footer className="mx-5 mt-10 text-center space-y-2 select-none">
+        <p className="text-[10px] text-text-tertiary tracking-wide">Powered by Anthropic Claude</p>
+        <p className="text-[11px] text-text-secondary font-semibold tracking-wide">APEX v1.1 MVP</p>
+        <p className="text-[10px] text-text-tertiary leading-relaxed">
+          © 2026 APEX. All rights reserved.<br />
+          APEX, the APEX shield, and the APEX logo are proprietary<br />
+          marks. Unauthorized use, reproduction, or distribution of<br />
+          the APEX name, mark, or shield design is prohibited.
+        </p>
+      </footer>
 
       <BottomNav />
     </div>
