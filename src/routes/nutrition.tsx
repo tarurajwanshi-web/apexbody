@@ -245,12 +245,19 @@ function Nutrition() {
 }
 
 function Macro({ label, v, t, color, hasMeals }: { label: string; v: number; t: number; color: string; hasMeals: boolean }) {
-  const pct = t > 0 ? Math.min(100, Math.round((v / t) * 100)) : 0;
+  const rawPct = t > 0 ? Math.round((v / t) * 100) : 0;
+  const pct = t > 0 ? Math.min(100, rawPct) : 0;
+  // Flag a meaningful per-macro overage (>10%) with amber, matching the
+  // calorie bar treatment. Same calm, informational tone.
+  const over = t > 0 && hasMeals && rawPct > 110;
+  const ringColor = over ? "#F59E0B" : color;
   return (
     <div className="flex flex-col items-center gap-1">
-      <RingChart size={56} stroke={5} rings={[{ value: pct, color }]} centerLabel={hasMeals ? `${pct}%` : "—"} />
+      <RingChart size={56} stroke={5} rings={[{ value: pct, color: ringColor }]} centerLabel={hasMeals ? `${rawPct}%` : "—"} />
       <p className="text-[11px] font-semibold mt-1">{label}</p>
-      <p className="text-[10px] text-text-tertiary">{hasMeals ? `${v}/${t || "—"}g` : `${t || "—"}g target`}</p>
+      <p className="text-[10px]" style={{ color: over ? "#F59E0B" : undefined }}>
+        {hasMeals ? `${v}/${t || "—"}g${over ? ` · +${v - t}g` : ""}` : `${t || "—"}g target`}
+      </p>
     </div>
   );
 }
