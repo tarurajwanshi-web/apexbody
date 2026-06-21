@@ -67,6 +67,15 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Audit #3: ownership check — caller must be the upload's user (via JWT)
+    // or an internal-secret dispatcher (the DB trigger that fires on insert).
+    const authz = await authorizeCaller(req, supabase, row.user_id);
+    if (!authz.ok) {
+      return new Response(JSON.stringify({ error: authz.error }), {
+        status: authz.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (!anthropicKey) {
       await markFailed(row.user_id, row.entry_date);
       return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY missing" }), {
