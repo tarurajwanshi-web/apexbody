@@ -1,9 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, useCallback, useMemo, useRef, type ReactNode } from "react";
-import { ChevronLeft, Lock, Check, Dumbbell, Sparkles, X, ChevronDown, ChevronUp, Zap, Camera, Trash2, Loader2 } from "lucide-react";
+import { ChevronLeft, Lock, Check, Dumbbell, Sparkles, X, ChevronDown, ChevronUp, Zap, Camera, Trash2, Loader2, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { BottomNav } from "@/components/BottomNav";
 import { AICard } from "@/components/AIOrb";
+import { RefreshStamp } from "@/components/RefreshStamp";
+import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/workouts")({
@@ -34,10 +36,16 @@ function WorkoutsPage() {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [preCheckOpen, setPreCheckOpen] = useState(false);
   const [sessionStarted, setSessionStarted] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [ptrDelta, setPtrDelta] = useState(0);
+  const ptrRef = useRef<HTMLDivElement>(null);
+  const ptrStart = useRef<number | null>(null);
   const todayIdx = todayMondayIndex();
 
   const loadAll = useCallback(async () => {
-    setLoading(true);
+    setLoading((prev) => prev); // no-op to keep prior behavior on first call
+    setRefreshing(true);
     try {
       const { data: u } = await supabase.auth.getUser();
       const uid = u.user?.id;
