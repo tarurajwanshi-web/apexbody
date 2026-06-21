@@ -196,31 +196,66 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
   const [mood, setMood] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [alreadyUploaded, setAlreadyUploaded] = useState(false);
+  const [alreadyMood, setAlreadyMood] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fn = useServerFn(upsertDeviceRecovery);
   const moodFn = useServerFn(upsertMood);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!file) { setErr("Please select a screenshot."); return; }
-    setBusy(true); setErr(null);
-    try {
+  // Detect what's already saved today so the form can accept partial submits.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
       const { data: u } = await supabase.auth.getUser();
       const uid = u.user?.id;
-      if (!uid) throw new Error("Not signed in.");
-      const ext = file.name.split(".").pop() || "png";
-      const path = `${uid}/recovery/${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from("shield-uploads").upload(path, file, { upsert: true });
-      if (upErr) throw new Error(upErr.message);
-      await fn({ data: { device_source: source, screenshot_url: path } });
-      if (mood) {
-        try { await moodFn({ data: { mood_emoji: mood } }); } catch { /* mood is optional */ }
+      if (!uid) return;
+      const today = new Date().toISOString().slice(0, 10);
+      const [up, mi] = await Promise.all([
+        supabase.from("shield_device_uploads").select("id").eq("user_id", uid).eq("entry_date", today).maybeSingle(),
+        supabase.from("shield_manual_inputs").select("mood_emoji").eq("user_id", uid).eq("entry_date", today).maybeSingle(),
+      ]);
+      if (cancelled) return;
+      setAlreadyUploaded(!!up.data);
+      const m = (mi.data as any)?.mood_emoji ?? null;
+      setAlreadyMood(m);
+      if (m) setMood(m);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    // Independent inputs: allow file alone, mood alone, or both. Submission is
+    // valid as long as at least one new value (or change) exists, OR the user
+    // is updating their mood while a device upload from earlier still stands.
+    const hasNewFile = !!file;
+    const hasMood = !!mood;
+    if (!hasNewFile && !hasMood && !alreadyUploaded) {
+      setErr("Add a screenshot or pick a mood — either works.");
+      return;
+    }
+    setBusy(true); setErr(null);
+    try {
+      if (hasNewFile) {
+        const { data: u } = await supabase.auth.getUser();
+        const uid = u.user?.id;
+        if (!uid) throw new Error("Not signed in.");
+        const ext = file!.name.split(".").pop() || "png";
+        const path = `${uid}/recovery/${Date.now()}.${ext}`;
+        const { error: upErr } = await supabase.storage.from("shield-uploads").upload(path, file!, { upsert: true });
+        if (upErr) throw new Error(upErr.message);
+        await fn({ data: { device_source: source, screenshot_url: path } });
+      }
+      if (hasMood && mood !== alreadyMood) {
+        try { await moodFn({ data: { mood_emoji: mood! } }); } catch { /* best-effort */ }
       }
       onSaved();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Upload failed. Try again.");
+      setErr(e instanceof Error ? e.message : "Save failed. Try again.");
     } finally { setBusy(false); }
   };
+
+  const canSubmit = !!file || !!mood || alreadyUploaded;
 
   return (
     <form onSubmit={submit} className="space-y-5">
@@ -242,24 +277,33 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
       </div>
 
       <div>
-        <label className="text-[12px] uppercase text-text-tertiary tracking-wider">Screenshot</label>
+        <label className="text-[12px] uppercase text-text-tertiary tracking-wider flex items-center justify-between">
+          <span>Screenshot</span>
+          {alreadyUploaded && !file && (
+            <span className="text-[10px] text-success normal-case tracking-normal">✓ already uploaded today</span>
+          )}
+        </label>
         <button type="button" onClick={() => inputRef.current?.click()}
           className="mt-3 w-full rounded-2xl py-6 flex flex-col items-center gap-2 text-text-secondary active:scale-[0.99] transition"
           style={{ background: "#0A0E1A", border: "1px dashed rgba(124,58,237,0.4)" }}>
           <Upload size={20} />
-          <span className="text-[13px]">{file ? file.name : "Tap to upload"}</span>
+          <span className="text-[13px]">{file ? "Screenshot ready" : alreadyUploaded ? "Replace screenshot (optional)" : "Tap to upload"}</span>
         </button>
         <input ref={inputRef} type="file" accept="image/*" className="hidden"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       </div>
 
       <MoodPicker value={mood} onChange={setMood} />
+      <p className="text-[11px] text-text-tertiary -mt-2">
+        Mood and screenshot are independent — save just one if that's all you have right now.
+      </p>
 
       {err && <p className="text-[12px] text-red-400">{err}</p>}
-      <SubmitBtn busy={busy} label="Upload screenshot" disabled={!file} />
+      <SubmitBtn busy={busy} label="Save recovery" disabled={!canSubmit} />
     </form>
   );
 }
+
 
 /** Quick water-logging modal. Tap a preset volume; updates today's total. */
 export function HydrationLogModal({ open, onClose, onSaved }: Props) {
