@@ -187,24 +187,6 @@ function Nutrition() {
       <HydrationInsight hydration={hydration} />
 
 
-      {(analyzing || analysis || error) && (
-        <section className="mx-5 mt-4 rounded-2xl border border-ai/30 bg-gradient-to-br from-ai/10 to-sleep/5 p-4 animate-fade-up">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Sparkles size={14} className={`text-ai ${analyzing ? "animate-pulse" : ""}`} />
-              <p className="text-[10px] uppercase tracking-wider text-text-accent font-semibold">
-                {analyzing ? "Analyzing photo…" : "Photo analysis"}
-              </p>
-            </div>
-            <button onClick={() => { setAnalysis(null); setPreview(null); setError(null); }} className="text-text-tertiary">
-              <X size={14} />
-            </button>
-          </div>
-          {preview && <img src={preview} alt="meal" className="mt-3 max-h-44 w-full object-cover rounded-xl" />}
-          {error && <p className="mt-3 text-sm text-danger">{error}</p>}
-          {analysis && <p className="mt-3 text-sm leading-relaxed whitespace-pre-wrap">{analysis}</p>}
-        </section>
-      )}
 
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
