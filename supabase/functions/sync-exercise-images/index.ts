@@ -1,19 +1,16 @@
 // sync-exercise-images
 // Fetches reference images for exercise names from the wger public API
-// (https://wger.de, CC-BY-SA 4.0) and caches them in Supabase Storage so
-// the app does not hotlink wger on every page load.
+// (https://wger.de, CC-BY-SA 4.0) and caches them in Supabase Storage so we
+// do not hotlink wger on every page load. Per CC-BY-SA we persist the
+// per-image license_author so the client can render visible attribution.
 //
-// Input: { names: string[] }   -> sync just those names
-//        {}                    -> scan all weekly_plans, dedupe, sync missing
+// Strategy: wger's API has no working full-text search, so we fetch the full
+// English exercise-translation index once per invocation and match locally:
+//   1. exact (case-insensitive) name match → 2. all user-name tokens appear
+//   in a wger name. Anything else is left unmatched (a missing image is
+//   strictly better than a wrong image).
 //
-// Per-row we persist: storage_path, wger_exercise_id, license, license_author,
-// original_url. This metadata is required for the per-image CC-BY-SA
-// attribution caption rendered in the client.
-//
-// Matching strategy: exact (case-insensitive) wger name match first, then a
-// loose contains-match against the wger result list when the user-provided
-// name contains keywords that appear in a wger exercise name. We skip rather
-// than guess wrong: an absent image is much better than a mismatched one.
+// Input: { names?: string[] } — if omitted, scans all weekly_plans.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const cors = {
@@ -23,71 +20,57 @@ const cors = {
 };
 
 const BUCKET = "exercise-images";
-const WGER_BASE = "https://wger.de/api/v2";
+const WGER = "https://wger.de/api/v2";
 
-function nameKey(s: string) {
-  return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+const nameKey = (s: string) =>
+  s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+
+const tokens = (s: string) =>
+  s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((t) => t.length > 2);
+
+type WgerTr = { exercise: number; name: string };
+type WgerImg = { exercise: number; image: string; is_main: boolean; license_author: string | null };
+
+async function fetchAllEnglishTranslations(): Promise<WgerTr[]> {
+  const out: WgerTr[] = [];
+  let url: string | null = `${WGER}/exercise-translation/?language=2&limit=200`;
+  while (url) {
+    const r = await fetch(url);
+    if (!r.ok) break;
+    const j = await r.json() as { results?: WgerTr[]; next?: string | null };
+    for (const t of j.results ?? []) if (t.exercise && t.name) out.push({ exercise: t.exercise, name: t.name });
+    url = j.next ?? null;
+  }
+  return out;
 }
 
-function tokens(s: string): string[] {
-  return s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((t) => t.length > 2);
+async function fetchAllImages(): Promise<WgerImg[]> {
+  const out: WgerImg[] = [];
+  let url: string | null = `${WGER}/exerciseimage/?limit=200`;
+  while (url) {
+    const r = await fetch(url);
+    if (!r.ok) break;
+    const j = await r.json() as { results?: WgerImg[]; next?: string | null };
+    for (const im of j.results ?? []) if (im.image && im.exercise) out.push(im);
+    url = j.next ?? null;
+  }
+  return out;
 }
 
-async function findWgerExercise(name: string): Promise<{ id: number; name: string } | null> {
-  // English = language id 2 on wger.
-  // Use exerciseinfo for richer payload (includes "name" and license context).
-  const search = encodeURIComponent(name);
-  const url = `${WGER_BASE}/exerciseinfo/?language=2&limit=50&name=${search}`;
-  let res: Response;
-  try { res = await fetch(url); } catch { return null; }
-  if (!res.ok) return null;
-  const json = await res.json().catch(() => null) as { results?: Array<{ id: number; name?: string; translations?: Array<{ language: number; name: string }> }> } | null;
-  const results = json?.results ?? [];
-  if (results.length === 0) {
-    // Fallback: search exercise endpoint
-    const r2 = await fetch(`${WGER_BASE}/exercise/?language=2&limit=50&name=${search}`).catch(() => null);
-    if (!r2 || !r2.ok) return null;
-    const j2 = await r2.json().catch(() => null) as { results?: Array<{ id?: number; exercise_base?: number; name?: string }> } | null;
-    const r = j2?.results?.[0];
-    const id = r?.exercise_base ?? r?.id;
-    if (typeof id !== "number") return null;
-    return { id, name: r?.name ?? name };
+function pickBestExerciseId(userName: string, translations: WgerTr[]): number | null {
+  const wantLc = userName.trim().toLowerCase();
+  for (const t of translations) if (t.name.trim().toLowerCase() === wantLc) return t.exercise;
+  const want = tokens(userName);
+  if (want.length === 0) return null;
+  // Score by token overlap (need all required tokens to appear).
+  let best: { id: number; len: number } | null = null;
+  for (const t of translations) {
+    const tn = t.name.toLowerCase();
+    if (!want.every((w) => tn.includes(w))) continue;
+    // Prefer shorter wger names (tighter match).
+    if (!best || t.name.length < best.len) best = { id: t.exercise, len: t.name.length };
   }
-  const wantTokens = tokens(name);
-  // Exact match first (case-insensitive).
-  for (const r of results) {
-    const cand = r.translations?.find((t) => t.language === 2)?.name ?? r.name ?? "";
-    if (cand.trim().toLowerCase() === name.trim().toLowerCase()) return { id: r.id, name: cand };
-  }
-  // Loose contains match — require ALL tokens of the user-name to appear in wger name.
-  for (const r of results) {
-    const cand = (r.translations?.find((t) => t.language === 2)?.name ?? r.name ?? "").toLowerCase();
-    if (wantTokens.length > 0 && wantTokens.every((t) => cand.includes(t))) {
-      return { id: r.id, name: cand };
-    }
-  }
-  return null;
-}
-
-async function findWgerImage(exerciseBaseId: number): Promise<{ url: string; license: string | null; license_author: string | null } | null> {
-  const url = `${WGER_BASE}/exerciseimage/?exercise_base=${exerciseBaseId}&is_main=True&limit=5`;
-  let res: Response;
-  try { res = await fetch(url); } catch { return null; }
-  if (!res.ok) return null;
-  const json = await res.json().catch(() => null) as { results?: Array<{ image: string; license_author?: string; license?: number; license_object?: { short_name?: string } }> } | null;
-  let r = json?.results?.[0];
-  if (!r) {
-    const res2 = await fetch(`${WGER_BASE}/exerciseimage/?exercise_base=${exerciseBaseId}&limit=5`).catch(() => null);
-    if (!res2 || !res2.ok) return null;
-    const j2 = await res2.json().catch(() => null) as { results?: Array<{ image: string; license_author?: string; license?: number; license_object?: { short_name?: string } }> } | null;
-    r = j2?.results?.[0];
-  }
-  if (!r?.image) return null;
-  return {
-    url: r.image,
-    license: r.license_object?.short_name ?? "CC-BY-SA 4.0",
-    license_author: r.license_author ?? null,
-  };
+  return best?.id ?? null;
 }
 
 Deno.serve(async (req) => {
@@ -99,9 +82,8 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     let names: string[] = Array.isArray(body?.names) ? body.names : [];
-
     if (names.length === 0) {
-      const { data: plans } = await supa.from("weekly_plans").select("plan_data").limit(200);
+      const { data: plans } = await supa.from("weekly_plans").select("plan_data").limit(500);
       const set = new Set<string>();
       for (const p of plans ?? []) {
         const days = (p as any)?.plan_data?.days ?? [];
@@ -113,24 +95,35 @@ Deno.serve(async (req) => {
     // Skip names already cached.
     const keys = names.map(nameKey);
     const { data: existing } = await supa
-      .from("exercise_image_cache")
-      .select("exercise_name_key")
-      .in("exercise_name_key", keys);
+      .from("exercise_image_cache").select("exercise_name_key").in("exercise_name_key", keys);
     const have = new Set((existing ?? []).map((r: any) => r.exercise_name_key));
     const todo = names.filter((n) => !have.has(nameKey(n)));
+    if (todo.length === 0) {
+      return new Response(JSON.stringify({ ok: true, processed: 0, matched: 0, missing: [] }), {
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
+    // Build the wger indexes once.
+    const [translations, images] = await Promise.all([fetchAllEnglishTranslations(), fetchAllImages()]);
+    const imgsByExercise = new Map<number, WgerImg[]>();
+    for (const im of images) {
+      const arr = imgsByExercise.get(im.exercise) ?? [];
+      arr.push(im); imgsByExercise.set(im.exercise, arr);
+    }
 
     const report = { processed: 0, matched: 0, missing: [] as string[] };
     for (const name of todo) {
       report.processed++;
-      const ex = await findWgerExercise(name);
-      if (!ex) { report.missing.push(name); continue; }
-      const img = await findWgerImage(ex.id);
-      if (!img) { report.missing.push(name); continue; }
-      // Download
-      const imgRes = await fetch(img.url).catch(() => null);
+      const exId = pickBestExerciseId(name, translations);
+      if (exId == null) { report.missing.push(name); continue; }
+      const imgs = imgsByExercise.get(exId);
+      if (!imgs?.length) { report.missing.push(name); continue; }
+      const img = imgs.find((i) => i.is_main) ?? imgs[0];
+      const imgRes = await fetch(img.image).catch(() => null);
       if (!imgRes || !imgRes.ok) { report.missing.push(name); continue; }
       const blob = await imgRes.arrayBuffer();
-      const ext = (img.url.split(".").pop() || "jpg").toLowerCase().split("?")[0].slice(0, 5);
+      const ext = (img.image.split(".").pop() || "png").toLowerCase().split("?")[0].slice(0, 5);
       const path = `${nameKey(name)}.${ext}`;
       const ct = imgRes.headers.get("content-type") || `image/${ext}`;
       const up = await supa.storage.from(BUCKET).upload(path, new Uint8Array(blob), { contentType: ct, upsert: true });
@@ -139,10 +132,10 @@ Deno.serve(async (req) => {
         exercise_name_key: nameKey(name),
         exercise_name: name,
         storage_path: path,
-        wger_exercise_id: ex.id,
-        license: img.license,
-        license_author: img.license_author,
-        original_url: img.url,
+        wger_exercise_id: exId,
+        license: "CC BY-SA 4.0",
+        license_author: img.license_author || "wger contributors",
+        original_url: img.image,
       });
       report.matched++;
     }
