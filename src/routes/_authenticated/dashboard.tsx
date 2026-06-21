@@ -107,9 +107,8 @@ function Dashboard() {
     setDay(getDayOfJourney());
     const h = new Date().getHours();
     setGreet(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
-    reloadReadiness();
-    reloadMacros();
-    reloadActivity();
+    // Initial load — establishes the "Updated [time]" stamp.
+    reloadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -222,10 +221,12 @@ function Dashboard() {
         transition: ptrDelta ? "none" : "transform 0.2s ease",
       }}
     >
-      {/* PTR indicator */}
+      {/* PTR indicator — always shows the word "Refreshing…" so the gesture is unambiguous. */}
       {(ptrDelta > 0 || refreshing) && (
-        <div className="absolute left-1/2 -translate-x-1/2 top-2 z-50 text-text-secondary">
-          <RefreshCw size={18} className={refreshing ? "animate-spin" : ""} style={{ transform: `rotate(${ptrDelta * 4}deg)` }} />
+        <div className="absolute left-1/2 -translate-x-1/2 top-2 z-50 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium text-text-secondary"
+          style={{ background: "rgba(15,21,36,0.85)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(8px)" }}>
+          <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} style={{ transform: refreshing ? undefined : `rotate(${ptrDelta * 4}deg)` }} />
+          <span>{refreshing ? "Refreshing…" : ptrDelta >= 60 ? "Release to refresh" : "Pull to refresh"}</span>
         </div>
       )}
       {/* Subtle radial backdrop */}
@@ -245,6 +246,7 @@ function Dashboard() {
               {greet}, {profile.name || "Athlete"}
             </h1>
             <p className="text-[13px] text-text-secondary mt-1">{subline}</p>
+            <RefreshStamp className="mt-1.5" refreshing={refreshing} lastUpdatedAt={lastUpdatedAt} />
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span
