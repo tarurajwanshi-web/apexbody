@@ -244,13 +244,15 @@ function Nutrition() {
   );
 }
 
-function Macro({ label, v, t, color, hasMeals }: { label: string; v: number; t: number; color: string; hasMeals: boolean }) {
+function Macro({ label, v, t, color: _color, hasMeals }: { label: string; v: number; t: number; color: string; hasMeals: boolean }) {
   const rawPct = t > 0 ? Math.round((v / t) * 100) : 0;
   const pct = t > 0 ? Math.min(100, rawPct) : 0;
-  // Flag a meaningful per-macro overage (>10%) with amber, matching the
-  // calorie bar treatment. Same calm, informational tone.
+  // Same color-zone system used by the APEX score ring and pillar dots:
+  // pct=100 reads as a confident green, missing the target slides through
+  // yellow → amber → red. Meaningful overshoot (>110%) still snaps to amber
+  // for the calorie/macro-overage tone consistent with the rest of the app.
   const over = t > 0 && hasMeals && rawPct > 110;
-  const ringColor = over ? "#F59E0B" : color;
+  const ringColor = !hasMeals ? "#4A566A" : over ? "#F59E0B" : scoreColor(pct);
   return (
     <div className="flex flex-col items-center gap-1">
       <RingChart size={56} stroke={5} rings={[{ value: pct, color: ringColor }]} centerLabel={hasMeals ? `${rawPct}%` : "—"} />
