@@ -1,22 +1,22 @@
-import { Camera, Heart } from "lucide-react";
+import { Camera, Heart, Ruler } from "lucide-react";
 
-type Action = "meal" | "recovery";
+export type QuickAction = "meal" | "recovery" | "body";
 type Props = {
   open: boolean;
   onClose: () => void;
-  onPick: (action: Action) => void;
+  onPick: (action: QuickAction) => void;
 };
 
 /**
- * Center-nav quick-action launcher. Two options for now (meal, recovery).
- * Structure deliberately list-driven so a third "body photo" item can be
- * added later when the Photo State Engine ships — see Prompt B addendum.
+ * Center-nav quick-action launcher. Three direct-access logging shortcuts:
+ * Recovery, Meal, Body measurement. Each routes straight to its flow.
  */
 export function QuickActionSheet({ open, onClose, onPick }: Props) {
   if (!open) return null;
-  const items: Array<{ key: Action; icon: typeof Camera; label: string; sub: string; tint: string }> = [
-    { key: "meal",     icon: Camera, label: "Log a meal",     sub: "Snap a photo, edit, log macros",         tint: "rgba(16,185,129,0.45)" },
-    { key: "recovery", icon: Heart,  label: "Log recovery",   sub: "How you feel, sleep, mood",              tint: "rgba(139,92,246,0.45)" },
+  const items: Array<{ key: QuickAction; icon: typeof Camera; label: string; sub: string; tint: string }> = [
+    { key: "recovery", icon: Heart,  label: "Log recovery",       sub: "How you feel, sleep, mood",                tint: "rgba(139,92,246,0.45)" },
+    { key: "meal",     icon: Camera, label: "Log a meal",         sub: "Snap a photo — itemized macros",           tint: "rgba(16,185,129,0.45)" },
+    { key: "body",     icon: Ruler,  label: "Body measurement",   sub: "Weight, body fat, waist / hip / arms / thigh", tint: "rgba(59,130,246,0.45)" },
   ];
   return (
     <div
