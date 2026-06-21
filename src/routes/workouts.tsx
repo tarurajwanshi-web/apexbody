@@ -272,11 +272,10 @@ function WorkoutsPage() {
 
       {cueEx && <CueSheet exercise={cueEx} onClose={() => setCueEx(null)} />}
 
-      {/* Rest-day "Train anyway" → reuses the existing strain logger so the
-          session still feeds the Training pillar without disturbing the
-          weekly plan structure. Chose freeform-logging over borrowing
-          another day's plan to keep this a one-tap path. */}
-      <WorkoutLogModal open={freeformOpen} onClose={() => setFreeformOpen(false)} onSaved={() => { setFreeformOpen(false); loadAll(); }} />
+      {/* Rest-day path: see RestDaySwapCard. Train-anyway now offers a
+          swap against the week's planned sessions instead of an add, so
+          the user's stated training-days-per-week cap is respected. This
+          is a manual stopgap — no adaptive volume rebalancing happens. */}
 
       <BottomNav />
     </div>
