@@ -32,13 +32,19 @@ export const getTodayMacroSummary = createServerFn({ method: "GET" })
     const sum = (key: string) =>
       (meals ?? []).reduce((s: number, m: any) => s + Number(m[key] ?? 0), 0);
 
-    // Always select the MOST RECENT macro target row, so the screen reflects
-    // the latest calculate-macros run rather than an arbitrary stale row.
+    // Audit #6: select the ACTIVE effective-dated target — the row whose
+    // [effective_start_date, effective_end_date) window contains today.
+    // The prior `order by calculated_at` approach surfaced future-dated rows
+    // (e.g. a Monday weekly-review insert that activates next Monday but is
+    // calculated today) immediately, instead of waiting for them to take effect.
+    const todayStr = today();
     const { data: target } = await context.supabase
       .from("daily_macro_targets")
-      .select("target_calories, target_protein_g, target_carbs_g, target_fat_g, calculated_at")
+      .select("target_calories, target_protein_g, target_carbs_g, target_fat_g, effective_start_date, effective_end_date")
       .eq("user_id", context.userId)
-      .order("calculated_at", { ascending: false })
+      .lte("effective_start_date", todayStr)
+      .or(`effective_end_date.is.null,effective_end_date.gt.${todayStr}`)
+      .order("effective_start_date", { ascending: false })
       .limit(1)
       .maybeSingle();
 
