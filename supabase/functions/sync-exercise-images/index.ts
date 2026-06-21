@@ -31,12 +31,27 @@ const tokens = (s: string) =>
 type WgerTr = { exercise: number; name: string };
 type WgerImg = { exercise: number; image: string; is_main: boolean; license_author: string | null };
 
+// Hard page caps so a single invocation cannot exhaust the 150s budget on
+// wger pagination alone. wger has ~hundreds of pages at limit=200; we cap
+// well below that and let subsequent invocations pick up the rest.
+const MAX_PAGES = 8;
+const FETCH_TIMEOUT_MS = 8000;
+
+async function fetchWithTimeout(url: string): Promise<Response | null> {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try { return await fetch(url, { signal: ctrl.signal }); }
+  catch { return null; }
+  finally { clearTimeout(to); }
+}
+
 async function fetchAllEnglishTranslations(): Promise<WgerTr[]> {
   const out: WgerTr[] = [];
   let url: string | null = `${WGER}/exercise-translation/?language=2&limit=200`;
-  while (url) {
-    const r = await fetch(url);
-    if (!r.ok) break;
+  let pages = 0;
+  while (url && pages++ < MAX_PAGES) {
+    const r = await fetchWithTimeout(url);
+    if (!r || !r.ok) break;
     const j = await r.json() as { results?: WgerTr[]; next?: string | null };
     for (const t of j.results ?? []) if (t.exercise && t.name) out.push({ exercise: t.exercise, name: t.name });
     url = j.next ?? null;
@@ -47,9 +62,10 @@ async function fetchAllEnglishTranslations(): Promise<WgerTr[]> {
 async function fetchAllImages(): Promise<WgerImg[]> {
   const out: WgerImg[] = [];
   let url: string | null = `${WGER}/exerciseimage/?limit=200`;
-  while (url) {
-    const r = await fetch(url);
-    if (!r.ok) break;
+  let pages = 0;
+  while (url && pages++ < MAX_PAGES) {
+    const r = await fetchWithTimeout(url);
+    if (!r || !r.ok) break;
     const j = await r.json() as { results?: WgerImg[]; next?: string | null };
     for (const im of j.results ?? []) if (im.image && im.exercise) out.push(im);
     url = j.next ?? null;
@@ -126,15 +142,21 @@ Deno.serve(async (req) => {
       arr.push(im); imgsByExercise.set(im.exercise, arr);
     }
 
-    const report = { processed: 0, matched: 0, missing: [] as string[] };
-    for (const name of todo) {
+    // Cap per-invocation work so we never approach the 150s limit. Callers
+    // can re-invoke to drain the remainder; deferred names are returned.
+    const MAX_PER_RUN = 25;
+    const deferred = todo.slice(MAX_PER_RUN);
+    const batch = todo.slice(0, MAX_PER_RUN);
+
+    const report = { processed: 0, matched: 0, missing: [] as string[], deferred: deferred.length };
+    for (const name of batch) {
       report.processed++;
       const exId = pickBestExerciseId(name, translations);
       if (exId == null) { report.missing.push(name); continue; }
       const imgs = imgsByExercise.get(exId);
       if (!imgs?.length) { report.missing.push(name); continue; }
       const img = imgs.find((i) => i.is_main) ?? imgs[0];
-      const imgRes = await fetch(img.image).catch(() => null);
+      const imgRes = await fetchWithTimeout(img.image);
       if (!imgRes || !imgRes.ok) { report.missing.push(name); continue; }
       const blob = await imgRes.arrayBuffer();
       const ext = (img.image.split(".").pop() || "png").toLowerCase().split("?")[0].slice(0, 5);
