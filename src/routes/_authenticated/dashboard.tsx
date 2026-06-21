@@ -9,6 +9,8 @@ import { RecoveryLogModal, MealLogModal } from "@/components/LogModals";
 import { MealHistoryList } from "@/components/MealHistoryList";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
 import { BottomNav } from "@/components/BottomNav";
+import { RefreshStamp } from "@/components/RefreshStamp";
+import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
@@ -45,13 +47,23 @@ function Dashboard() {
   const [greet, setGreet] = useState("Hello");
   const [insight, setInsight] = useState("Your recovery is strong. Ready to push intensity today.");
   const [insightTime] = useState("Just now");
-  const [insightDismissed, setInsightDismissed] = useState(false);
+  // Lazy-init from localStorage so dismissal persists across remounts within
+  // the same day. The "Got it" button writes today's YYYY-MM-DD; on a fresh
+  // day we reset to false so the new daily insight surfaces.
+  const [insightDismissed, setInsightDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const stored = localStorage.getItem("apex_insight_dismissed_at");
+      return stored === new Date().toISOString().slice(0, 10);
+    } catch { return false; }
+  });
   const [expanded, setExpanded] = useState(false);
   const [readiness, setReadiness] = useState<TodayReadiness>(null);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [mealOpen, setMealOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const fn = useServerFn(getOrCreateDailyInsight);
   const fetchReadiness = useServerFn(getTodayReadiness);
   const fetchMacros = useServerFn(getTodayMacroSummary);
@@ -67,9 +79,17 @@ function Dashboard() {
 
   const reloadAll = async () => {
     setRefreshing(true);
-    await Promise.allSettled([fetchReadiness().then(setReadiness), fetchMacros().then(setMacros), fetchActivity().then(setActivity)]);
+    await Promise.allSettled([
+      fetchReadiness().then(setReadiness),
+      fetchMacros().then(setMacros),
+      fetchActivity().then(setActivity),
+    ]);
+    setLastUpdatedAt(Date.now());
     setRefreshing(false);
   };
+
+  // Silent refresh whenever the PWA comes back to the foreground (>60s gap).
+  useAutoRefreshOnVisible(reloadAll, lastUpdatedAt);
 
   // Hydrate name from server profile (canonical) into the local store
   // so we stop greeting everyone as "Athlete".
