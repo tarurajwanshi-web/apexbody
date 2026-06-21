@@ -350,17 +350,46 @@ function Dashboard() {
 
 
 
-        {/* APEX Score Card */}
+        {/* APEX Score Card — instrument-panel treatment */}
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="w-full text-left rounded-[20px] p-6 animate-fade-up active:scale-[0.995] transition"
+          className="w-full text-left rounded-[20px] p-6 animate-fade-up active:scale-[0.995] transition relative overflow-hidden"
           style={{
-            background: "#0F1524",
-            border: "1px solid rgba(255,255,255,0.06)",
+            background:
+              "radial-gradient(120% 90% at 50% 0%, rgba(124,58,237,0.18) 0%, rgba(15,21,36,0.85) 55%, #0B1020 100%)",
+            border: "1px solid rgba(124,58,237,0.22)",
+            boxShadow:
+              "inset 0 1px 0 rgba(255,255,255,0.04), 0 12px 36px -12px rgba(124,58,237,0.35), 0 1px 0 rgba(255,255,255,0.02)",
             animationDelay: "300ms",
           }}
         >
-          <div className="flex items-center justify-between gap-6">
+          {/* Particle texture (CSS-only, no animation → reduced-motion safe) */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 opacity-60 mix-blend-screen"
+            style={{
+              backgroundImage: [
+                "radial-gradient(1px 1px at 12% 28%, rgba(167,139,250,0.55), transparent 60%)",
+                "radial-gradient(1px 1px at 78% 18%, rgba(59,130,246,0.45), transparent 60%)",
+                "radial-gradient(1.5px 1.5px at 88% 64%, rgba(16,185,129,0.4), transparent 60%)",
+                "radial-gradient(1px 1px at 32% 78%, rgba(255,255,255,0.35), transparent 60%)",
+                "radial-gradient(1px 1px at 62% 42%, rgba(167,139,250,0.35), transparent 60%)",
+                "radial-gradient(1px 1px at 48% 12%, rgba(255,255,255,0.25), transparent 60%)",
+              ].join(","),
+            }}
+          />
+          {/* Hairline grid for instrument feel */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 opacity-[0.05]"
+            style={{
+              backgroundImage:
+                "linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)",
+              backgroundSize: "40px 40px",
+            }}
+          />
+
+          <div className="relative flex items-center justify-between gap-6">
             {/* LEFT */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
@@ -376,15 +405,21 @@ function Dashboard() {
                   <div className="mt-2 flex items-baseline gap-1">
                     <span
                       className="text-white tabular-nums"
-                      style={{ fontSize: 56, fontWeight: 300, lineHeight: 1, textShadow: "0 0 20px rgba(124,58,237,0.3)" }}
+                      style={{
+                        fontSize: 64,
+                        fontWeight: 200,
+                        lineHeight: 1,
+                        letterSpacing: "-0.04em",
+                        textShadow: "0 0 28px rgba(124,58,237,0.45), 0 0 2px rgba(255,255,255,0.6)",
+                      }}
                     >
                       {score}
                     </span>
-                    <span className="text-text-tertiary" style={{ fontSize: 18 }}>/100</span>
+                    <span className="text-text-tertiary" style={{ fontSize: 18, fontWeight: 300 }}>/100</span>
                   </div>
                   <div className="mt-3 inline-flex items-center gap-1.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                    <span className="text-[13px] text-success">Today's readiness</span>
+                    <span className="h-1.5 w-1.5 rounded-full bg-success" style={{ boxShadow: "0 0 8px #10B981" }} />
+                    <span className="text-[12px] uppercase tracking-[1.5px] text-success">Today's readiness</span>
                   </div>
                 </>
               ) : (
@@ -403,19 +438,35 @@ function Dashboard() {
               )}
             </div>
 
-            {/* RIGHT — ring */}
+            {/* RIGHT — ring with soft outer glow */}
             <div className="shrink-0 relative">
-              <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`}>
+              <div
+                aria-hidden
+                className="absolute inset-0 rounded-full"
+                style={{
+                  background:
+                    "radial-gradient(circle, rgba(124,58,237,0.35) 0%, rgba(59,130,246,0.18) 45%, transparent 70%)",
+                  filter: "blur(8px)",
+                }}
+              />
+              <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`} className="relative">
                 <defs>
                   <linearGradient id="scoreRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#7C3AED" />
+                    <stop offset="0%" stopColor="#A78BFA" />
                     <stop offset="55%" stopColor="#3B82F6" />
                     <stop offset="100%" stopColor="#10B981" />
                   </linearGradient>
+                  <filter id="scoreRingGlow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="2.2" result="b" />
+                    <feMerge>
+                      <feMergeNode in="b" />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
                 </defs>
                 <circle
                   cx={ringSize / 2} cy={ringSize / 2} r={ringR}
-                  fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={ringStroke}
+                  fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={ringStroke}
                 />
                 {score != null && (
                   <circle
@@ -425,6 +476,7 @@ function Dashboard() {
                     strokeDasharray={ringC}
                     strokeDashoffset={ringC * (1 - fillPct)}
                     transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                    filter="url(#scoreRingGlow)"
                   />
                 )}
                 <text
