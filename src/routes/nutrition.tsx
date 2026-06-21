@@ -1,15 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, Plus, Camera, Sparkles, X, Loader2, RefreshCw } from "lucide-react";
+import { ChevronLeft, Plus, Sparkles, X, Loader2, RefreshCw, Droplet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { AICard } from "@/components/AIOrb";
 import { RingChart } from "@/components/RingChart";
 import { BottomNav } from "@/components/BottomNav";
 import { RefreshStamp } from "@/components/RefreshStamp";
+import { HydrationLogModal } from "@/components/LogModals";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { analyzePhoto } from "@/lib/coach.functions";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
-import { getTodayMeals, logMeal, type TodayMeal } from "@/lib/shield.functions";
+import { getTodayMeals, getTodayHydration, logMeal, type TodayMeal, type HydrationSummary } from "@/lib/shield.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/nutrition")({
@@ -32,6 +33,8 @@ function Nutrition() {
   const [error, setError] = useState<string | null>(null);
   const [macros, setMacros] = useState<MacroSummary | null>(null);
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
+  const [hydration, setHydration] = useState<HydrationSummary | null>(null);
+  const [hydrationOpen, setHydrationOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [ptrDelta, setPtrDelta] = useState(0);
@@ -41,6 +44,7 @@ function Nutrition() {
   const fn = useServerFn(analyzePhoto);
   const fetchMacros = useServerFn(getTodayMacroSummary);
   const fetchMeals = useServerFn(getTodayMeals);
+  const fetchHydration = useServerFn(getTodayHydration);
   const logMealFn = useServerFn(logMeal);
 
   const reload = async () => {
@@ -48,6 +52,7 @@ function Nutrition() {
     await Promise.allSettled([
       fetchMacros().then(setMacros),
       fetchMeals().then(setMeals).catch(() => setMeals([])),
+      fetchHydration().then(setHydration).catch(() => {}),
     ]);
     setLastUpdatedAt(Date.now());
     setRefreshing(false);
@@ -217,6 +222,12 @@ function Nutrition() {
         </div>
       </section>
 
+      {/* Hydration card — ACSM-aligned target, with quick-add launcher.
+       *  For manual users this also feeds 30% of their Nutrition pillar score.
+       *  Device users still see the same UI but it doesn't move their score
+       *  (avoids double-counting with HRV/RHR-driven Recovery). */}
+      <HydrationCard hydration={hydration} onLog={() => setHydrationOpen(true)} />
+
       {hasTarget && hasMeals && proteinShort >= 20 && (
         <div className="mx-5 mt-4">
           <AICard>
@@ -224,6 +235,11 @@ function Nutrition() {
           </AICard>
         </div>
       )}
+
+      {/* Hydration-aware insight — fires when meaningfully behind target after midday.
+       *  Framed as general guidance, not a clinical claim. */}
+      <HydrationInsight hydration={hydration} />
+
 
       {(analyzing || analysis || error) && (
         <section className="mx-5 mt-4 rounded-2xl border border-ai/30 bg-gradient-to-br from-ai/10 to-sleep/5 p-4 animate-fade-up">
@@ -299,7 +315,8 @@ function Nutrition() {
         <Plus size={26} />
       </button>
 
-      <BottomNav />
+      <BottomNav onLogged={reload} />
+      <HydrationLogModal open={hydrationOpen} onClose={() => setHydrationOpen(false)} onSaved={reload} />
     </div>
   );
 }
@@ -311,6 +328,64 @@ function Macro({ label, v, t, color, hasMeals }: { label: string; v: number; t: 
       <RingChart size={56} stroke={5} rings={[{ value: pct, color }]} centerLabel={hasMeals ? `${pct}%` : "—"} />
       <p className="text-[11px] font-semibold mt-1">{label}</p>
       <p className="text-[10px] text-text-tertiary">{hasMeals ? `${v}/${t || "—"}g` : `${t || "—"}g target`}</p>
+    </div>
+  );
+}
+
+function HydrationCard({ hydration, onLog }: { hydration: HydrationSummary | null; onLog: () => void }) {
+  const consumed = hydration?.consumed_ml ?? 0;
+  const target = hydration?.target_ml ?? null;
+  const pct = target ? Math.min(100, Math.round((consumed / target) * 100)) : 0;
+  const liters = (ml: number) => (ml / 1000).toFixed(ml >= 1000 ? 1 : 2);
+  return (
+    <section className="mx-5 mt-4 rounded-3xl bg-bg-2 border border-white/5 p-5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="h-9 w-9 rounded-xl flex items-center justify-center" style={{ background: "rgba(59,130,246,0.18)", border: "1px solid rgba(59,130,246,0.35)" }}>
+            <Droplet size={16} className="text-sleep" />
+          </div>
+          <div>
+            <p className="text-[15px] font-semibold text-white">Hydration</p>
+            <p className="text-[11px] text-text-tertiary">
+              {target ? `${liters(consumed)}L / ${liters(target)}L today` : "Add your weight in settings to see a target"}
+              {hydration?.had_training_today && target ? " · training day (+10 ml/kg)" : ""}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={onLog}
+          aria-label="Log water"
+          className="rounded-full px-3 py-1.5 text-[12px] font-semibold text-white active:scale-95 transition"
+          style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.85), rgba(124,58,237,0.85))" }}
+        >
+          + Log water
+        </button>
+      </div>
+      {target && (
+        <div className="mt-4 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+          <div className="h-full" style={{ width: `${pct}%`, background: "linear-gradient(90deg, #3B82F6, #06B6D4)" }} />
+        </div>
+      )}
+      {hydration?.path === "device" && (
+        <p className="mt-3 text-[10px] text-text-tertiary">
+          Tracked for your own awareness — your device's HRV/RHR already reflects hydration in Recovery.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function HydrationInsight({ hydration }: { hydration: HydrationSummary | null }) {
+  if (!hydration?.target_ml) return null;
+  const pct = hydration.target_ml > 0 ? hydration.consumed_ml / hydration.target_ml : 0;
+  const hourLocal = new Date().getHours();
+  if (hourLocal < 13 || pct >= 0.55) return null;
+  const shortMl = Math.max(0, hydration.target_ml - hydration.consumed_ml);
+  return (
+    <div className="mx-5 mt-4">
+      <AICard>
+        You're <span className="text-text-primary font-semibold">{(shortMl / 1000).toFixed(1)}L behind</span> on water today. Staying ahead now tends to support tomorrow's recovery score — informational guidance, not medical advice.
+      </AICard>
     </div>
   );
 }

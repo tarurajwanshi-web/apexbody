@@ -1,16 +1,23 @@
+import { useState } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { Home, Dumbbell, Apple, Camera } from "lucide-react";
+import { Home, Dumbbell, Apple, Plus } from "lucide-react";
 import { FloatingCoach } from "@/components/FloatingCoach";
+import { QuickActionSheet } from "@/components/QuickActionSheet";
+import { RecoveryLogModal, MealLogModal } from "@/components/LogModals";
 
 /**
- * Bottom nav: 3 flat tabs (Home / Train / Eat) + center launcher.
- * Coach is intentionally NOT in the row — it lives as a separate floating
- * launcher (FloatingCoach) so the AI assistant reads as its own surface,
- * not a nav tab.
+ * Bottom nav: 3 flat tabs (Home / Train / Eat) + center quick-action launcher.
+ * The center button now opens an action sheet with Meal + Recovery options
+ * (Prompt B addendum) instead of being hardwired to a single action.
+ * Coach lives on its own as the FloatingCoach so the AI surface reads
+ * separately from navigation.
  */
 type Props = {
-  /** Optional center action. Defaults to navigating to /nutrition. */
+  /** When provided, overrides the built-in launcher (e.g. dashboard wants
+   *  to fire its own meal-modal that piggybacks score-update toasts). */
   onCenter?: () => void;
+  /** Fires after any modal logs successfully — parent reload hook. */
+  onLogged?: () => void;
 };
 
 const TABS = [
@@ -19,14 +26,22 @@ const TABS = [
   { to: "/nutrition", icon: Apple, label: "Eat" },
 ] as const;
 
-export function BottomNav({ onCenter }: Props = {}) {
+export function BottomNav({ onCenter, onLogged }: Props = {}) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [mealOpen, setMealOpen] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const isActive = (to: string) => pathname === to || pathname.startsWith(to + "/");
 
   const handleCenter = () => {
     if (onCenter) return onCenter();
-    navigate({ to: "/nutrition" });
+    setSheetOpen(true);
+  };
+
+  const handlePick = (a: "meal" | "recovery") => {
+    if (a === "meal") setMealOpen(true);
+    else setRecoveryOpen(true);
   };
 
   const renderTab = (t: (typeof TABS)[number]) => {
@@ -58,15 +73,27 @@ export function BottomNav({ onCenter }: Props = {}) {
           <button
             type="button"
             onClick={handleCenter}
-            aria-label="Quick log a meal"
+            aria-label="Quick log"
             className="mx-1 flex h-12 w-12 items-center justify-center rounded-full gradient-brand ai-glow text-white active:scale-95 transition"
           >
-            <Camera size={22} />
+            <Plus size={24} />
           </button>
           {renderTab(TABS[2])}
         </div>
       </nav>
       <FloatingCoach />
+
+      <QuickActionSheet open={sheetOpen} onClose={() => setSheetOpen(false)} onPick={handlePick} />
+      <MealLogModal
+        open={mealOpen}
+        onClose={() => setMealOpen(false)}
+        onSaved={() => { onLogged?.(); navigate({ to: "/nutrition" }); }}
+      />
+      <RecoveryLogModal
+        open={recoveryOpen}
+        onClose={() => setRecoveryOpen(false)}
+        onSaved={() => { onLogged?.(); }}
+      />
     </>
   );
 }

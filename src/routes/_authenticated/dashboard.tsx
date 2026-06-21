@@ -576,8 +576,18 @@ function Dashboard() {
 
       </div>
 
-      <BottomNav onCenter={() => setMealOpen(true)} />
+      {/* Center quick-action launcher (meal + recovery) lives inside BottomNav.
+       *  We pipe onLogged → dashboard reloads so the score toast still fires. */}
+      <BottomNav onLogged={() => {
+        captureScore();
+        showToast("Logged");
+        reloadReadiness();
+        reloadActivity();
+        reloadMacros();
+        pollScoreChange();
+      }} />
 
+      {/* Local modals used by the "Log recovery" / "Log meal" buttons elsewhere on Home. */}
       <RecoveryLogModal open={recoveryOpen} onClose={() => setRecoveryOpen(false)} onSaved={() => { captureScore(); showToast("Recovery logged"); reloadReadiness(); reloadActivity(); pollScoreChange(); }} />
       <MealLogModal open={mealOpen} onClose={() => setMealOpen(false)} onSaved={() => { captureScore(); showToast("Meal logged"); pollScoreChange(); reloadActivity(); setTimeout(reloadMacros, 4000); }} />
 

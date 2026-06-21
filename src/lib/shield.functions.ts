@@ -40,23 +40,103 @@ export const upsertManualRecovery = createServerFn({ method: "POST" })
     z.object({
       recovery_self_rating: z.number().int().min(1).max(5),
       sleep_hours: z.number().min(0).max(24),
+      mood_emoji: z.string().min(1).max(8).nullable().optional(),
     }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const payload = {
+      user_id: context.userId,
+      entry_date: today(),
+      recovery_self_rating: data.recovery_self_rating,
+      sleep_hours: data.sleep_hours,
+      ...(data.mood_emoji != null ? { mood_emoji: data.mood_emoji } : {}),
+    };
+    const { error } = await context.supabase
+      .from("shield_manual_inputs")
+      .upsert(payload, { onConflict: "user_id,entry_date" });
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+/** Standalone mood upsert — used by the device-path recovery flow so device
+ *  users still contribute Mood data (their own pillar, independent of path). */
+export const upsertMood = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ mood_emoji: z.string().min(1).max(8) }).parse(d),
   )
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("shield_manual_inputs")
       .upsert(
-        {
-          user_id: context.userId,
-          entry_date: today(),
-          recovery_self_rating: data.recovery_self_rating,
-          sleep_hours: data.sleep_hours,
-        },
+        { user_id: context.userId, entry_date: today(), mood_emoji: data.mood_emoji },
         { onConflict: "user_id,entry_date" },
       );
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+/** Atomic increment via SECURITY DEFINER RPC. Returns the new total ml. */
+export const logHydration = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ amount_ml: z.number().int().min(1).max(5000) }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ total_ml: number }> => {
+    const { data: total, error } = await context.supabase.rpc("increment_hydration", {
+      p_amount_ml: data.amount_ml,
+    });
+    if (error) throw new Error(error.message);
+    return { total_ml: Number(total ?? 0) };
+  });
+
+export type HydrationSummary = {
+  consumed_ml: number;
+  target_ml: number | null;
+  had_training_today: boolean;
+  weight_kg: number | null;
+  path: "device" | "manual";
+};
+
+export const getTodayHydration = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<HydrationSummary> => {
+    const date = today();
+    const [profileRes, manualRes, trainingRes] = await Promise.all([
+      context.supabase
+        .from("profiles")
+        .select("input_path_preference, measurement_weight_kg")
+        .eq("user_id", context.userId)
+        .maybeSingle(),
+      context.supabase
+        .from("shield_manual_inputs")
+        .select("hydration_ml")
+        .eq("user_id", context.userId)
+        .eq("entry_date", date)
+        .maybeSingle(),
+      context.supabase
+        .from("shield_training_logs")
+        .select("id")
+        .eq("user_id", context.userId)
+        .eq("entry_date", date)
+        .maybeSingle(),
+    ]);
+    const weight = profileRes.data?.measurement_weight_kg != null
+      ? Number(profileRes.data.measurement_weight_kg) : null;
+    const path: "device" | "manual" = profileRes.data?.input_path_preference === "device" ? "device" : "manual";
+    const hadTraining = !!trainingRes.data;
+    const target = weight && weight > 0
+      ? Math.round(weight * (hadTraining ? 40 : 30))
+      : null;
+    return {
+      consumed_ml: Number(manualRes.data?.hydration_ml ?? 0),
+      target_ml: target,
+      had_training_today: hadTraining,
+      weight_kg: weight,
+      path,
+    };
+  });
+
 
 export const upsertDeviceRecovery = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
