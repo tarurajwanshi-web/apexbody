@@ -65,6 +65,16 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Audit #3: ownership check — caller must be the row's user (via JWT) or
+    // an internal-secret dispatcher. Performed AFTER fetch since the body
+    // identifies the row by id, not by user_id.
+    const authz = await authorizeCaller(req, supabase, row.user_id);
+    if (!authz.ok) {
+      return new Response(JSON.stringify({ error: authz.error }), {
+        status: authz.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Pull training context for same date (if any) for timing evaluation.
     const { data: training } = await supabase
       .from("shield_training_logs")
