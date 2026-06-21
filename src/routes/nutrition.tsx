@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, Sparkles, X, Loader2, RefreshCw, Droplet } from "lucide-react";
+import { ChevronLeft, Loader2, RefreshCw, Droplet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { AICard } from "@/components/AIOrb";
@@ -9,10 +9,8 @@ import { RefreshStamp } from "@/components/RefreshStamp";
 import { HydrationLogModal } from "@/components/LogModals";
 import { MealDetailModal } from "@/components/MealDetailModal";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
-import { analyzePhoto } from "@/lib/coach.functions";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
-import { getTodayMeals, getTodayHydration, logMeal, type TodayMeal, type HydrationSummary } from "@/lib/shield.functions";
-import { supabase } from "@/integrations/supabase/client";
+import { getTodayMeals, getTodayHydration, type TodayMeal, type HydrationSummary } from "@/lib/shield.functions";
 
 export const Route = createFileRoute("/nutrition")({
   head: () => ({ meta: [{ title: "Nutrition — APEX" }] }),
