@@ -36,6 +36,7 @@ function Nutrition() {
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
   const [hydration, setHydration] = useState<HydrationSummary | null>(null);
   const [hydrationOpen, setHydrationOpen] = useState(false);
+  const [openMeal, setOpenMeal] = useState<TodayMeal | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [ptrDelta, setPtrDelta] = useState(0);
