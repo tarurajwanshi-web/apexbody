@@ -209,7 +209,7 @@ function WorkoutsPage() {
                   <p className="text-[13px] text-text-primary">Today is a scheduled rest day.</p>
                   <p className="text-[11px] text-text-tertiary mt-1">Listening to your body matters more than the calendar — train anyway if you're feeling it.</p>
                   <button
-                    onClick={() => setPreCheckOpen(true)}
+                    onClick={() => setFreeformOpen(true)}
                     className="mt-3 w-full rounded-2xl py-3 text-[13px] font-semibold text-white active:scale-[0.98] transition"
                     style={{ background: "linear-gradient(90deg, #7C3AED, #3B82F6)" }}
                   >
