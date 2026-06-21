@@ -656,7 +656,7 @@ function MetricRow({
 }
 
 
-function MacrosCard({ macros }: { macros: MacroSummary | null }) {
+function MacrosCard({ macros, hydration, onHydrationTap }: { macros: MacroSummary | null; hydration: HydrationSummary | null; onHydrationTap: () => void }) {
   const target = macros?.target_calories ?? null;
   const consumed = macros?.consumed_calories ?? 0;
   const hasAny = (macros?.meals_estimated ?? 0) > 0;
@@ -692,9 +692,134 @@ function MacrosCard({ macros }: { macros: MacroSummary | null }) {
           </p>
         </>
       )}
+
+      {/* Inline hydration indicator — display only; tap routes to Nutrition.
+          Chose inline-on-Macros (vs separate card) to avoid crowding Home. */}
+      {hydration && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onHydrationTap(); }}
+          className="mt-4 w-full flex items-center justify-between rounded-xl px-3 py-2 active:scale-[0.99] transition"
+          style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.25)" }}
+          aria-label="Hydration today — open Nutrition"
+        >
+          <span className="flex items-center gap-2 text-[12px] text-text-primary">
+            <Droplet size={13} className="text-sleep" />
+            <span className="tabular-nums">
+              {(hydration.consumed_ml / 1000).toFixed(hydration.consumed_ml >= 1000 ? 1 : 2)}L
+              {hydration.target_ml ? ` / ${(hydration.target_ml / 1000).toFixed(1)}L` : ""}
+            </span>
+            <span className="text-text-tertiary">water</span>
+          </span>
+          <span className="text-text-tertiary text-[12px]">›</span>
+        </button>
+      )}
     </div>
   );
 }
+
+/** Glanceable training status. Mirrors MacrosCard's weight; never shows
+ *  exercise lists or set/rep detail (that's the Training tab's job). */
+function WorkoutStatusCard({ session, onNav }: { session: { rest: boolean; session_name: string | null; doneSets: number; totalSets: number } | null; onNav: () => void }) {
+  let title = "Today: Training";
+  let sub = "Open the training tab to start.";
+  if (!session) {
+    title = "Today: Training";
+    sub = "Open the training tab to start.";
+  } else if (session.rest) {
+    title = "Today: Rest day";
+    sub = "Want to train anyway?";
+  } else {
+    const name = session.session_name || "Session";
+    const status = session.totalSets === 0 ? "" : session.doneSets === 0 ? "not started" : session.doneSets >= session.totalSets ? "complete" : `in progress · ${session.doneSets}/${session.totalSets} sets`;
+    title = `Today: ${name}`;
+    sub = status || "Open the training tab.";
+  }
+  return (
+    <button
+      onClick={onNav}
+      className="w-full flex items-center gap-3 rounded-2xl p-4 text-left active:scale-[0.99] transition"
+      style={{ background: "#0F1524", border: "1px solid rgba(255,255,255,0.06)" }}
+    >
+      <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)" }}>
+        <Dumbbell size={16} className="text-warning" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[14px] font-semibold text-white truncate">{title}</p>
+        <p className="text-[12px] text-text-secondary mt-0.5 truncate">{sub}</p>
+      </div>
+      <span className="text-text-tertiary">›</span>
+    </button>
+  );
+}
+
+/** Always-visible pillar breakdown. For each pillar we either show today's
+ *  contribution OR an explicit "not logged yet" framing — so a LOW-confidence
+ *  score reads as incomplete, not reassuring. Tapping the card still expands
+ *  the wider readout with the nudge message. */
+function PillarExplainer({ readiness, expanded }: { readiness: TodayReadiness; expanded: boolean }) {
+  const breakdown = readiness?.pillar_breakdown ?? null;
+  const conf = readiness?.confidence_level ?? null;
+  const status = PILLAR_META.map((p) => {
+    const v = breakdown?.[p.key];
+    const has = typeof v === "number" || (typeof v === "string" && v !== "" && v !== "—");
+    return { ...p, value: has ? String(v) : null, logged: has };
+  });
+  const missing = status.filter((s) => !s.logged).map((s) => s.label);
+  const incompleteFraming =
+    missing.length === 0
+      ? null
+      : conf === "LOW" || missing.length >= 3
+        ? `${missing.slice(0, 2).join(" and ")}${missing.length > 2 ? ` (+${missing.length - 2} more)` : ""} haven't been logged yet — your score will get more accurate as you log them.`
+        : `Still missing today: ${missing.join(", ")}.`;
+
+  if (!expanded) {
+    return (
+      <div className="mt-4">
+        <div className="flex flex-wrap gap-1.5">
+          {status.map((s) => (
+            <span
+              key={s.key}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
+              style={{
+                background: s.logged ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.02)",
+                border: `1px solid ${s.logged ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.05)"}`,
+                color: s.logged ? "#F0F4FF" : "#4A566A",
+              }}
+            >
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.logged ? s.color : "#4A566A" }} />
+              {s.label}
+              {s.logged ? <span className="tabular-nums opacity-70">{s.value}</span> : <span className="opacity-70">— not logged</span>}
+            </span>
+          ))}
+        </div>
+        {incompleteFraming && (
+          <p className="mt-2 text-[11px] text-text-tertiary leading-snug">{incompleteFraming}</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-5 overflow-hidden" style={{ animation: "fade-up 0.3s ease both" }}>
+      {status.map((s, i) => (
+        <MetricRow
+          key={s.key}
+          color={s.color}
+          name={s.label}
+          value={s.logged ? s.value! : "not logged yet"}
+          trend="stable"
+          note=""
+          hideNote
+          last={i === status.length - 1}
+        />
+      ))}
+      {incompleteFraming && (
+        <p className="mt-3 text-[12px] text-text-tertiary leading-snug">{incompleteFraming}</p>
+      )}
+    </div>
+  );
+}
+
 
 function MacroLine({ label, v, t, color }: { label: string; v: number; t: number | null; color: string }) {
   return (
