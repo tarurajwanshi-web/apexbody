@@ -115,8 +115,12 @@ export type Database = {
           bmr: number
           calculated_at: string
           created_at: string
+          effective_end_date: string | null
+          effective_start_date: string
           formula_used: string
           id: string
+          review_id: string | null
+          source: string
           target_calories: number
           target_carbs_g: number
           target_fat_g: number
@@ -129,8 +133,12 @@ export type Database = {
           bmr: number
           calculated_at?: string
           created_at?: string
+          effective_end_date?: string | null
+          effective_start_date: string
           formula_used: string
           id?: string
+          review_id?: string | null
+          source?: string
           target_calories: number
           target_carbs_g: number
           target_fat_g: number
@@ -143,8 +151,12 @@ export type Database = {
           bmr?: number
           calculated_at?: string
           created_at?: string
+          effective_end_date?: string | null
+          effective_start_date?: string
           formula_used?: string
           id?: string
+          review_id?: string | null
+          source?: string
           target_calories?: number
           target_carbs_g?: number
           target_fat_g?: number
@@ -153,7 +165,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "daily_macro_targets_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "nutrition_weekly_reviews"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       exercise_image_cache: {
         Row: {
@@ -212,6 +232,92 @@ export type Database = {
         }
         Relationships: []
       }
+      nutrition_weekly_reviews: {
+        Row: {
+          abnormal_week: boolean
+          adherence_pct: number
+          adjustment_kcal: number
+          applied_at: string | null
+          applied_target_id: string | null
+          blended_tdee: number | null
+          confidence_tier: string | null
+          created_at: string
+          days_logged: number
+          decision: string
+          eligible: boolean
+          flag_reason: string | null
+          id: string
+          new_observed_tdee: number | null
+          new_target_calories: number | null
+          old_observed_tdee: number | null
+          old_target_calories: number | null
+          raw_target_calories: number | null
+          timezone_used: string
+          user_id: string
+          week_end_date: string
+          week_start_date: string
+          weigh_in_count: number
+        }
+        Insert: {
+          abnormal_week?: boolean
+          adherence_pct?: number
+          adjustment_kcal?: number
+          applied_at?: string | null
+          applied_target_id?: string | null
+          blended_tdee?: number | null
+          confidence_tier?: string | null
+          created_at?: string
+          days_logged?: number
+          decision: string
+          eligible?: boolean
+          flag_reason?: string | null
+          id?: string
+          new_observed_tdee?: number | null
+          new_target_calories?: number | null
+          old_observed_tdee?: number | null
+          old_target_calories?: number | null
+          raw_target_calories?: number | null
+          timezone_used: string
+          user_id: string
+          week_end_date: string
+          week_start_date: string
+          weigh_in_count?: number
+        }
+        Update: {
+          abnormal_week?: boolean
+          adherence_pct?: number
+          adjustment_kcal?: number
+          applied_at?: string | null
+          applied_target_id?: string | null
+          blended_tdee?: number | null
+          confidence_tier?: string | null
+          created_at?: string
+          days_logged?: number
+          decision?: string
+          eligible?: boolean
+          flag_reason?: string | null
+          id?: string
+          new_observed_tdee?: number | null
+          new_target_calories?: number | null
+          old_observed_tdee?: number | null
+          old_target_calories?: number | null
+          raw_target_calories?: number | null
+          timezone_used?: string
+          user_id?: string
+          week_end_date?: string
+          week_start_date?: string
+          weigh_in_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nutrition_weekly_reviews_applied_target_fkey"
+            columns: ["applied_target_id"]
+            isOneToOne: false
+            referencedRelation: "daily_macro_targets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pre_session_checks: {
         Row: {
           created_at: string
@@ -256,9 +362,11 @@ export type Database = {
           name: string | null
           plan_unlock_date: string | null
           profile_completed_at: string | null
+          timezone: string
           training_days_per_week: number | null
           updated_at: string
           user_id: string
+          user_marked_abnormal_week_start: string | null
         }
         Insert: {
           age?: number | null
@@ -279,9 +387,11 @@ export type Database = {
           name?: string | null
           plan_unlock_date?: string | null
           profile_completed_at?: string | null
+          timezone?: string
           training_days_per_week?: number | null
           updated_at?: string
           user_id: string
+          user_marked_abnormal_week_start?: string | null
         }
         Update: {
           age?: number | null
@@ -302,9 +412,11 @@ export type Database = {
           name?: string | null
           plan_unlock_date?: string | null
           profile_completed_at?: string | null
+          timezone?: string
           training_days_per_week?: number | null
           updated_at?: string
           user_id?: string
+          user_marked_abnormal_week_start?: string | null
         }
         Relationships: []
       }
@@ -607,6 +719,36 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      apply_weekly_macro_review: {
+        Args: {
+          p_abnormal_week: boolean
+          p_adherence_pct: number
+          p_adjustment_kcal: number
+          p_blended_tdee: number
+          p_bmr: number
+          p_confidence_tier: string
+          p_days_logged: number
+          p_decision: string
+          p_effective_start_date: string
+          p_eligible: boolean
+          p_flag_reason: string
+          p_new_observed_tdee: number
+          p_new_target_calories: number
+          p_old_observed_tdee: number
+          p_old_target_calories: number
+          p_raw_target_calories: number
+          p_review_id: string
+          p_target_carbs_g: number
+          p_target_fat_g: number
+          p_target_protein_g: number
+          p_timezone_used: string
+          p_user_id: string
+          p_week_end_date: string
+          p_week_start_date: string
+          p_weigh_in_count: number
+        }
+        Returns: string
+      }
       increment_hydration: { Args: { p_amount_ml: number }; Returns: number }
       shield_dispatch_calculate_score: {
         Args: { _entry_date: string; _user_id: string }
