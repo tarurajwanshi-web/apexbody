@@ -67,13 +67,36 @@ function Dashboard() {
   const fetchReadiness = useServerFn(getTodayReadiness);
   const fetchMacros = useServerFn(getTodayMacroSummary);
   const fetchActivity = useServerFn(getActivityWeek);
+  const fetchHydration = useServerFn(getTodayHydration);
   const [macros, setMacros] = useState<MacroSummary | null>(null);
   const [activity, setActivity] = useState<ActivityWeek | null>(null);
+  const [hydration, setHydration] = useState<HydrationSummary | null>(null);
+  const [todaySession, setTodaySession] = useState<{ rest: boolean; session_name: string | null; doneSets: number; totalSets: number } | null>(null);
   const reloadMacros = () => { fetchMacros().then(setMacros).catch(() => {}); };
   const reloadActivity = () => { fetchActivity().then(setActivity).catch(() => {}); };
 
   const reloadReadiness = () => {
     fetchReadiness().then(setReadiness).catch(() => setReadiness(null));
+  };
+
+  const reloadTodaySession = async () => {
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      if (!u.user) return;
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const jsDay = new Date().getDay();
+      const todayIdx = (jsDay + 6) % 7;
+      const [planRes, logsRes] = await Promise.all([
+        supabase.from("weekly_plans").select("plan_data").eq("user_id", u.user.id).order("week_start_date", { ascending: false }).limit(1).maybeSingle(),
+        supabase.from("workout_set_logs").select("completed").eq("user_id", u.user.id).eq("entry_date", todayIso),
+      ]);
+      const days = (planRes.data?.plan_data as any)?.days ?? [];
+      const today = days[todayIdx];
+      if (!today) { setTodaySession(null); return; }
+      const totalSets = today.rest ? 0 : (today.exercises ?? []).reduce((s: number, ex: any) => s + (ex.sets ?? 0), 0);
+      const doneSets = (logsRes.data ?? []).filter((l: any) => l.completed).length;
+      setTodaySession({ rest: !!today.rest, session_name: today.session_name ?? null, doneSets, totalSets });
+    } catch { setTodaySession(null); }
   };
 
   const reloadAll = async () => {
@@ -82,6 +105,8 @@ function Dashboard() {
       fetchReadiness().then(setReadiness),
       fetchMacros().then(setMacros),
       fetchActivity().then(setActivity),
+      fetchHydration().then(setHydration).catch(() => {}),
+      reloadTodaySession(),
     ]);
     setLastUpdatedAt(Date.now());
     setRefreshing(false);
