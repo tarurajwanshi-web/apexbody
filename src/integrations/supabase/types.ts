@@ -297,6 +297,7 @@ export type Database = {
         Row: {
           created_at: string
           entry_date: string
+          hydration_ml: number
           id: string
           mood_emoji: string | null
           recovery_self_rating: number | null
@@ -306,6 +307,7 @@ export type Database = {
         Insert: {
           created_at?: string
           entry_date: string
+          hydration_ml?: number
           id?: string
           mood_emoji?: string | null
           recovery_self_rating?: number | null
@@ -315,6 +317,7 @@ export type Database = {
         Update: {
           created_at?: string
           entry_date?: string
+          hydration_ml?: number
           id?: string
           mood_emoji?: string | null
           recovery_self_rating?: number | null
@@ -490,6 +493,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      increment_hydration: { Args: { p_amount_ml: number }; Returns: number }
       shield_dispatch_calculate_score: {
         Args: { _entry_date: string; _user_id: string }
         Returns: undefined
