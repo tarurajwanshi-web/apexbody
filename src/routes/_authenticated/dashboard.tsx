@@ -11,6 +11,7 @@ import { BottomNav } from "@/components/BottomNav";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { supabase } from "@/integrations/supabase/client";
+import { scoreColor, isExtreme, scoreColorRgba } from "@/lib/score-color";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — APEX" }] }),
