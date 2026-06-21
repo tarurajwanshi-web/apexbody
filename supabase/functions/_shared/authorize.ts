@@ -1,8 +1,10 @@
 // Audit #3: shared authorization helper for service-role edge functions.
 //
 // Accepts either:
-//   (a) `x-internal-secret` header matching `public.internal_secrets.dispatch_secret`
-//       — used by DB-trigger dispatch functions and the weekly cron.
+//   (a) `x-internal-secret` header matching the dispatch_secret stored in
+//       Supabase Vault — used by DB-trigger dispatch functions and the
+//       weekly cron. Read via the `public.get_dispatch_secret()` RPC
+//       (SECURITY DEFINER, service_role only).
 //   (b) `Authorization: Bearer <jwt>` whose authenticated user.id equals the
 //       supplied `body_user_id` — used by signed-in users calling a function
 //       that operates on their own data.
@@ -18,6 +20,23 @@ export type AuthzResult =
   | { ok: true; userId: string | null /* null = internal-secret path */ }
   | { ok: false; status: number; error: string };
 
+/** Constant-time string equality. Returns false fast on length mismatch
+ *  (length itself is not a secret here). */
+export function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+async function loadInternalSecret(supa: SupabaseClient): Promise<string | null> {
+  if (_cachedInternalSecret) return _cachedInternalSecret;
+  const { data, error } = await supa.rpc("get_dispatch_secret");
+  if (error || typeof data !== "string" || !data) return null;
+  _cachedInternalSecret = data;
+  return _cachedInternalSecret;
+}
+
 export async function authorizeCaller(
   req: Request,
   supa: SupabaseClient,
@@ -25,15 +44,8 @@ export async function authorizeCaller(
 ): Promise<AuthzResult> {
   const internalSecret = req.headers.get("x-internal-secret");
   if (internalSecret) {
-    if (!_cachedInternalSecret) {
-      const { data } = await supa
-        .from("internal_secrets")
-        .select("value")
-        .eq("name", "dispatch_secret")
-        .maybeSingle();
-      _cachedInternalSecret = (data as { value?: string } | null)?.value ?? null;
-    }
-    if (_cachedInternalSecret && internalSecret === _cachedInternalSecret) {
+    const expected = await loadInternalSecret(supa);
+    if (expected && constantTimeEqual(internalSecret, expected)) {
       return { ok: true, userId: null };
     }
     return { ok: false, status: 401, error: "invalid internal secret" };
@@ -52,6 +64,25 @@ export async function authorizeCaller(
     return { ok: false, status: 403, error: "forbidden: user_id does not match authenticated caller" };
   }
   return { ok: true, userId: userData.user.id };
+}
+
+/** Internal-secret-only gate. Rejects ANY request that does not present a
+ *  valid `x-internal-secret` header — no JWT fallback. Use on functions
+ *  that should only ever be invoked by DB triggers or pg_cron, not by users.
+ */
+export async function requireInternalSecret(
+  req: Request,
+  supa: SupabaseClient,
+): Promise<AuthzResult> {
+  const internalSecret = req.headers.get("x-internal-secret");
+  if (!internalSecret) {
+    return { ok: false, status: 401, error: "unauthorized: x-internal-secret header required" };
+  }
+  const expected = await loadInternalSecret(supa);
+  if (expected && constantTimeEqual(internalSecret, expected)) {
+    return { ok: true, userId: null };
+  }
+  return { ok: false, status: 401, error: "invalid internal secret" };
 }
 
 export const corsAllowHeaders =

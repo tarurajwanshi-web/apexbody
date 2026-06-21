@@ -11,50 +11,14 @@
 // any other function.
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { requireInternalSecret, corsAllowHeaders } from "../_shared/authorize.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-secret",
+  "Access-Control-Allow-Headers": corsAllowHeaders,
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// Audit #3: authorize caller. Accepts either:
-//   (a) x-internal-secret header matching public.internal_secrets.dispatch_secret
-//       (DB-trigger / cron path), OR
-//   (b) Bearer JWT whose user.id equals body_user_id (signed-in user calling
-//       a function operating on their own data).
-// Rejects unauthenticated calls and cross-user attempts.
-let _cachedInternalSecret: string | null = null;
-async function authorizeCaller(
-  req: Request,
-  supa: SupabaseClient,
-  body_user_id?: string,
-): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
-  const internalSecret = req.headers.get("x-internal-secret");
-  if (internalSecret) {
-    if (!_cachedInternalSecret) {
-      const { data } = await supa
-        .from("internal_secrets")
-        .select("value")
-        .eq("name", "dispatch_secret")
-        .maybeSingle();
-      _cachedInternalSecret = (data as { value?: string } | null)?.value ?? null;
-    }
-    if (_cachedInternalSecret && internalSecret === _cachedInternalSecret) return { ok: true };
-    return { ok: false, status: 401, error: "invalid internal secret" };
-  }
-  const authHeader = req.headers.get("authorization") || req.headers.get("Authorization");
-  if (!authHeader || !authHeader.toLowerCase().startsWith("bearer ")) {
-    return { ok: false, status: 401, error: "unauthorized: missing bearer token or internal secret" };
-  }
-  const token = authHeader.slice(7).trim();
-  const { data: userData, error } = await supa.auth.getUser(token);
-  if (error || !userData?.user) return { ok: false, status: 401, error: "unauthorized: invalid token" };
-  if (body_user_id && body_user_id !== userData.user.id) {
-    return { ok: false, status: 403, error: "forbidden: user_id does not match authenticated caller" };
-  }
-  return { ok: true };
-}
 
 type Profile = {
   user_id: string;
@@ -492,15 +456,18 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { /* empty body OK for cron */ }
   const force = body.force_recalculate === true;
 
-  // Audit #3: gate the function. Cron path → x-internal-secret header.
-  // Manual force-recalc for a specific user → JWT bearer matching body.user_id.
-  // Unauthenticated calls (no internal secret AND no valid JWT) are rejected.
-  const authz = await authorizeCaller(req, supa, body.user_id);
+  // Audit #2 spec: this function is internal-only (DB cron / dispatch).
+  // Reject any request lacking a valid x-internal-secret header — NO JWT
+  // fallback, even for force_recalculate by a signed-in user. If a manual
+  // re-run is needed, dispatch through the DB layer (which forwards the
+  // secret) rather than calling the edge function directly.
+  const authz = await requireInternalSecret(req, supa);
   if (!authz.ok) {
     return new Response(JSON.stringify({ error: authz.error }), {
       status: authz.status, headers: { ...cors, "Content-Type": "application/json" },
     });
   }
+
 
   let profiles: Profile[];
   try {
