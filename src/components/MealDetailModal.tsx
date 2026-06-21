@@ -42,6 +42,21 @@ export function MealDetailModal({ meal, onClose }: { meal: TodayMeal | null; onC
           <img src={meal.meal_photo_url} alt="Meal" className="w-full max-h-44 object-cover rounded-xl mb-4" />
         )}
 
+        {Array.isArray(meal.estimated_items) && meal.estimated_items.length > 0 && (
+          <ul className="mb-4 space-y-1.5">
+            {meal.estimated_items.map((it, i) => (
+              <li key={i} className="rounded-lg p-2.5" style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.05)" }}>
+                <p className="text-[12px] text-white leading-snug">
+                  {i + 1}. {it.name} — <span className="text-text-tertiary">~{it.grams}g</span>
+                </p>
+                <p className="text-[11px] text-text-tertiary tabular-nums">
+                  {it.calories} kcal · {it.protein_g}g protein · {it.carbs_g}g carbs · {it.fat_g}g fat
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+
         <div className="grid grid-cols-4 gap-2">
           <Stat label="kcal" value={cal != null ? Math.round(cal).toString() : "—"} />
           <Stat label="protein" value={p != null ? `${Math.round(p)}g` : "—"} color="#F59E0B" />

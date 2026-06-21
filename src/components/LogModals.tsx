@@ -14,6 +14,7 @@ import {
   getTodayDeviceUploadStatus,
   supplementDeviceRhr,
   reassignDeviceUploadDate,
+  logBodyMeasurement,
   type DeviceUploadStatus,
 } from "@/lib/shield.functions";
 import { analyzePhoto } from "@/lib/coach.functions";
@@ -1063,3 +1064,235 @@ export function WorkoutLogModal({ open, onClose, onSaved }: Props) {
     </Sheet>
   );
 }
+
+// ---------- Body measurement (Step A / Step B) ----------
+
+type WeightUnit = "kg" | "lb";
+type LengthUnit = "cm" | "in";
+
+const kgToLb = (kg: number) => kg * 2.20462262;
+const lbToKg = (lb: number) => lb / 2.20462262;
+const cmToIn = (cm: number) => cm / 2.54;
+const inToCm = (i: number) => i * 2.54;
+
+/** Numeric input that parses raw digits literally — typing "36" stores 36,
+ *  never 3.6. Decimals only when the user explicitly types one. fontSize 16
+ *  to suppress iOS auto-zoom. */
+function NumField({
+  value, onChange, suffix, placeholder, ariaLabel,
+}: { value: string; onChange: (v: string) => void; suffix?: string; placeholder?: string; ariaLabel?: string }) {
+  const handle = (raw: string) => {
+    if (raw === "") return onChange("");
+    if (!/^\d*\.?\d*$/.test(raw)) return;
+    onChange(raw);
+  };
+  return (
+    <span className="flex items-center gap-1">
+      <input
+        type="text"
+        inputMode="decimal"
+        value={value}
+        onChange={(e) => handle(e.target.value)}
+        placeholder={placeholder ?? "—"}
+        aria-label={ariaLabel}
+        className="w-24 bg-bg-1 border border-white/10 rounded-xl px-3 py-2 text-right text-[14px] font-semibold focus:outline-none text-white"
+        style={{ fontSize: 16 }}
+      />
+      {suffix && <span className="text-xs text-text-tertiary w-6 text-left">{suffix}</span>}
+    </span>
+  );
+}
+
+function UnitToggle<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: readonly T[] }) {
+  return (
+    <div className="inline-flex rounded-full bg-bg-1 border border-white/10 p-0.5">
+      {options.map((o) => (
+        <button
+          key={o}
+          type="button"
+          onClick={() => onChange(o)}
+          className={`px-3 py-1 text-[11px] font-semibold rounded-full transition ${value === o ? "bg-white/10 text-white" : "text-text-tertiary"}`}
+        >
+          {o}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function BodyMeasurementModal({ open, onClose, onSaved }: Props) {
+  const log = useServerFn(logBodyMeasurement);
+  const [step, setStep] = useState<"A" | "B">("A");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Step A
+  const [path, setPath] = useState<"device" | "manual">("manual");
+  const [wUnit, setWUnit] = useState<WeightUnit>("kg");
+  const [bfPct, setBfPct] = useState("");
+  const [leanDisp, setLeanDisp] = useState(""); // in current wUnit
+  const [weightDisp, setWeightDisp] = useState(""); // in current wUnit
+
+  // Step B
+  const [lUnit, setLUnit] = useState<LengthUnit>("cm");
+  const [waistDisp, setWaistDisp] = useState("");
+  const [hipDisp, setHipDisp] = useState("");
+  const [armDisp, setArmDisp] = useState("");
+  const [thighDisp, setThighDisp] = useState("");
+
+  useEffect(() => {
+    if (!open) {
+      setStep("A"); setBusy(false); setErr(null);
+      setPath("manual"); setBfPct(""); setLeanDisp(""); setWeightDisp("");
+      setWaistDisp(""); setHipDisp(""); setArmDisp(""); setThighDisp("");
+    }
+  }, [open]);
+
+  const convertWeightOnToggle = (next: WeightUnit) => {
+    if (wUnit === next) return;
+    const convert = (s: string) => {
+      if (!s) return "";
+      const n = Number(s);
+      if (!Number.isFinite(n)) return "";
+      const kg = wUnit === "kg" ? n : lbToKg(n);
+      const out = next === "kg" ? kg : kgToLb(kg);
+      return String(Number(out.toFixed(1)));
+    };
+    setWeightDisp(convert(weightDisp));
+    setLeanDisp(convert(leanDisp));
+    setWUnit(next);
+  };
+
+  const convertLengthOnToggle = (next: LengthUnit) => {
+    if (lUnit === next) return;
+    const convert = (s: string) => {
+      if (!s) return "";
+      const n = Number(s);
+      if (!Number.isFinite(n)) return "";
+      const cm = lUnit === "cm" ? n : inToCm(n);
+      const out = next === "cm" ? cm : cmToIn(cm);
+      return String(Number(out.toFixed(1)));
+    };
+    setWaistDisp(convert(waistDisp));
+    setHipDisp(convert(hipDisp));
+    setArmDisp(convert(armDisp));
+    setThighDisp(convert(thighDisp));
+    setLUnit(next);
+  };
+
+  const toKg = (s: string) => s ? (wUnit === "kg" ? Number(s) : lbToKg(Number(s))) : null;
+  const toCm = (s: string) => s ? (lUnit === "cm" ? Number(s) : inToCm(Number(s))) : null;
+  const num = (v: number | null) => v == null || !Number.isFinite(v) ? null : Number(v.toFixed(2));
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    try {
+      await log({
+        data: {
+          source: path === "device" ? "dexa" : "manual",
+          weight_kg: num(toKg(weightDisp)),
+          body_fat_pct: bfPct ? Number(bfPct) : null,
+          lean_mass_kg: num(toKg(leanDisp)),
+          waist_cm: num(toCm(waistDisp)),
+          hip_cm: num(toCm(hipDisp)),
+          arm_cm: num(toCm(armDisp)),
+          thigh_cm: num(toCm(thighDisp)),
+        },
+      });
+      onSaved?.();
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save measurement.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title={step === "A" ? "Body composition" : "Circumference measurements"}>
+      {step === "A" ? (
+        <div className="space-y-5">
+          <div className="flex gap-2">
+            {(["device", "manual"] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPath(p)}
+                className={`flex-1 rounded-xl py-2.5 text-[12px] font-semibold transition ${path === p ? "gradient-brand text-white" : "border border-white/10 bg-bg-1 text-text-secondary"}`}
+              >
+                {p === "device" ? "I have DEXA / InBody" : "Estimate manually"}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Weight unit</span>
+            <UnitToggle value={wUnit} onChange={convertWeightOnToggle} options={["kg", "lb"] as const} />
+          </div>
+
+          <Row label="Weight">
+            <NumField value={weightDisp} onChange={setWeightDisp} suffix={wUnit} ariaLabel="Weight" />
+          </Row>
+          <Row label="Body fat %">
+            <NumField value={bfPct} onChange={setBfPct} suffix="%" ariaLabel="Body fat percent" />
+          </Row>
+          {path === "device" && (
+            <Row label="Lean mass (optional)">
+              <NumField value={leanDisp} onChange={setLeanDisp} suffix={wUnit} ariaLabel="Lean mass" />
+            </Row>
+          )}
+
+          {err && <p className="text-[12px] text-red-400">{err}</p>}
+
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setStep("B")} className="flex-1 rounded-2xl border border-white/10 py-3 text-[14px] text-text-secondary">
+              Skip to measurements
+            </button>
+            <button type="button" onClick={() => setStep("B")} className="flex-1 rounded-2xl gradient-brand py-3 text-[14px] font-semibold text-white">
+              Next: measurements
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={submit} className="space-y-5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Length unit</span>
+            <UnitToggle value={lUnit} onChange={convertLengthOnToggle} options={["cm", "in"] as const} />
+          </div>
+
+          <Row label="Waist">
+            <NumField value={waistDisp} onChange={setWaistDisp} suffix={lUnit} ariaLabel="Waist" />
+          </Row>
+          <Row label="Hip">
+            <NumField value={hipDisp} onChange={setHipDisp} suffix={lUnit} ariaLabel="Hip" />
+          </Row>
+          <Row label="Arm">
+            <NumField value={armDisp} onChange={setArmDisp} suffix={lUnit} ariaLabel="Arm" />
+          </Row>
+          <Row label="Thigh">
+            <NumField value={thighDisp} onChange={setThighDisp} suffix={lUnit} ariaLabel="Thigh" />
+          </Row>
+
+          {err && <p className="text-[12px] text-red-400">{err}</p>}
+
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setStep("A")} className="rounded-2xl px-4 py-3 text-[14px] text-text-secondary border border-white/10">
+              Back
+            </button>
+            <SubmitBtn busy={busy} label="Save measurement" />
+          </div>
+        </form>
+      )}
+    </Sheet>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="flex items-center justify-between rounded-2xl bg-bg-1 border border-white/5 px-4 py-3">
+      <span className="text-sm text-text-secondary">{label}</span>
+      {children}
+    </label>
+  );
+}
+
