@@ -165,26 +165,37 @@ function scoreDay(d: DayInputs, recoveryBaseline: RecoveryBaseline): {
   let usedDevice = false;
   let usedManual = false;
 
-  // recovery
-  if (d.manual?.recovery_self_rating != null) {
+  // recovery — precedence depends on the user's input path.
+  // device-path users: device data with HRV (Journey A/B) wins over any
+  //   same-day manual entry; manual only contributes when device data is
+  //   absent OR unusable (HRV null = Journey C territory).
+  // manual-path users: manual entry wins; device data is a fallback.
+  const deviceUsable = d.device && d.device.parsed_hrv != null; // HRV is the primary signal
+  const useDeviceFirst = d.pathPref === "device" && deviceUsable;
+  if (useDeviceFirst) {
+    const r = deviceRecoveryScore(d.device!.parsed_hrv, d.device!.parsed_rhr, recoveryBaseline);
+    if (r != null) { scores.recovery = r; usedDevice = true; }
+  } else if (d.manual?.recovery_self_rating != null) {
     scores.recovery = manualRecoveryScore(d.manual.recovery_self_rating);
     usedManual = true;
   } else if (d.device && (d.device.parsed_hrv != null || d.device.parsed_rhr != null)) {
     const r = deviceRecoveryScore(d.device.parsed_hrv, d.device.parsed_rhr, recoveryBaseline);
-    if (r != null) {
-      scores.recovery = r;
-      usedDevice = true;
-    }
+    if (r != null) { scores.recovery = r; usedDevice = true; }
   }
 
-  // sleep
+  // sleep — same precedence model: device-path users prefer device sleep when present.
   let sleepHours: number | null = null;
-  if (d.manual?.sleep_hours != null) {
+  const deviceSleep = d.device?.parsed_sleep_hours;
+  if (d.pathPref === "device" && deviceSleep != null) {
+    sleepHours = Number(deviceSleep);
+    scores.sleep = manualSleepScore(sleepHours);
+    usedDevice = true;
+  } else if (d.manual?.sleep_hours != null) {
     sleepHours = Number(d.manual.sleep_hours);
     scores.sleep = manualSleepScore(sleepHours);
     usedManual = true;
-  } else if (d.device?.parsed_sleep_hours != null) {
-    sleepHours = Number(d.device.parsed_sleep_hours);
+  } else if (deviceSleep != null) {
+    sleepHours = Number(deviceSleep);
     scores.sleep = manualSleepScore(sleepHours);
     usedDevice = true;
   }
