@@ -123,6 +123,7 @@ Deno.serve(async (req) => {
     const remaining = target_calories - target_protein_g * 4 - target_fat_g * 9;
     const target_carbs_g = Math.max(0, remaining / 4);
 
+    const today = new Date().toISOString().slice(0, 10);
     const row = {
       user_id,
       calculated_at: new Date().toISOString(),
@@ -133,11 +134,25 @@ Deno.serve(async (req) => {
       target_carbs_g: Math.round(target_carbs_g),
       target_fat_g: Math.round(target_fat_g),
       formula_used,
+      effective_start_date: today,
+      effective_end_date: null as string | null,
+      source: "onboarding",
     };
+
+    // Close any prior active target row that started before today. (If a
+    // target already exists with start=today, the upsert below will update it
+    // in place.)
+    const { error: closeErr } = await supa
+      .from("daily_macro_targets")
+      .update({ effective_end_date: today })
+      .eq("user_id", user_id)
+      .is("effective_end_date", null)
+      .lt("effective_start_date", today);
+    if (closeErr) throw closeErr;
 
     const { error: upErr } = await supa
       .from("daily_macro_targets")
-      .upsert(row, { onConflict: "user_id" });
+      .upsert(row, { onConflict: "user_id,effective_start_date" });
     if (upErr) throw upErr;
 
     return new Response(JSON.stringify({ ok: true, ...row }), {
