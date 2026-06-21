@@ -262,6 +262,12 @@ function WorkoutsPage() {
 
       {cueEx && <CueSheet exercise={cueEx} onClose={() => setCueEx(null)} />}
 
+      {/* Rest-day "Train anyway" → reuses the existing strain logger so the
+          session still feeds the Training pillar without disturbing the
+          weekly plan structure. Chose freeform-logging over borrowing
+          another day's plan to keep this a one-tap path. */}
+      <WorkoutLogModal open={freeformOpen} onClose={() => setFreeformOpen(false)} onSaved={() => { setFreeformOpen(false); loadAll(); }} />
+
       <BottomNav />
     </div>
   );
