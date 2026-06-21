@@ -148,7 +148,8 @@ function Settings() {
         Exercise reference images provided by the <a href="https://wger.de" target="_blank" rel="noreferrer" className="underline">wger project</a> (wger.de), licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer" className="underline">CC BY-SA 4.0</a>. Per-image attribution shown alongside each image.
       </p>
 
-      <ResourceLibrary />
+
+
 
       <button
         onClick={handleSignOut}
