@@ -255,7 +255,7 @@ function Macro({ label, v, t, color, hasMeals }: { label: string; v: number; t: 
     <div className="flex flex-col items-center gap-1">
       <RingChart size={56} stroke={5} rings={[{ value: pct, color: ringColor }]} centerLabel={hasMeals ? `${rawPct}%` : "—"} />
       <p className="text-[11px] font-semibold mt-1">{label}</p>
-      <p className="text-[10px]" style={{ color: over ? "#F59E0B" : undefined }}>
+      <p className={`text-[10px] ${over ? "" : "text-text-tertiary"}`} style={{ color: over ? "#F59E0B" : undefined }}>
         {hasMeals ? `${v}/${t || "—"}g${over ? ` · +${v - t}g` : ""}` : `${t || "—"}g target`}
       </p>
     </div>
