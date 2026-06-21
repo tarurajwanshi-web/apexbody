@@ -290,7 +290,31 @@ function HydrationInsight({ hydration }: { hydration: HydrationSummary | null })
   if (!hydration?.target_ml) return null;
   const pct = hydration.target_ml > 0 ? hydration.consumed_ml / hydration.target_ml : 0;
   const hourLocal = new Date().getHours();
-  if (hourLocal < 13 || pct >= 0.55) return null;
+  const underTarget = pct < 0.55;
+
+  // Device-path causal insight: only fires when hydration is meaningfully
+  // under target AND the user's Recovery pillar today dipped vs. their recent
+  // baseline by a real amount. Deterministic comparison — no LLM, no causal
+  // claim, framed as "likely contributor".
+  if (hydration.path === "device" && underTarget) {
+    const today = hydration.recovery_today;
+    const base = hydration.recovery_baseline;
+    const yest = hydration.recovery_yesterday;
+    const ref = today ?? yest;
+    if (ref != null && base != null && base - ref >= 8) {
+      const drop = Math.round(base - ref);
+      return (
+        <div className="mx-5 mt-4">
+          <AICard>
+            Your recovery dipped about <span className="text-text-primary font-semibold">{drop} pts</span> below your recent baseline today — you're also under your water target, which is a likely contributor. Informational guidance, not medical advice.
+          </AICard>
+        </div>
+      );
+    }
+    // Fall through to the generic late-day callout if no observed correlation.
+  }
+
+  if (hourLocal < 13 || !underTarget) return null;
   const shortMl = Math.max(0, hydration.target_ml - hydration.consumed_ml);
   return (
     <div className="mx-5 mt-4">
@@ -300,3 +324,4 @@ function HydrationInsight({ hydration }: { hydration: HydrationSummary | null })
     </div>
   );
 }
+
