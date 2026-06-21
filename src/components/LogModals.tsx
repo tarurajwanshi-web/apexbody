@@ -10,6 +10,7 @@ import {
   updateMeal,
   upsertTraining,
 } from "@/lib/shield.functions";
+import { analyzePhoto } from "@/lib/coach.functions";
 
 type Props = { open: boolean; onClose: () => void; onSaved?: () => void };
 
@@ -215,7 +216,8 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
 type MealEditing = { id: string; meal_description: string | null; meal_photo_url: string | null } | null;
 type MealProps = Props & { editing?: MealEditing };
 
-type VisionGuess = { description: string };
+type _VisionGuess = { description: string };
+void ({} as _VisionGuess);
 
 /**
  * Meal log modal — two-step:
@@ -384,9 +386,7 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
   );
 }
 
-/** Fire a fast Claude Haiku vision pass via score-nutrition's sibling — but
- *  we use the existing analyze-photo path through coach.functions if available.
- *  For now this is a thin shim that asks Claude to name the food from the file. */
+/** Fast Claude Sonnet vision pass to seed the description; user edits before logging. */
 async function runVisionDraft(file: File): Promise<string> {
   const reader = new FileReader();
   const dataUrl: string = await new Promise((resolve, reject) => {
@@ -395,12 +395,18 @@ async function runVisionDraft(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
   try {
-    const { data, error } = await supabase.functions.invoke("score-nutrition", { body: { __vision_draft: true, image_data_url: dataUrl } });
-    if (error) throw error;
-    if (typeof data?.description === "string") return data.description;
-  } catch { /* fallback below */ }
-  // Fallback: empty string lets the user just type what's in it.
-  return "";
+    const r = await analyzePhoto({
+      data: {
+        base64Image: dataUrl,
+        mediaType: file.type || "image/jpeg",
+        prompt:
+          "Identify the food in this image in one short phrase suitable as a meal-log description. Include visible quantity (e.g. '2 puri') when obvious. Reply with just the description text, no preamble.",
+      },
+    });
+    return (r.content || "").trim();
+  } catch {
+    return "";
+  }
 }
 
 export function WorkoutLogModal({ open, onClose, onSaved }: Props) {
