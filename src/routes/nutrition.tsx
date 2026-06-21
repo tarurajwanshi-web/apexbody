@@ -28,10 +28,6 @@ const GOAL_LABEL: Record<string, string> = {
 };
 
 function Nutrition() {
-  const [analysis, setAnalysis] = useState<string | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [macros, setMacros] = useState<MacroSummary | null>(null);
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
   const [hydration, setHydration] = useState<HydrationSummary | null>(null);
@@ -42,12 +38,9 @@ function Nutrition() {
   const [ptrDelta, setPtrDelta] = useState(0);
   const ptrRef = useRef<HTMLDivElement>(null);
   const ptrStart = useRef<number | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const fn = useServerFn(analyzePhoto);
   const fetchMacros = useServerFn(getTodayMacroSummary);
   const fetchMeals = useServerFn(getTodayMeals);
   const fetchHydration = useServerFn(getTodayHydration);
-  const logMealFn = useServerFn(logMeal);
 
   const reload = async () => {
     setRefreshing(true);
