@@ -442,10 +442,7 @@ function Dashboard() {
                     </span>
                     <span className="text-text-tertiary" style={{ fontSize: 18, fontWeight: 300 }}>/100</span>
                   </div>
-                  <div className="mt-3 inline-flex items-center gap-1.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-success" style={{ boxShadow: "0 0 8px #10B981" }} />
-                    <span className="text-[12px] uppercase tracking-[1.5px] text-success">Today's readiness</span>
-                  </div>
+                  <ConfidenceExplainer readiness={readiness} />
                 </>
               ) : (
                 <>
@@ -463,53 +460,78 @@ function Dashboard() {
               )}
             </div>
 
-            {/* RIGHT — ring with soft outer glow */}
-            <div className="shrink-0 relative">
-              <div
-                aria-hidden
-                className="absolute inset-0 rounded-full score-halo-breathe"
-                style={{
-                  background:
-                    "radial-gradient(circle, rgba(124,58,237,0.45) 0%, rgba(59,130,246,0.22) 45%, transparent 70%)",
-                }}
-              />
-              <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`} className="relative">
-                <defs>
-                  <linearGradient id="scoreRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#A78BFA" />
-                    <stop offset="55%" stopColor="#3B82F6" />
-                    <stop offset="100%" stopColor="#10B981" />
-                  </linearGradient>
-                  <filter id="scoreRingGlow" x="-50%" y="-50%" width="200%" height="200%">
-                    <feGaussianBlur stdDeviation="2.2" result="b" />
-                    <feMerge>
-                      <feMergeNode in="b" />
-                      <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                  </filter>
-                </defs>
-                <circle
-                  cx={ringSize / 2} cy={ringSize / 2} r={ringR}
-                  fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={ringStroke}
-                />
-                {score != null && (
-                  <circle
-                    cx={ringSize / 2} cy={ringSize / 2} r={ringR}
-                    fill="none" stroke="url(#scoreRingGrad)" strokeWidth={ringStroke}
-                    strokeLinecap="round"
-                    strokeDasharray={ringC}
-                    strokeDashoffset={ringC * (1 - fillPct)}
-                    transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
-                    filter="url(#scoreRingGlow)"
-                  />
-                )}
-                <text
-                  x="50%" y="50%" textAnchor="middle" dominantBaseline="central"
-                  className="fill-white" style={{ fontSize: 16, fontWeight: 500 }}
-                >
-                  {score ?? "—"}
-                </text>
-              </svg>
+            {/* RIGHT — ring + halo breathe together as one unit. */}
+            <div className="shrink-0 relative score-ring-breathe">
+              {(() => {
+                const ringHex = score != null ? scoreColor(score) : "#7C3AED";
+                const extreme = isExtreme(score);
+                const haloAlpha = extreme ? 0.65 : 0.4;
+                const haloAlpha2 = extreme ? 0.32 : 0.18;
+                return (
+                  <>
+                    <div
+                      aria-hidden
+                      className="absolute inset-0 rounded-full score-halo-breathe"
+                      style={{
+                        background: `radial-gradient(circle, ${scoreColorRgba(score, haloAlpha)} 0%, ${scoreColorRgba(score, haloAlpha2)} 45%, transparent 70%)`,
+                      }}
+                    />
+                    <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`} className="relative overflow-visible">
+                      <defs>
+                        <linearGradient id="scoreRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stopColor={ringHex} stopOpacity="0.85" />
+                          <stop offset="50%" stopColor={ringHex} stopOpacity="1" />
+                          <stop offset="100%" stopColor={ringHex} stopOpacity="0.9" />
+                        </linearGradient>
+                        <linearGradient id="scoreRingSpec" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.55" />
+                          <stop offset="60%" stopColor="#ffffff" stopOpacity="0" />
+                        </linearGradient>
+                        <filter id="scoreRingGlow" x="-50%" y="-50%" width="200%" height="200%">
+                          <feGaussianBlur stdDeviation={extreme ? "3.4" : "2.0"} result="b" />
+                          <feMerge>
+                            <feMergeNode in="b" />
+                            <feMergeNode in="SourceGraphic" />
+                          </feMerge>
+                        </filter>
+                      </defs>
+                      <circle
+                        cx={ringSize / 2} cy={ringSize / 2} r={ringR}
+                        fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={ringStroke}
+                      />
+                      {score != null && (
+                        <>
+                          <circle
+                            cx={ringSize / 2} cy={ringSize / 2} r={ringR}
+                            fill="none" stroke="url(#scoreRingGrad)" strokeWidth={ringStroke}
+                            strokeLinecap="round"
+                            strokeDasharray={ringC}
+                            strokeDashoffset={ringC * (1 - fillPct)}
+                            transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                            filter="url(#scoreRingGlow)"
+                          />
+                          {/* specular highlight arc for instrument depth */}
+                          <circle
+                            cx={ringSize / 2} cy={ringSize / 2} r={ringR}
+                            fill="none" stroke="url(#scoreRingSpec)" strokeWidth={ringStroke * 0.45}
+                            strokeLinecap="round"
+                            strokeDasharray={`${ringC * 0.18 * fillPct} ${ringC}`}
+                            strokeDashoffset={ringC * (1 - fillPct) + ringC * 0.04}
+                            transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                            style={{ mixBlendMode: "screen" }}
+                          />
+                        </>
+                      )}
+                      <text
+                        x="50%" y="50%" textAnchor="middle" dominantBaseline="central"
+                        className="fill-white" style={{ fontSize: 16, fontWeight: 500 }}
+                      >
+                        {score ?? "—"}
+                      </text>
+                    </svg>
+                  </>
+                );
+              })()}
             </div>
           </div>
 
