@@ -826,3 +826,118 @@ function BodyScanThumb({ scan, onRemove }: { scan: BodyScan; onRemove: () => voi
     </div>
   );
 }
+
+/**
+ * RestDaySwapCard — "Train anyway" on a scheduled rest day.
+ *
+ * The user's onboarding stated training-days-per-week determines which days
+ * the weekly plan marks as rest. To honor that capacity, we offer a SWAP
+ * (not an add): pick one of this week's other planned sessions, that session
+ * moves to today, and the day it came from becomes the new rest day. The
+ * weekly total of training days stays exactly what the user said they can
+ * handle.
+ *
+ * NOTE: This is a Week 1-2 manual stopgap. Copy is deliberately honest —
+ * we acknowledge the swap happened, and nothing more. We do NOT claim to
+ * be rebalancing volume, adjusting for fatigue, or modifying future
+ * sessions based on this choice. Genuine adaptive volume logic depends on
+ * Engine B's Volume Allocation + Cross-Day Pattern Memory modules (not
+ * built yet) — when those exist, this swap mechanism should be revisited
+ * and may be replaced or augmented by real automated adjustment.
+ */
+function RestDaySwapCard({
+  plan,
+  todayIdx,
+  onSwapped,
+}: {
+  plan: WeeklyPlan;
+  todayIdx: number;
+  onSwapped: () => void | Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const days = plan.plan_data?.days ?? [];
+  // Candidate sessions = any non-rest day in this week other than today.
+  // We include earlier-in-week sessions too: the user may already have
+  // completed them, but swapping is still a no-op-safe choice — they just
+  // re-do that session today, and the original day becomes rest going
+  // forward (which it already effectively is).
+  const candidates = days
+    .map((d, idx) => ({ idx, day: d }))
+    .filter(({ idx, day }) => idx !== todayIdx && !day.rest && (day.exercises?.length ?? 0) > 0);
+
+  const handleSwap = async (sourceIdx: number) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const sourceDay = days[sourceIdx];
+      if (!sourceDay) return;
+      const todayDay = days[todayIdx];
+      const newDays = days.map((d, i) => {
+        if (i === todayIdx) {
+          return { ...sourceDay, day: todayDay.day, day_name: todayDay.day_name, rest: false };
+        }
+        if (i === sourceIdx) {
+          return { ...sourceDay, rest: true, session_name: null, exercises: [] };
+        }
+        return d;
+      });
+      const newPlanData = { ...plan.plan_data, days: newDays };
+      const { error } = await supabase
+        .from("weekly_plans")
+        .update({ plan_data: newPlanData as any })
+        .eq("id", plan.id);
+      if (error) throw error;
+      toast.success(`Moved ${sourceDay.session_name ?? "session"} to today`);
+      await onSwapped();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't swap sessions");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const daysPerWeek = days.filter((d) => !d.rest).length;
+
+  return (
+    <div
+      className="mx-5 mt-4 rounded-2xl p-4"
+      style={{ background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.25)" }}
+    >
+      <p className="text-[13px] text-text-primary">Today is a scheduled rest day.</p>
+      <p className="text-[11px] text-text-tertiary mt-1">
+        You told us you train {daysPerWeek} {daysPerWeek === 1 ? "day" : "days"}/week, and today isn't one of them.
+        Want to move one of this week's sessions here instead? The day it came from becomes your new rest day.
+      </p>
+      {candidates.length > 0 ? (
+        <div className="mt-3 space-y-2">
+          {candidates.map(({ idx, day }) => (
+            <button
+              key={idx}
+              disabled={busy}
+              onClick={() => handleSwap(idx)}
+              className="w-full rounded-xl px-3 py-2.5 text-left active:scale-[0.99] transition disabled:opacity-50 flex items-center justify-between gap-3"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+            >
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold text-text-primary truncate">
+                  {day.session_name ?? "Session"}
+                </p>
+                <p className="text-[11px] text-text-tertiary">
+                  Originally {day.day_name ?? DAY_NAMES[idx]} · {(day.exercises?.length ?? 0)} exercises
+                </p>
+              </div>
+              <span className="text-[12px] text-text-accent shrink-0">Move here →</span>
+            </button>
+          ))}
+          <p className="text-[10px] text-text-tertiary mt-2 leading-snug">
+            Manual swap only — your weekly volume and future sessions aren't adjusted automatically.
+          </p>
+        </div>
+      ) : (
+        <p className="mt-3 text-[12px] text-text-secondary">
+          No other sessions available to swap this week. Take the rest day — it's part of the plan.
+        </p>
+      )}
+    </div>
+  );
+}
