@@ -82,12 +82,15 @@ export function RecoveryLogModal({ open, onClose, onSaved }: Props) {
   );
 }
 
+// Plain-language mood labels that read like how a person actually describes
+// their state. The emoji stays the primary tap target; the word beneath is
+// a supporting clarification so the picker isn't emoji-only.
 const MOOD_OPTIONS: Array<{ emoji: string; label: string }> = [
-  { emoji: "😞", label: "Low" },
-  { emoji: "🙁", label: "Meh" },
+  { emoji: "😞", label: "Drained" },
+  { emoji: "🙁", label: "Low" },
   { emoji: "😐", label: "Okay" },
   { emoji: "🙂", label: "Good" },
-  { emoji: "😄", label: "Great" },
+  { emoji: "😄", label: "Motivated" },
 ];
 
 function MoodPicker({ value, onChange }: { value: string | null; onChange: (v: string) => void }) {
@@ -103,13 +106,19 @@ function MoodPicker({ value, onChange }: { value: string | null; onChange: (v: s
               key={m.emoji}
               onClick={() => onChange(m.emoji)}
               aria-label={m.label}
-              className="h-14 rounded-2xl text-[26px] active:scale-95 transition flex items-center justify-center"
+              className="rounded-2xl py-2 px-1 active:scale-95 transition flex flex-col items-center justify-center gap-1"
               style={{
                 background: active ? "linear-gradient(135deg, rgba(139,92,246,0.25), rgba(59,130,246,0.18))" : "#0A0E1A",
                 border: `1px solid ${active ? "rgba(139,92,246,0.6)" : "rgba(255,255,255,0.08)"}`,
               }}
             >
-              {m.emoji}
+              <span className="text-[24px] leading-none">{m.emoji}</span>
+              <span
+                className="text-[10px] font-medium leading-none"
+                style={{ color: active ? "#E5E7EB" : "#9CA3AF" }}
+              >
+                {m.label}
+              </span>
             </button>
           );
         })}

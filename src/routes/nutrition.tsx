@@ -151,7 +151,12 @@ function Nutrition() {
               {hasTarget ? (
                 hasMeals ? (
                   <>
-                    <span className="text-5xl font-extrabold leading-none gradient-text tabular-nums">{cCal.toLocaleString()}</span>
+                    <span
+                      className={`text-5xl font-extrabold leading-none tabular-nums ${cCal > tCal! ? "" : "gradient-text"}`}
+                      style={cCal > tCal! ? { color: "#F59E0B" } : undefined}
+                    >
+                      {cCal.toLocaleString()}
+                    </span>
                     <span className="text-base text-text-tertiary mb-1">/ {tCal!.toLocaleString()} kcal</span>
                   </>
                 ) : (
@@ -165,13 +170,31 @@ function Nutrition() {
                 <span className="text-sm text-text-tertiary">No target yet.</span>
               )}
             </div>
+            {/* Informational over-target line — keep tone calm and factual,
+                consistent with other nutrition copy in the app. */}
+            {hasTarget && hasMeals && cCal > tCal! && (
+              <p className="mt-2 text-[12px]" style={{ color: "#F59E0B" }}>
+                {(cCal - tCal!).toLocaleString()} kcal over today's target
+              </p>
+            )}
           </div>
         </div>
-        {hasTarget && (
-          <div className="mt-4 h-1.5 rounded-full bg-white/5 overflow-hidden">
-            <div className="h-full gradient-brand" style={{ width: `${pct(cCal, tCal!)}%` }} />
-          </div>
-        )}
+        {hasTarget && (() => {
+          const ratio = tCal! > 0 ? cCal / tCal! : 0;
+          const over = ratio > 1;
+          // Bar fills to 100% at target, then shifts to amber to flag the overage
+          // without becoming alarming. No red — copy elsewhere stays informational.
+          const barColor = over ? "#F59E0B" : undefined;
+          const widthPct = Math.min(100, Math.round(ratio * 100));
+          return (
+            <div className="mt-4 h-1.5 rounded-full bg-white/5 overflow-hidden">
+              <div
+                className={over ? "h-full" : "h-full gradient-brand"}
+                style={{ width: `${widthPct}%`, background: barColor }}
+              />
+            </div>
+          );
+        })()}
         <div className="mt-5 grid grid-cols-3 gap-3">
           <Macro label="Protein" v={macros?.consumed_protein_g ?? 0} t={macros?.target_protein_g ?? 0} color="#F59E0B" hasMeals={hasMeals} />
           <Macro label="Carbs"   v={macros?.consumed_carbs_g ?? 0}   t={macros?.target_carbs_g ?? 0}   color="#10B981" hasMeals={hasMeals} />
@@ -222,12 +245,19 @@ function Nutrition() {
 }
 
 function Macro({ label, v, t, color, hasMeals }: { label: string; v: number; t: number; color: string; hasMeals: boolean }) {
-  const pct = t > 0 ? Math.min(100, Math.round((v / t) * 100)) : 0;
+  const rawPct = t > 0 ? Math.round((v / t) * 100) : 0;
+  const pct = t > 0 ? Math.min(100, rawPct) : 0;
+  // Flag a meaningful per-macro overage (>10%) with amber, matching the
+  // calorie bar treatment. Same calm, informational tone.
+  const over = t > 0 && hasMeals && rawPct > 110;
+  const ringColor = over ? "#F59E0B" : color;
   return (
     <div className="flex flex-col items-center gap-1">
-      <RingChart size={56} stroke={5} rings={[{ value: pct, color }]} centerLabel={hasMeals ? `${pct}%` : "—"} />
+      <RingChart size={56} stroke={5} rings={[{ value: pct, color: ringColor }]} centerLabel={hasMeals ? `${rawPct}%` : "—"} />
       <p className="text-[11px] font-semibold mt-1">{label}</p>
-      <p className="text-[10px] text-text-tertiary">{hasMeals ? `${v}/${t || "—"}g` : `${t || "—"}g target`}</p>
+      <p className={`text-[10px] ${over ? "" : "text-text-tertiary"}`} style={{ color: over ? "#F59E0B" : undefined }}>
+        {hasMeals ? `${v}/${t || "—"}g${over ? ` · +${v - t}g` : ""}` : `${t || "—"}g target`}
+      </p>
     </div>
   );
 }

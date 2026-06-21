@@ -179,16 +179,24 @@ Deno.serve(async (req) => {
           } catch (_) { /* ignore */ }
           estContent.push({
             type: "text",
-            text: `Description: ${row.meal_description ?? "(none)"}. Estimate total calories and macros for the WHOLE meal shown.`,
+            text:
+              `Description: ${row.meal_description ?? "(none)"}. ` +
+              `Step 1: list the specific foods you actually identify on the plate (be concrete: "two puris", "potato curry ~1 cup", not "carbs + protein"). ` +
+              `Step 2: for each food, recall its real nutritional profile per typical serving — protein is dominated by what's actually present (meat, fish, eggs, dairy, legumes, tofu, protein powder); refined-flour breads, rice, potatoes, fried doughs, fruits and most vegetables are LOW protein regardless of how much is on the plate. ` +
+              `Step 3: sum the per-food estimates into a plate total. ` +
+              `Return only the final JSON.`,
           });
           const estRes = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
             body: JSON.stringify({
               model: "claude-haiku-4-5-20251001",
-              max_tokens: 250,
+              max_tokens: 400,
               system:
                 "You estimate calories and macros from a meal photo + description. " +
+                "Ground every macro in the specific foods you identify and their actual nutritional profile — do NOT distribute macros proportionally across total calories, and do NOT infer 'plausible plate macros' from portion volume alone. " +
+                "A larger portion of a low-protein food (puri, rice, potato, pasta, bread, fried dough) is still low protein. Only count protein from foods that genuinely contain it (meat, fish, eggs, dairy, legumes, tofu, tempeh, seitan, protein powder, nuts/seeds in smaller amounts). " +
+                "If the dish is a high-carb staple with no obvious protein source, protein should be in the single digits to low teens, not 20g+. " +
                 "Respond with ONLY a single JSON object, no prose, no fences: " +
                 "{ \"estimated_calories\": <number>, \"estimated_protein_g\": <number>, \"estimated_carbs_g\": <number>, \"estimated_fat_g\": <number> }. " +
                 "Be realistic; this is an estimate, not precise tracking.",
