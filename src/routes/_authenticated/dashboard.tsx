@@ -809,7 +809,13 @@ function PillarExplainer({ readiness, expanded }: { readiness: TodayReadiness; e
                 color: s.logged ? "#F0F4FF" : "#4A566A",
               }}
             >
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.logged ? s.color : "#4A566A" }} />
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{
+                  background: s.logged ? scoreColor(Number(s.value)) : "#4A566A",
+                  boxShadow: s.logged ? `0 0 6px ${scoreColorRgba(Number(s.value), 0.55)}` : undefined,
+                }}
+              />
               {s.label}
               {s.logged ? <span className="tabular-nums opacity-70">{s.value}</span> : <span className="opacity-70">— not logged</span>}
             </span>
@@ -827,7 +833,7 @@ function PillarExplainer({ readiness, expanded }: { readiness: TodayReadiness; e
       {status.map((s, i) => (
         <MetricRow
           key={s.key}
-          color={s.color}
+          color={s.logged ? scoreColor(Number(s.value)) : "#4A566A"}
           name={s.label}
           value={s.logged ? s.value! : "not logged yet"}
           trend="stable"
