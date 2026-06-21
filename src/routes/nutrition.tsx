@@ -1,10 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, Plus, Camera, Sparkles, X, Loader2 } from "lucide-react";
+import { ChevronLeft, Plus, Camera, Sparkles, X, Loader2, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { AICard } from "@/components/AIOrb";
 import { RingChart } from "@/components/RingChart";
 import { BottomNav } from "@/components/BottomNav";
+import { RefreshStamp } from "@/components/RefreshStamp";
+import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { analyzePhoto } from "@/lib/coach.functions";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
 import { getTodayMeals, logMeal, type TodayMeal } from "@/lib/shield.functions";
@@ -30,18 +32,58 @@ function Nutrition() {
   const [error, setError] = useState<string | null>(null);
   const [macros, setMacros] = useState<MacroSummary | null>(null);
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [ptrDelta, setPtrDelta] = useState(0);
+  const ptrRef = useRef<HTMLDivElement>(null);
+  const ptrStart = useRef<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const fn = useServerFn(analyzePhoto);
   const fetchMacros = useServerFn(getTodayMacroSummary);
   const fetchMeals = useServerFn(getTodayMeals);
   const logMealFn = useServerFn(logMeal);
 
-  const reload = () => {
-    fetchMacros().then(setMacros).catch(() => {});
-    fetchMeals().then(setMeals).catch(() => setMeals([]));
+  const reload = async () => {
+    setRefreshing(true);
+    await Promise.allSettled([
+      fetchMacros().then(setMacros),
+      fetchMeals().then(setMeals).catch(() => setMeals([])),
+    ]);
+    setLastUpdatedAt(Date.now());
+    setRefreshing(false);
   };
 
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
+  useAutoRefreshOnVisible(reload, lastUpdatedAt);
+
+  // Pull-to-refresh.
+  useEffect(() => {
+    const el = ptrRef.current;
+    if (!el) return;
+    const onStart = (e: TouchEvent) => {
+      if (window.scrollY > 0) return;
+      ptrStart.current = e.touches[0].clientY;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (ptrStart.current == null) return;
+      const d = e.touches[0].clientY - ptrStart.current;
+      if (d > 0) setPtrDelta(Math.min(80, d * 0.5));
+    };
+    const onEnd = () => {
+      if (ptrDelta >= 60) reload();
+      ptrStart.current = null;
+      setPtrDelta(0);
+    };
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: true });
+    el.addEventListener("touchend", onEnd);
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ptrDelta]);
 
   const pct = (a: number, b: number) => (b > 0 ? Math.min(100, Math.round((a / b) * 100)) : 0);
 
