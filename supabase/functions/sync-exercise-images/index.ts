@@ -142,15 +142,21 @@ Deno.serve(async (req) => {
       arr.push(im); imgsByExercise.set(im.exercise, arr);
     }
 
-    const report = { processed: 0, matched: 0, missing: [] as string[] };
-    for (const name of todo) {
+    // Cap per-invocation work so we never approach the 150s limit. Callers
+    // can re-invoke to drain the remainder; deferred names are returned.
+    const MAX_PER_RUN = 25;
+    const deferred = todo.slice(MAX_PER_RUN);
+    const batch = todo.slice(0, MAX_PER_RUN);
+
+    const report = { processed: 0, matched: 0, missing: [] as string[], deferred: deferred.length };
+    for (const name of batch) {
       report.processed++;
       const exId = pickBestExerciseId(name, translations);
       if (exId == null) { report.missing.push(name); continue; }
       const imgs = imgsByExercise.get(exId);
       if (!imgs?.length) { report.missing.push(name); continue; }
       const img = imgs.find((i) => i.is_main) ?? imgs[0];
-      const imgRes = await fetch(img.image).catch(() => null);
+      const imgRes = await fetchWithTimeout(img.image);
       if (!imgRes || !imgRes.ok) { report.missing.push(name); continue; }
       const blob = await imgRes.arrayBuffer();
       const ext = (img.image.split(".").pop() || "png").toLowerCase().split("?")[0].slice(0, 5);
