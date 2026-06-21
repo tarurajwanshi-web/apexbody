@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, Plus, Sparkles, X, Loader2, RefreshCw, Droplet } from "lucide-react";
+import { ChevronLeft, Sparkles, X, Loader2, RefreshCw, Droplet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { AICard } from "@/components/AIOrb";
@@ -7,6 +7,7 @@ import { RingChart } from "@/components/RingChart";
 import { BottomNav } from "@/components/BottomNav";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { HydrationLogModal } from "@/components/LogModals";
+import { MealDetailModal } from "@/components/MealDetailModal";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { analyzePhoto } from "@/lib/coach.functions";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
