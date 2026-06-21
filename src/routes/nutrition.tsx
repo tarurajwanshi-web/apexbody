@@ -222,6 +222,12 @@ function Nutrition() {
         </div>
       </section>
 
+      {/* Hydration card — ACSM-aligned target, with quick-add launcher.
+       *  For manual users this also feeds 30% of their Nutrition pillar score.
+       *  Device users still see the same UI but it doesn't move their score
+       *  (avoids double-counting with HRV/RHR-driven Recovery). */}
+      <HydrationCard hydration={hydration} onLog={() => setHydrationOpen(true)} />
+
       {hasTarget && hasMeals && proteinShort >= 20 && (
         <div className="mx-5 mt-4">
           <AICard>
@@ -229,6 +235,11 @@ function Nutrition() {
           </AICard>
         </div>
       )}
+
+      {/* Hydration-aware insight — fires when meaningfully behind target after midday.
+       *  Framed as general guidance, not a clinical claim. */}
+      <HydrationInsight hydration={hydration} />
+
 
       {(analyzing || analysis || error) && (
         <section className="mx-5 mt-4 rounded-2xl border border-ai/30 bg-gradient-to-br from-ai/10 to-sleep/5 p-4 animate-fade-up">
