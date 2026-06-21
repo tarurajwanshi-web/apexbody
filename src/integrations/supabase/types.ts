@@ -555,6 +555,10 @@ export type Database = {
         Args: { _entry_date: string; _user_id: string }
         Returns: undefined
       }
+      shield_dispatch_parse_device_upload: {
+        Args: { _entry_date: string; _upload_id: string; _user_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
