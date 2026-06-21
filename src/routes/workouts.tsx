@@ -7,6 +7,7 @@ import { AICard } from "@/components/AIOrb";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { toast } from "sonner";
+import { WorkoutLogModal } from "@/components/LogModals";
 
 export const Route = createFileRoute("/workouts")({
   head: () => ({ meta: [{ title: "Workouts — APEX" }] }),
