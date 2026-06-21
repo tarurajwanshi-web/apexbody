@@ -197,7 +197,14 @@
 }
 .score-halo-breathe { animation: score-halo-breathe 3.6s ease-in-out infinite; }
 
+/* Whole-unit (ring + halo) gentle breathe — explicitly NOT a heartbeat tempo. */
+@keyframes score-ring-breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.025); }
+}
+.score-ring-breathe { animation: score-ring-breathe 3.6s ease-in-out infinite; transform-origin: center; }
+
 @media (prefers-reduced-motion: reduce) {
   .ambient-ring, .ambient-ring-rotate, .ambient-ring-arc,
-  .score-halo-breathe { animation: none; }
+  .score-halo-breathe, .score-ring-breathe { animation: none; }
 }

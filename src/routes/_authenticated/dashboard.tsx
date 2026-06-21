@@ -11,6 +11,7 @@ import { BottomNav } from "@/components/BottomNav";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { supabase } from "@/integrations/supabase/client";
+import { scoreColor, isExtreme, scoreColorRgba } from "@/lib/score-color";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — APEX" }] }),
@@ -402,14 +403,14 @@ function Dashboard() {
               ].join(","),
             }}
           />
-          {/* Hairline grid for instrument feel */}
+          {/* Hairline grid for instrument feel — toned way down so it reads as ambient depth, not a noisy artifact. */}
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-0 opacity-[0.05]"
+            className="pointer-events-none absolute inset-0 opacity-[0.015]"
             style={{
               backgroundImage:
                 "linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)",
-              backgroundSize: "40px 40px",
+              backgroundSize: "48px 48px",
             }}
           />
 
@@ -441,10 +442,7 @@ function Dashboard() {
                     </span>
                     <span className="text-text-tertiary" style={{ fontSize: 18, fontWeight: 300 }}>/100</span>
                   </div>
-                  <div className="mt-3 inline-flex items-center gap-1.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-success" style={{ boxShadow: "0 0 8px #10B981" }} />
-                    <span className="text-[12px] uppercase tracking-[1.5px] text-success">Today's readiness</span>
-                  </div>
+                  <ConfidenceExplainer readiness={readiness} />
                 </>
               ) : (
                 <>
@@ -462,53 +460,78 @@ function Dashboard() {
               )}
             </div>
 
-            {/* RIGHT — ring with soft outer glow */}
-            <div className="shrink-0 relative">
-              <div
-                aria-hidden
-                className="absolute inset-0 rounded-full score-halo-breathe"
-                style={{
-                  background:
-                    "radial-gradient(circle, rgba(124,58,237,0.45) 0%, rgba(59,130,246,0.22) 45%, transparent 70%)",
-                }}
-              />
-              <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`} className="relative">
-                <defs>
-                  <linearGradient id="scoreRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#A78BFA" />
-                    <stop offset="55%" stopColor="#3B82F6" />
-                    <stop offset="100%" stopColor="#10B981" />
-                  </linearGradient>
-                  <filter id="scoreRingGlow" x="-50%" y="-50%" width="200%" height="200%">
-                    <feGaussianBlur stdDeviation="2.2" result="b" />
-                    <feMerge>
-                      <feMergeNode in="b" />
-                      <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                  </filter>
-                </defs>
-                <circle
-                  cx={ringSize / 2} cy={ringSize / 2} r={ringR}
-                  fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={ringStroke}
-                />
-                {score != null && (
-                  <circle
-                    cx={ringSize / 2} cy={ringSize / 2} r={ringR}
-                    fill="none" stroke="url(#scoreRingGrad)" strokeWidth={ringStroke}
-                    strokeLinecap="round"
-                    strokeDasharray={ringC}
-                    strokeDashoffset={ringC * (1 - fillPct)}
-                    transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
-                    filter="url(#scoreRingGlow)"
-                  />
-                )}
-                <text
-                  x="50%" y="50%" textAnchor="middle" dominantBaseline="central"
-                  className="fill-white" style={{ fontSize: 16, fontWeight: 500 }}
-                >
-                  {score ?? "—"}
-                </text>
-              </svg>
+            {/* RIGHT — ring + halo breathe together as one unit. */}
+            <div className="shrink-0 relative score-ring-breathe">
+              {(() => {
+                const ringHex = score != null ? scoreColor(score) : "#7C3AED";
+                const extreme = isExtreme(score);
+                const haloAlpha = extreme ? 0.65 : 0.4;
+                const haloAlpha2 = extreme ? 0.32 : 0.18;
+                return (
+                  <>
+                    <div
+                      aria-hidden
+                      className="absolute inset-0 rounded-full score-halo-breathe"
+                      style={{
+                        background: `radial-gradient(circle, ${scoreColorRgba(score, haloAlpha)} 0%, ${scoreColorRgba(score, haloAlpha2)} 45%, transparent 70%)`,
+                      }}
+                    />
+                    <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`} className="relative overflow-visible">
+                      <defs>
+                        <linearGradient id="scoreRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stopColor={ringHex} stopOpacity="0.85" />
+                          <stop offset="50%" stopColor={ringHex} stopOpacity="1" />
+                          <stop offset="100%" stopColor={ringHex} stopOpacity="0.9" />
+                        </linearGradient>
+                        <linearGradient id="scoreRingSpec" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.55" />
+                          <stop offset="60%" stopColor="#ffffff" stopOpacity="0" />
+                        </linearGradient>
+                        <filter id="scoreRingGlow" x="-50%" y="-50%" width="200%" height="200%">
+                          <feGaussianBlur stdDeviation={extreme ? "3.4" : "2.0"} result="b" />
+                          <feMerge>
+                            <feMergeNode in="b" />
+                            <feMergeNode in="SourceGraphic" />
+                          </feMerge>
+                        </filter>
+                      </defs>
+                      <circle
+                        cx={ringSize / 2} cy={ringSize / 2} r={ringR}
+                        fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={ringStroke}
+                      />
+                      {score != null && (
+                        <>
+                          <circle
+                            cx={ringSize / 2} cy={ringSize / 2} r={ringR}
+                            fill="none" stroke="url(#scoreRingGrad)" strokeWidth={ringStroke}
+                            strokeLinecap="round"
+                            strokeDasharray={ringC}
+                            strokeDashoffset={ringC * (1 - fillPct)}
+                            transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                            filter="url(#scoreRingGlow)"
+                          />
+                          {/* specular highlight arc for instrument depth */}
+                          <circle
+                            cx={ringSize / 2} cy={ringSize / 2} r={ringR}
+                            fill="none" stroke="url(#scoreRingSpec)" strokeWidth={ringStroke * 0.45}
+                            strokeLinecap="round"
+                            strokeDasharray={`${ringC * 0.18 * fillPct} ${ringC}`}
+                            strokeDashoffset={ringC * (1 - fillPct) + ringC * 0.04}
+                            transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                            style={{ mixBlendMode: "screen" }}
+                          />
+                        </>
+                      )}
+                      <text
+                        x="50%" y="50%" textAnchor="middle" dominantBaseline="central"
+                        className="fill-white" style={{ fontSize: 16, fontWeight: 500 }}
+                      >
+                        {score ?? "—"}
+                      </text>
+                    </svg>
+                  </>
+                );
+              })()}
             </div>
           </div>
 
@@ -621,6 +644,35 @@ function ConfidenceBadge({ level }: { level: "HIGH" | "MEDIUM" | "LOW" }) {
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
       {level}
     </span>
+  );
+}
+
+/** Inline explanation for the confidence badge so "HIGH" never reads as
+ *  "your score is good". Lists which pillars actually fed today's number. */
+function ConfidenceExplainer({ readiness }: { readiness: TodayReadiness }) {
+  const level = readiness?.confidence_level ?? null;
+  const breakdown = readiness?.pillar_breakdown ?? null;
+  const logged = PILLAR_META.filter((p) => {
+    const v = breakdown?.[p.key];
+    return typeof v === "number" || (typeof v === "string" && v !== "" && v !== "—");
+  }).map((p) => p.label);
+
+  const phrase =
+    level === "HIGH" ? "High confidence" :
+    level === "MEDIUM" ? "Medium confidence" :
+    level === "LOW" ? "Low confidence" : "Confidence";
+
+  const basis =
+    logged.length === 0
+      ? "nothing logged yet today"
+      : logged.length === 1
+        ? `based on ${logged[0]}`
+        : `based on ${logged.slice(0, -1).join(", ")} & ${logged[logged.length - 1]}`;
+
+  return (
+    <p className="mt-3 text-[11px] text-text-tertiary leading-snug max-w-[240px]">
+      <span className="text-text-secondary">{phrase}</span> — {basis}.
+    </p>
   );
 }
 
@@ -786,7 +838,13 @@ function PillarExplainer({ readiness, expanded }: { readiness: TodayReadiness; e
                 color: s.logged ? "#F0F4FF" : "#4A566A",
               }}
             >
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.logged ? s.color : "#4A566A" }} />
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{
+                  background: s.logged ? scoreColor(Number(s.value)) : "#4A566A",
+                  boxShadow: s.logged ? `0 0 6px ${scoreColorRgba(Number(s.value), 0.55)}` : undefined,
+                }}
+              />
               {s.label}
               {s.logged ? <span className="tabular-nums opacity-70">{s.value}</span> : <span className="opacity-70">— not logged</span>}
             </span>
@@ -804,7 +862,7 @@ function PillarExplainer({ readiness, expanded }: { readiness: TodayReadiness; e
       {status.map((s, i) => (
         <MetricRow
           key={s.key}
-          color={s.color}
+          color={s.logged ? scoreColor(Number(s.value)) : "#4A566A"}
           name={s.label}
           value={s.logged ? s.value! : "not logged yet"}
           trend="stable"
