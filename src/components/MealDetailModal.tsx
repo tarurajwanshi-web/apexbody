@@ -44,27 +44,44 @@ export function MealDetailModal({ meal, onClose }: { meal: TodayMeal | null; onC
           <img src={meal.meal_photo_url} alt="Meal" className="w-full max-h-44 object-cover rounded-xl mb-4" />
         )}
 
-        {Array.isArray(meal.estimated_items) && meal.estimated_items.length > 0 && (
-          <ul className="mb-4 space-y-1.5">
-            {meal.estimated_items.map((it, i) => (
-              <li key={i} className="rounded-lg p-2.5" style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.05)" }}>
-                <p className="text-[12px] text-white leading-snug">
-                  {i + 1}. {it.name} — <span className="text-text-tertiary">~{it.grams}g</span>
-                </p>
-                <p className="text-[11px] text-text-tertiary tabular-nums">
-                  {it.calories} kcal · {it.protein_g}g protein · {it.carbs_g}g carbs · {it.fat_g}g fat
-                </p>
-              </li>
-            ))}
-          </ul>
-        )}
-
         <div className="grid grid-cols-4 gap-2">
           <Stat label="kcal" value={cal != null ? Math.round(cal).toString() : "—"} />
           <Stat label="protein" value={p != null ? `${Math.round(p)}g` : "—"} color="#F59E0B" />
           <Stat label="carbs"   value={c != null ? `${Math.round(c)}g` : "—"} color="#10B981" />
           <Stat label="fat"     value={f != null ? `${Math.round(f)}g` : "—"} color="#3B82F6" />
         </div>
+
+        {Array.isArray(meal.estimated_items) && meal.estimated_items.length > 0 && (
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => setShowItems((v) => !v)}
+              className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-left active:scale-[0.99] transition"
+              style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.06)" }}
+              aria-expanded={showItems}
+            >
+              <span className="text-[12px] text-text-secondary">
+                {showItems ? "Hide" : "Show"} itemized breakdown
+                <span className="text-text-tertiary"> · {meal.estimated_items.length} items</span>
+              </span>
+              {showItems ? <ChevronUp size={16} className="text-text-tertiary" /> : <ChevronDown size={16} className="text-text-tertiary" />}
+            </button>
+            {showItems && (
+              <ul className="mt-2 space-y-1.5">
+                {meal.estimated_items.map((it, i) => (
+                  <li key={i} className="rounded-lg p-2.5" style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.05)" }}>
+                    <p className="text-[12px] text-white leading-snug">
+                      {i + 1}. {it.name} — <span className="text-text-tertiary">~{it.grams}g</span>
+                    </p>
+                    <p className="text-[11px] text-text-tertiary tabular-nums">
+                      {it.calories} kcal · {it.protein_g}g protein · {it.carbs_g}g carbs · {it.fat_g}g fat
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         <div className="mt-4 flex items-center gap-2">
           <span className="text-[10px] uppercase tracking-wider text-text-tertiary">Meal score</span>
