@@ -151,7 +151,12 @@ function Nutrition() {
               {hasTarget ? (
                 hasMeals ? (
                   <>
-                    <span className="text-5xl font-extrabold leading-none gradient-text tabular-nums">{cCal.toLocaleString()}</span>
+                    <span
+                      className={`text-5xl font-extrabold leading-none tabular-nums ${cCal > tCal! ? "" : "gradient-text"}`}
+                      style={cCal > tCal! ? { color: "#F59E0B" } : undefined}
+                    >
+                      {cCal.toLocaleString()}
+                    </span>
                     <span className="text-base text-text-tertiary mb-1">/ {tCal!.toLocaleString()} kcal</span>
                   </>
                 ) : (
@@ -165,13 +170,31 @@ function Nutrition() {
                 <span className="text-sm text-text-tertiary">No target yet.</span>
               )}
             </div>
+            {/* Informational over-target line — keep tone calm and factual,
+                consistent with other nutrition copy in the app. */}
+            {hasTarget && hasMeals && cCal > tCal! && (
+              <p className="mt-2 text-[12px]" style={{ color: "#F59E0B" }}>
+                {(cCal - tCal!).toLocaleString()} kcal over today's target
+              </p>
+            )}
           </div>
         </div>
-        {hasTarget && (
-          <div className="mt-4 h-1.5 rounded-full bg-white/5 overflow-hidden">
-            <div className="h-full gradient-brand" style={{ width: `${pct(cCal, tCal!)}%` }} />
-          </div>
-        )}
+        {hasTarget && (() => {
+          const ratio = tCal! > 0 ? cCal / tCal! : 0;
+          const over = ratio > 1;
+          // Bar fills to 100% at target, then shifts to amber to flag the overage
+          // without becoming alarming. No red — copy elsewhere stays informational.
+          const barColor = over ? "#F59E0B" : undefined;
+          const widthPct = Math.min(100, Math.round(ratio * 100));
+          return (
+            <div className="mt-4 h-1.5 rounded-full bg-white/5 overflow-hidden">
+              <div
+                className={over ? "h-full" : "h-full gradient-brand"}
+                style={{ width: `${widthPct}%`, background: barColor }}
+              />
+            </div>
+          );
+        })()}
         <div className="mt-5 grid grid-cols-3 gap-3">
           <Macro label="Protein" v={macros?.consumed_protein_g ?? 0} t={macros?.target_protein_g ?? 0} color="#F59E0B" hasMeals={hasMeals} />
           <Macro label="Carbs"   v={macros?.consumed_carbs_g ?? 0}   t={macros?.target_carbs_g ?? 0}   color="#10B981" hasMeals={hasMeals} />
