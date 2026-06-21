@@ -150,12 +150,29 @@ function Nutrition() {
   const proteinShort = tProtein != null ? Math.max(0, tProtein - cProtein) : 0;
 
   return (
-    <div className="min-h-screen bg-bg-1 pb-32">
+    <div
+      ref={ptrRef}
+      className="min-h-screen bg-bg-1 pb-32 relative"
+      style={{
+        transform: ptrDelta ? `translateY(${ptrDelta}px)` : undefined,
+        transition: ptrDelta ? "none" : "transform 0.2s ease",
+      }}
+    >
+      {(ptrDelta > 0 || refreshing) && (
+        <div className="absolute left-1/2 -translate-x-1/2 top-2 z-50 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium text-text-secondary"
+          style={{ background: "rgba(15,21,36,0.85)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(8px)" }}>
+          <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
+          <span>{refreshing ? "Refreshing…" : ptrDelta >= 60 ? "Release to refresh" : "Pull to refresh"}</span>
+        </div>
+      )}
       <header className="flex items-center justify-between px-5 pt-6">
         <Link to="/dashboard" className="text-text-secondary"><ChevronLeft size={24} /></Link>
         <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Nutrition</span>
         <span className="w-6" />
       </header>
+      <div className="px-5 mt-2">
+        <RefreshStamp refreshing={refreshing} lastUpdatedAt={lastUpdatedAt} />
+      </div>
 
       {/* Goal-based framing line */}
       <p className="mx-5 mt-5 text-[12px] text-text-secondary leading-snug">
