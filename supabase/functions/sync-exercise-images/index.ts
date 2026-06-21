@@ -31,12 +31,27 @@ const tokens = (s: string) =>
 type WgerTr = { exercise: number; name: string };
 type WgerImg = { exercise: number; image: string; is_main: boolean; license_author: string | null };
 
+// Hard page caps so a single invocation cannot exhaust the 150s budget on
+// wger pagination alone. wger has ~hundreds of pages at limit=200; we cap
+// well below that and let subsequent invocations pick up the rest.
+const MAX_PAGES = 8;
+const FETCH_TIMEOUT_MS = 8000;
+
+async function fetchWithTimeout(url: string): Promise<Response | null> {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try { return await fetch(url, { signal: ctrl.signal }); }
+  catch { return null; }
+  finally { clearTimeout(to); }
+}
+
 async function fetchAllEnglishTranslations(): Promise<WgerTr[]> {
   const out: WgerTr[] = [];
   let url: string | null = `${WGER}/exercise-translation/?language=2&limit=200`;
-  while (url) {
-    const r = await fetch(url);
-    if (!r.ok) break;
+  let pages = 0;
+  while (url && pages++ < MAX_PAGES) {
+    const r = await fetchWithTimeout(url);
+    if (!r || !r.ok) break;
     const j = await r.json() as { results?: WgerTr[]; next?: string | null };
     for (const t of j.results ?? []) if (t.exercise && t.name) out.push({ exercise: t.exercise, name: t.name });
     url = j.next ?? null;
@@ -47,9 +62,10 @@ async function fetchAllEnglishTranslations(): Promise<WgerTr[]> {
 async function fetchAllImages(): Promise<WgerImg[]> {
   const out: WgerImg[] = [];
   let url: string | null = `${WGER}/exerciseimage/?limit=200`;
-  while (url) {
-    const r = await fetch(url);
-    if (!r.ok) break;
+  let pages = 0;
+  while (url && pages++ < MAX_PAGES) {
+    const r = await fetchWithTimeout(url);
+    if (!r || !r.ok) break;
     const j = await r.json() as { results?: WgerImg[]; next?: string | null };
     for (const im of j.results ?? []) if (im.image && im.exercise) out.push(im);
     url = j.next ?? null;
