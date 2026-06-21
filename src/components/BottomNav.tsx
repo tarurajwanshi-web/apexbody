@@ -75,15 +75,15 @@ export function BottomNav({ onCenter, onLogged }: Props = {}) {
         <div className="flex items-center gap-1 rounded-full border border-white/10 bg-bg-2/85 backdrop-blur-xl px-2 py-2 card-shadow">
           {renderTab(TABS[0])}
           {renderTab(TABS[1])}
+          {renderTab(TABS[2])}
           <button
             type="button"
             onClick={handleCenter}
             aria-label="Quick log"
-            className="mx-1 flex h-12 w-12 items-center justify-center rounded-full gradient-brand ai-glow text-white active:scale-95 transition"
+            className="ml-1 flex h-12 w-12 items-center justify-center rounded-full gradient-brand ai-glow text-white active:scale-95 transition"
           >
             <Plus size={24} />
           </button>
-          {renderTab(TABS[2])}
         </div>
       </nav>
       <FloatingCoach />
