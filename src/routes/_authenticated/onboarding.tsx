@@ -67,17 +67,21 @@ const EMPTY: Draft = {
 
 function ProfileSetup() {
   const navigate = useNavigate();
+  const logMeasure = useServerFn(logBodyMeasurement);
   const [step, setStep] = useState(1);
+  const [bodySub, setBodySub] = useState<"A" | "B">("A"); // sub-step inside step 6
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [submitting, setSubmitting] = useState(false);
 
   const patch = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }));
 
-  const bodyPathValid = (() => {
-    if (draft.bodyDataType === null) return true;
-    if (draft.bodyDataType === "dexa") return !!draft.dexaBf && !!draft.dexaLean;
-    return !!draft.waist && !!draft.hip && !!draft.weight && !!draft.height;
+  // Step 6 sub-A requires: a path picked + weight + body-fat + height (needed for BMR).
+  const bodyAValid = (() => {
+    if (draft.bodyDataType === null) return false;
+    return !!draft.weight && !!draft.dexaBf && !!draft.height;
   })();
+  // Step 6 sub-B circumferences are always optional.
+  const bodyBValid = true;
 
   const canContinue = (() => {
     switch (step) {
@@ -89,14 +93,32 @@ function ProfileSetup() {
       case 3: return !!draft.goal;
       case 4: return draft.days >= 1 && draft.days <= 6;
       case 5: return !!draft.equipment;
-      case 6: return bodyPathValid;
+      case 6: return bodySub === "A" ? bodyAValid : bodyBValid;
       case 7: return true;
       default: return false;
     }
   })();
 
-  const next = () => setStep((s) => Math.min(s + 1, TOTAL - 1));
-  const back = () => setStep((s) => Math.max(s - 1, 1));
+  const next = () => {
+    if (step === 6 && bodySub === "A") { setBodySub("B"); return; }
+    if (step === 6 && bodySub === "B") { setBodySub("A"); setStep((s) => Math.min(s + 1, TOTAL - 1)); return; }
+    setStep((s) => Math.min(s + 1, TOTAL - 1));
+  };
+  const back = () => {
+    if (step === 6 && bodySub === "B") { setBodySub("A"); return; }
+    setStep((s) => Math.max(s - 1, 1));
+  };
+
+  const skipBody = () => {
+    patch({
+      bodyDataType: null,
+      dexaBf: "", dexaLean: "",
+      waist: "", hip: "", arm: "", thigh: "",
+      weight: "", height: "",
+    });
+    setBodySub("A");
+    setStep((s) => Math.min(s + 1, TOTAL - 1));
+  };
 
   const submit = async () => {
     setSubmitting(true);
@@ -119,23 +141,39 @@ function ProfileSetup() {
         training_days_per_week: draft.days,
         equipment_access: draft.equipment,
         body_data_type: draft.bodyDataType,
-        dexa_body_fat_pct: draft.bodyDataType === "dexa" ? Number(draft.dexaBf) : null,
-        dexa_lean_mass_kg: draft.bodyDataType === "dexa" ? Number(draft.dexaLean) : null,
-        measurement_waist_cm: draft.bodyDataType === "measurements" ? Number(draft.waist) : null,
-        measurement_hip_cm: draft.bodyDataType === "measurements" ? Number(draft.hip) : null,
-        // Weight is captured in either body-data path now (DEXA users still
-        // need it for hydration targets / macro recalcs); the form on the
-        // measurements path collects it directly, and the DEXA path will fall
-        // back to deriving from lean mass / body-fat if the user didn't enter
-        // weight. We always persist whatever weight the user typed if any.
+        dexa_body_fat_pct: draft.bodyDataType === "dexa" && draft.dexaBf ? Number(draft.dexaBf) : null,
+        dexa_lean_mass_kg: draft.bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
+        measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
+        measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
         measurement_weight_kg: draft.weight ? Number(draft.weight) : null,
-        measurement_height_cm: draft.bodyDataType === "measurements" ? Number(draft.height) : null,
+        measurement_height_cm: draft.height ? Number(draft.height) : null,
         profile_completed_at: now.toISOString(),
         plan_unlock_date: unlockDate,
       };
 
       const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "user_id" });
       if (error) throw error;
+
+      // Persist a per-entry row in body_measurement_events so the new history table
+      // gets seeded from onboarding (Section 6 requirement: every save = a dated row).
+      if (draft.bodyDataType !== null) {
+        try {
+          await logMeasure({
+            data: {
+              source: draft.bodyDataType === "dexa" ? "dexa" : "manual",
+              weight_kg: draft.weight ? Number(draft.weight) : null,
+              body_fat_pct: draft.dexaBf ? Number(draft.dexaBf) : null,
+              lean_mass_kg: draft.bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
+              waist_cm: draft.waist ? Number(draft.waist) : null,
+              hip_cm: draft.hip ? Number(draft.hip) : null,
+              arm_cm: draft.arm ? Number(draft.arm) : null,
+              thigh_cm: draft.thigh ? Number(draft.thigh) : null,
+            },
+          });
+        } catch (e) {
+          console.warn("logBodyMeasurement failed", e);
+        }
+      }
 
       // Mirror name to local store so the dashboard greets immediately.
       try {
@@ -162,15 +200,15 @@ function ProfileSetup() {
 
   if (submitting) return <BuildingPlanScreen />;
 
+  const stepLabel = step === 6 ? `Step 6${bodySub} of ${TOTAL - 1}` : `Step ${step} of ${TOTAL - 1}`;
+
   return (
     <div className="min-h-screen bg-bg-1 pb-32" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
       <header className="flex items-center justify-between px-5 pt-6">
         <button onClick={step === 1 ? () => navigate({ to: "/" }) : back} className="text-text-secondary">
           <ChevronLeft size={24} />
         </button>
-        <span className="text-[11px] uppercase tracking-wider text-text-tertiary">
-          Step {step} of {TOTAL - 1}
-        </span>
+        <span className="text-[11px] uppercase tracking-wider text-text-tertiary">{stepLabel}</span>
         <span className="w-6" />
       </header>
 
@@ -184,7 +222,7 @@ function ProfileSetup() {
         {step === 3 && <GoalStep value={draft.goal} onChange={(goal) => patch({ goal })} />}
         {step === 4 && <DaysStep value={draft.days} onChange={(days) => patch({ days })} />}
         {step === 5 && <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />}
-        {step === 6 && <BodyStep draft={draft} patch={patch} onSkip={() => { patch({ bodyDataType: null, dexaBf: "", dexaLean: "", dexaFileName: null, waist: "", hip: "", weight: "", height: "" }); next(); }} />}
+        {step === 6 && <BodyStep draft={draft} patch={patch} subStep={bodySub} onSkip={skipBody} />}
         {step === 7 && <ReviewStep draft={draft} />}
       </main>
 
@@ -203,7 +241,7 @@ function ProfileSetup() {
               className="block w-full rounded-2xl gradient-brand text-white py-3.5 text-sm font-semibold disabled:opacity-40"
               style={{ borderRadius: 18 }}
             >
-              Continue
+              {step === 6 && bodySub === "A" ? "Next: measurements" : "Continue"}
             </button>
           ) : (
             <button
@@ -218,6 +256,7 @@ function ProfileSetup() {
         </div>
       </footer>
     </div>
+
   );
 }
 
