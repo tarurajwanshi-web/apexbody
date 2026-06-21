@@ -216,17 +216,16 @@ function WorkoutsPage() {
             if (sessionStarted) return null;
             if (todayDay.rest) {
               return (
-                <div className="mx-5 mt-4 rounded-2xl p-4" style={{ background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.25)" }}>
-                  <p className="text-[13px] text-text-primary">Today is a scheduled rest day.</p>
-                  <p className="text-[11px] text-text-tertiary mt-1">Listening to your body matters more than the calendar — train anyway if you're feeling it.</p>
-                  <button
-                    onClick={() => setFreeformOpen(true)}
-                    className="mt-3 w-full rounded-2xl py-3 text-[13px] font-semibold text-white active:scale-[0.98] transition"
-                    style={{ background: "linear-gradient(90deg, #7C3AED, #3B82F6)" }}
-                  >
-                    Train anyway →
-                  </button>
-                </div>
+                <RestDaySwapCard
+                  plan={plan}
+                  todayIdx={todayIdx}
+                  onSwapped={async () => {
+                    await loadAll();
+                    // After the swap the plan now shows a session on today —
+                    // open the normal pre-workout flow so logging works.
+                    setPreCheckOpen(true);
+                  }}
+                />
               );
             }
             return (
