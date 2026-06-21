@@ -149,7 +149,7 @@ function resolveEffectiveWeight(p: any): number | null {
 
 type PillarScores = Partial<Record<PillarKey, number>>;
 
-function scoreDay(d: DayInputs): {
+function scoreDay(d: DayInputs, recoveryBaseline: RecoveryBaseline): {
   scores: PillarScores;
   present: Record<PillarKey, boolean>;
   sleepHours: number | null;
@@ -169,9 +169,11 @@ function scoreDay(d: DayInputs): {
     scores.recovery = manualRecoveryScore(d.manual.recovery_self_rating);
     usedManual = true;
   } else if (d.device && (d.device.parsed_hrv != null || d.device.parsed_rhr != null)) {
-    // PLACEHOLDER — see open-items in calculate-score response.
-    scores.recovery = 55;
-    usedDevice = true;
+    const r = deviceRecoveryScore(d.device.parsed_hrv, d.device.parsed_rhr, recoveryBaseline);
+    if (r != null) {
+      scores.recovery = r;
+      usedDevice = true;
+    }
   }
 
   // sleep
