@@ -523,6 +523,21 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
               If quantity looks off, correct it here (e.g. "1 puri" instead of "2"). Macros are calculated from this description.
             </p>
           </div>
+          {/* Parsed-interpretation recap — re-presents what the system will log
+              (text or photo, doesn't matter) so the user actively confirms the
+              specific input rather than handing off a silent guess. Macros are
+              estimated server-side after save and surface in the meal card. */}
+          {desc.trim() && (
+            <div className="rounded-2xl p-3" style={{ background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.25)" }}>
+              <p className="text-[10px] uppercase tracking-wider text-success font-semibold flex items-center gap-1">
+                <Check size={11} /> Here's what we'll log
+              </p>
+              <p className="mt-1.5 text-[13px] text-white leading-snug">"{desc.trim()}"</p>
+              <p className="mt-1.5 text-[10px] text-text-tertiary">
+                Macros (kcal / protein / carbs / fat) are calculated from this exact text right after you confirm.
+              </p>
+            </div>
+          )}
           {err && <p className="text-[12px] text-red-400">{err}</p>}
           <div className="flex gap-2">
             {!editing && (
