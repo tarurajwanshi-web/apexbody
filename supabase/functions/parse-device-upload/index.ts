@@ -118,11 +118,15 @@ Deno.serve(async (req) => {
     const systemPrompt =
       `You are extracting recovery metrics from a screenshot of a ${row.device_source} wearable app. ` +
       `Respond with ONLY a single JSON object, no prose, no markdown fences: ` +
-      `{ "hrv_ms": <number|null>, "rhr_bpm": <number|null>, "sleep_hours": <number|null> }. ` +
+      `{ "hrv_ms": <number|null>, "rhr_bpm": <number|null>, "sleep_hours": <number|null>, "data_date": <"YYYY-MM-DD"|null> }. ` +
       `hrv_ms: heart rate variability in milliseconds (RMSSD-style; typical 20-150). ` +
       `rhr_bpm: resting heart rate in beats per minute (typical 40-90). ` +
       `sleep_hours: total sleep time in hours (decimal, e.g. 7.5). ` +
-      `If a metric is not clearly visible in the screenshot, return null for that field. ` +
+      `data_date: the calendar date the screenshot is reporting recovery for, ` +
+      `read from the image (header, date selector, "Mar 14", etc.). ` +
+      `Return ISO YYYY-MM-DD. If only a relative label like "Today"/"Yesterday" is visible ` +
+      `with no real date, return null — do not guess. ` +
+      `If any other metric is not clearly visible, return null for that field. ` +
       `Do not guess. Convert units if needed (e.g. "7h 30m" → 7.5).`;
 
     const aRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -140,7 +144,7 @@ Deno.serve(async (req) => {
           role: "user",
           content: [
             { type: "image", source: { type: "base64", media_type, data: b64 } },
-            { type: "text", text: `Extract HRV, RHR, and sleep hours from this ${row.device_source} screenshot.` },
+            { type: "text", text: `Extract HRV, RHR, sleep hours, and the data date from this ${row.device_source} screenshot.` },
           ],
         }],
       }),
@@ -172,6 +176,17 @@ Deno.serve(async (req) => {
     const parsed_hrv = numOrNull(parsed.hrv_ms);
     const parsed_rhr = numOrNull(parsed.rhr_bpm);
     const parsed_sleep_hours = numOrNull(parsed.sleep_hours);
+    // data_date: only accept a strict YYYY-MM-DD; otherwise null (caller defaults to today).
+    const parsed_date: string | null =
+      typeof parsed.data_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(parsed.data_date)
+        ? parsed.data_date
+        : null;
+
+    // Journey C: total parse failure. If NOTHING usable came back (HRV, RHR,
+    // sleep all null), don't pretend we have data — mark failed so the UI
+    // can route the user into the per-day manual fallback path.
+    const totalFailure = parsed_hrv == null && parsed_rhr == null && parsed_sleep_hours == null;
+    const nextStatus = totalFailure ? "failed" : "parsed";
 
     const { data: updated, error: upErr } = await supabase
       .from("shield_device_uploads")
@@ -179,7 +194,8 @@ Deno.serve(async (req) => {
         parsed_hrv,
         parsed_rhr,
         parsed_sleep_hours,
-        parse_status: "parsed",
+        parsed_date,
+        parse_status: nextStatus,
       })
       .eq("id", row.id)
       .select()

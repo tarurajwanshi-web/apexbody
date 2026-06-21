@@ -93,10 +93,11 @@ function dateOffset(iso: string, daysBack: number): string {
 }
 
 type DayInputs = {
-  manual?: { recovery_self_rating: number | null; sleep_hours: number | null; mood_emoji: string | null; hydration_ml: number | null };
+  manual?: { recovery_self_rating: number | null; sleep_hours: number | null; mood_emoji: string | null; hydration_ml: number | null; recovery_source?: string | null };
   device?: { parsed_hrv: number | null; parsed_rhr: number | null; parsed_sleep_hours: number | null };
   meals: Array<{ claude_quality_score: number | null }>;
   training?: { strain_value: number | null };
+  pathPref?: "device" | "manual";
 };
 
 type RecoveryBaseline = { hrv: number | null; rhr: number | null };
@@ -164,26 +165,37 @@ function scoreDay(d: DayInputs, recoveryBaseline: RecoveryBaseline): {
   let usedDevice = false;
   let usedManual = false;
 
-  // recovery
-  if (d.manual?.recovery_self_rating != null) {
+  // recovery — precedence depends on the user's input path.
+  // device-path users: device data with HRV (Journey A/B) wins over any
+  //   same-day manual entry; manual only contributes when device data is
+  //   absent OR unusable (HRV null = Journey C territory).
+  // manual-path users: manual entry wins; device data is a fallback.
+  const deviceUsable = d.device && d.device.parsed_hrv != null; // HRV is the primary signal
+  const useDeviceFirst = d.pathPref === "device" && deviceUsable;
+  if (useDeviceFirst) {
+    const r = deviceRecoveryScore(d.device!.parsed_hrv, d.device!.parsed_rhr, recoveryBaseline);
+    if (r != null) { scores.recovery = r; usedDevice = true; }
+  } else if (d.manual?.recovery_self_rating != null) {
     scores.recovery = manualRecoveryScore(d.manual.recovery_self_rating);
     usedManual = true;
   } else if (d.device && (d.device.parsed_hrv != null || d.device.parsed_rhr != null)) {
     const r = deviceRecoveryScore(d.device.parsed_hrv, d.device.parsed_rhr, recoveryBaseline);
-    if (r != null) {
-      scores.recovery = r;
-      usedDevice = true;
-    }
+    if (r != null) { scores.recovery = r; usedDevice = true; }
   }
 
-  // sleep
+  // sleep — same precedence model: device-path users prefer device sleep when present.
   let sleepHours: number | null = null;
-  if (d.manual?.sleep_hours != null) {
+  const deviceSleep = d.device?.parsed_sleep_hours;
+  if (d.pathPref === "device" && deviceSleep != null) {
+    sleepHours = Number(deviceSleep);
+    scores.sleep = manualSleepScore(sleepHours);
+    usedDevice = true;
+  } else if (d.manual?.sleep_hours != null) {
     sleepHours = Number(d.manual.sleep_hours);
     scores.sleep = manualSleepScore(sleepHours);
     usedManual = true;
-  } else if (d.device?.parsed_sleep_hours != null) {
-    sleepHours = Number(d.device.parsed_sleep_hours);
+  } else if (deviceSleep != null) {
+    sleepHours = Number(deviceSleep);
     scores.sleep = manualSleepScore(sleepHours);
     usedDevice = true;
   }
@@ -322,7 +334,7 @@ Deno.serve(async (req) => {
     // reasonable prior for single-day users).
     const baselineFrom = dateOffset(today, 14);
     const [manualRes, deviceRes, mealsRes, trainingRes, baselineRes] = await Promise.all([
-      supabase.from("shield_manual_inputs").select("entry_date, recovery_self_rating, sleep_hours, mood_emoji, hydration_ml")
+      supabase.from("shield_manual_inputs").select("entry_date, recovery_self_rating, sleep_hours, mood_emoji, hydration_ml, recovery_source")
         .eq("user_id", user_id).in("entry_date", dateList),
       supabase.from("shield_device_uploads").select("entry_date, parsed_hrv, parsed_rhr, parsed_sleep_hours, parse_status")
         .eq("user_id", user_id).in("entry_date", dateList).eq("parse_status", "parsed"),
@@ -343,7 +355,7 @@ Deno.serve(async (req) => {
     };
 
     const byDate: Record<string, DayInputs> = {};
-    for (const d of dateList) byDate[d] = { meals: [] };
+    for (const d of dateList) byDate[d] = { meals: [], pathPref };
     for (const r of manualRes.data ?? []) byDate[r.entry_date].manual = r as any;
     for (const r of deviceRes.data ?? []) byDate[r.entry_date].device = r as any;
     for (const r of mealsRes.data ?? []) byDate[r.entry_date].meals.push({ claude_quality_score: r.claude_quality_score });

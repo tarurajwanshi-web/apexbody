@@ -315,6 +315,7 @@ export type Database = {
           entry_date: string
           id: string
           parse_status: string
+          parsed_date: string | null
           parsed_hrv: number | null
           parsed_rhr: number | null
           parsed_sleep_hours: number | null
@@ -328,6 +329,7 @@ export type Database = {
           entry_date: string
           id?: string
           parse_status?: string
+          parsed_date?: string | null
           parsed_hrv?: number | null
           parsed_rhr?: number | null
           parsed_sleep_hours?: number | null
@@ -341,6 +343,7 @@ export type Database = {
           entry_date?: string
           id?: string
           parse_status?: string
+          parsed_date?: string | null
           parsed_hrv?: number | null
           parsed_rhr?: number | null
           parsed_sleep_hours?: number | null
@@ -358,6 +361,7 @@ export type Database = {
           id: string
           mood_emoji: string | null
           recovery_self_rating: number | null
+          recovery_source: string | null
           sleep_hours: number | null
           user_id: string
         }
@@ -368,6 +372,7 @@ export type Database = {
           id?: string
           mood_emoji?: string | null
           recovery_self_rating?: number | null
+          recovery_source?: string | null
           sleep_hours?: number | null
           user_id: string
         }
@@ -378,6 +383,7 @@ export type Database = {
           id?: string
           mood_emoji?: string | null
           recovery_self_rating?: number | null
+          recovery_source?: string | null
           sleep_hours?: number | null
           user_id?: string
         }

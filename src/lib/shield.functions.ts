@@ -41,6 +41,12 @@ export const upsertManualRecovery = createServerFn({ method: "POST" })
       recovery_self_rating: z.number().int().min(1).max(5),
       sleep_hours: z.number().min(0).max(24),
       mood_emoji: z.string().min(1).max(8).nullable().optional(),
+      // Per-day source marker. 'device_parse_failed_fallback' = the user is
+      // normally on the device path but today's screenshot couldn't be
+      // parsed, so they entered manually as a one-day fallback. We do NOT
+      // change profiles.input_path_preference in that case — they remain a
+      // device-path user. Default 'manual' for ordinary manual-path entries.
+      recovery_source: z.enum(["manual", "device_parse_failed_fallback"]).optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
@@ -49,6 +55,7 @@ export const upsertManualRecovery = createServerFn({ method: "POST" })
       entry_date: today(),
       recovery_self_rating: data.recovery_self_rating,
       sleep_hours: data.sleep_hours,
+      recovery_source: data.recovery_source ?? "manual",
       ...(data.mood_emoji != null ? { mood_emoji: data.mood_emoji } : {}),
     };
     const { error } = await context.supabase
@@ -243,6 +250,12 @@ export const upsertDeviceRecovery = createServerFn({ method: "POST" })
           device_source: data.device_source,
           screenshot_url: data.screenshot_url,
           parse_status: "pending",
+          // Wipe stale parsed values from a prior attempt for the same day
+          // (re-upload replacing a failed/partial parse).
+          parsed_hrv: null,
+          parsed_rhr: null,
+          parsed_sleep_hours: null,
+          parsed_date: null,
         },
         { onConflict: "user_id,entry_date" },
       )
@@ -258,6 +271,72 @@ export const upsertDeviceRecovery = createServerFn({ method: "POST" })
     // Worker terminates the request context on response and cancels
     // un-awaited fetches.
     return { ok: true, upload_id: row?.id };
+  });
+
+/** Poll the most recent device upload row for today so the UI can branch
+ *  into the right post-parse Journey (A clean / B partial / C failure). */
+export type DeviceUploadStatus = {
+  id: string;
+  parse_status: "pending" | "parsed" | "failed" | string;
+  parsed_hrv: number | null;
+  parsed_rhr: number | null;
+  parsed_sleep_hours: number | null;
+  parsed_date: string | null;
+  entry_date: string;
+  device_source: string | null;
+} | null;
+
+export const getTodayDeviceUploadStatus = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<DeviceUploadStatus> => {
+    const { data, error } = await context.supabase
+      .from("shield_device_uploads")
+      .select("id, parse_status, parsed_hrv, parsed_rhr, parsed_sleep_hours, parsed_date, entry_date, device_source")
+      .eq("user_id", context.userId)
+      .eq("entry_date", today())
+      .maybeSingle();
+    if (error) return null;
+    return (data as DeviceUploadStatus) ?? null;
+  });
+
+/** Journey B helper: user supplies the RHR the screenshot didn't show.
+ *  Writes onto the existing upload row (NOT a separate manual entry) so
+ *  the device-path Recovery formula picks it up via the same precedence. */
+export const supplementDeviceRhr = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ rhr_bpm: z.number().min(25).max(140) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("shield_device_uploads")
+      .update({ parsed_rhr: data.rhr_bpm })
+      .eq("user_id", context.userId)
+      .eq("entry_date", today());
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+/** Confirmation step: if the screenshot's detected date doesn't match the
+ *  upload day (e.g. uploaded at 1am, or reviewing yesterday), reassign the
+ *  upload to the correct entry_date. Lightweight — only used when the user
+ *  explicitly corrects the detected date. */
+export const reassignDeviceUploadDate = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      upload_id: z.string().uuid(),
+      new_entry_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("shield_device_uploads")
+      .update({ entry_date: data.new_entry_date })
+      .eq("id", data.upload_id)
+      .eq("user_id", context.userId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
   });
 
 export const logMeal = createServerFn({ method: "POST" })

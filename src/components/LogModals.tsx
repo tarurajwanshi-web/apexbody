@@ -11,6 +11,10 @@ import {
   updateMeal,
   upsertTraining,
   logHydration,
+  getTodayDeviceUploadStatus,
+  supplementDeviceRhr,
+  reassignDeviceUploadDate,
+  type DeviceUploadStatus,
 } from "@/lib/shield.functions";
 import { analyzePhoto } from "@/lib/coach.functions";
 
@@ -199,6 +203,8 @@ function ManualRecoveryForm({ onSaved }: { onSaved: () => void }) {
   );
 }
 
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+
 function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
   const [source, setSource] = useState<"whoop" | "oura" | "garmin">("whoop");
   const [file, setFile] = useState<File | null>(null);
@@ -207,9 +213,13 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
   const [err, setErr] = useState<string | null>(null);
   const [alreadyUploaded, setAlreadyUploaded] = useState(false);
   const [alreadyMood, setAlreadyMood] = useState<string | null>(null);
+  // Post-upload parse state: null = haven't uploaded yet this session.
+  const [parseState, setParseState] = useState<DeviceUploadStatus>(null);
+  const [polling, setPolling] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const fn = useServerFn(upsertDeviceRecovery);
   const moodFn = useServerFn(upsertMood);
+  const statusFn = useServerFn(getTodayDeviceUploadStatus);
 
   // Detect what's already saved today so the form can accept partial submits.
   useEffect(() => {
@@ -218,7 +228,7 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
       const { data: u } = await supabase.auth.getUser();
       const uid = u.user?.id;
       if (!uid) return;
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayISO();
       const [up, mi] = await Promise.all([
         supabase.from("shield_device_uploads").select("id").eq("user_id", uid).eq("entry_date", today).maybeSingle(),
         supabase.from("shield_manual_inputs").select("mood_emoji").eq("user_id", uid).eq("entry_date", today).maybeSingle(),
@@ -231,6 +241,26 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Poll for parse result after an upload. Stop on terminal status or timeout.
+  const startPolling = async () => {
+    setPolling(true);
+    const started = Date.now();
+    while (Date.now() - started < 30_000) {
+      try {
+        const s = await statusFn();
+        if (s && (s.parse_status === "parsed" || s.parse_status === "failed")) {
+          setParseState(s);
+          setPolling(false);
+          return;
+        }
+      } catch { /* retry */ }
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    setPolling(false);
+    // Timeout: leave parseState null so the user sees the timeout message below.
+    setErr("Still processing your screenshot — check back in a minute.");
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -245,6 +275,9 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
     }
     setBusy(true); setErr(null);
     try {
+      if (hasMood && mood !== alreadyMood) {
+        try { await moodFn({ data: { mood_emoji: mood! } }); } catch { /* best-effort */ }
+      }
       if (hasNewFile) {
         const { data: u } = await supabase.auth.getUser();
         const uid = u.user?.id;
@@ -254,9 +287,9 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
         const { error: upErr } = await supabase.storage.from("shield-uploads").upload(path, file!, { upsert: true });
         if (upErr) throw new Error(upErr.message);
         await fn({ data: { device_source: source, screenshot_url: path } });
-      }
-      if (hasMood && mood !== alreadyMood) {
-        try { await moodFn({ data: { mood_emoji: mood! } }); } catch { /* best-effort */ }
+        setBusy(false);
+        await startPolling(); // surface Journey A/B/C inline
+        return;
       }
       onSaved();
     } catch (e) {
@@ -265,6 +298,27 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
   };
 
   const canSubmit = !!file || !!mood || alreadyUploaded;
+
+  // If we have a parse result this session, show the per-Journey panel
+  // instead of the upload form.
+  if (parseState && (parseState.parse_status === "parsed" || parseState.parse_status === "failed")) {
+    return (
+      <ParseOutcomePanel
+        status={parseState}
+        onDone={onSaved}
+      />
+    );
+  }
+
+  if (polling) {
+    return (
+      <div className="py-10 flex flex-col items-center gap-3">
+        <Loader2 className="animate-spin text-text-secondary" size={28} />
+        <p className="text-[13px] text-text-secondary">Reading your screenshot…</p>
+        <p className="text-[11px] text-text-tertiary">This usually takes 5–15 seconds.</p>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={submit} className="space-y-5">
@@ -312,6 +366,306 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
     </form>
   );
 }
+
+/** Renders the Journey A / B / C outcome of a parse attempt.
+ *  A — clean parse: confirm + done.
+ *  B — partial: show what was read + invite an RHR top-up (or skip).
+ *  C — failure: show the failure message + route into a per-day manual
+ *      fallback flow that flags the entry as `device_parse_failed_fallback`
+ *      (does NOT change input_path_preference). */
+function ParseOutcomePanel({
+  status,
+  onDone,
+}: {
+  status: NonNullable<DeviceUploadStatus>;
+  onDone: () => void;
+}) {
+  const reassignFn = useServerFn(reassignDeviceUploadDate);
+  const [dateConfirmed, setDateConfirmed] = useState(false);
+  const [dateBusy, setDateBusy] = useState(false);
+
+  // Date alignment: if the screenshot has a confidently-detected date that
+  // doesn't match today, ask the user to confirm before we treat this as
+  // today's reading. No detected date → default to today silently (fast path).
+  const showDateConfirm =
+    !dateConfirmed &&
+    status.parsed_date != null &&
+    status.parsed_date !== status.entry_date;
+
+  const reassignToScreenshotDate = async () => {
+    if (!status.parsed_date) return;
+    setDateBusy(true);
+    try {
+      await reassignFn({ data: { upload_id: status.id, new_entry_date: status.parsed_date } });
+      setDateConfirmed(true);
+    } finally { setDateBusy(false); }
+  };
+
+  if (showDateConfirm) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-2xl p-4" style={{ background: "#0A0E1A", border: "1px solid rgba(245,158,11,0.35)" }}>
+          <p className="text-[13px] text-white font-medium">Quick check</p>
+          <p className="text-[12px] text-text-secondary mt-1">
+            This screenshot looks like data for <span className="text-white">{status.parsed_date}</span>, but
+            you're logging it for <span className="text-white">{status.entry_date}</span> (today).
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setDateConfirmed(true)}
+            className="flex-1 rounded-xl py-3 text-[13px] font-semibold text-white active:scale-95"
+            style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.85), rgba(59,130,246,0.85))" }}
+          >
+            It's for today
+          </button>
+          <button
+            type="button"
+            onClick={reassignToScreenshotDate}
+            disabled={dateBusy}
+            className="flex-1 rounded-xl py-3 text-[13px] font-semibold text-white active:scale-95 disabled:opacity-50"
+            style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.15)" }}
+          >
+            {dateBusy ? "…" : `Use ${status.parsed_date}`}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (status.parse_status === "failed") {
+    return <JourneyCFallback onDone={onDone} deviceSource={status.device_source ?? "device"} />;
+  }
+
+  // parsed: Journey A (HRV+RHR) or Journey B (HRV only / RHR missing).
+  const hasHRV = status.parsed_hrv != null;
+  const hasRHR = status.parsed_rhr != null;
+
+  if (hasHRV && hasRHR) {
+    return <JourneyACleanParse status={status} onDone={onDone} />;
+  }
+  if (hasHRV && !hasRHR) {
+    return <JourneyBPartialParse status={status} onDone={onDone} />;
+  }
+  // parsed but no HRV — treat like total failure for Recovery purposes;
+  // sleep alone is logged via the device row and still contributes to Sleep pillar.
+  return <JourneyCFallback onDone={onDone} deviceSource={status.device_source ?? "device"} />;
+}
+
+function ReadingsList({ status }: { status: NonNullable<DeviceUploadStatus> }) {
+  const rows: Array<[string, string]> = [];
+  if (status.parsed_hrv != null) rows.push(["HRV", `${Math.round(status.parsed_hrv)} ms`]);
+  if (status.parsed_rhr != null) rows.push(["RHR", `${Math.round(status.parsed_rhr)} bpm`]);
+  if (status.parsed_sleep_hours != null) rows.push(["Sleep", `${Number(status.parsed_sleep_hours).toFixed(1)} hrs`]);
+  if (rows.length === 0) return null;
+  return (
+    <div className="rounded-2xl p-4 grid grid-cols-3 gap-3" style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.06)" }}>
+      {rows.map(([k, v]) => (
+        <div key={k}>
+          <p className="text-[10px] uppercase tracking-wider text-text-tertiary">{k}</p>
+          <p className="text-[16px] text-white font-semibold tabular-nums mt-1">{v}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function JourneyACleanParse({ status, onDone }: { status: NonNullable<DeviceUploadStatus>; onDone: () => void }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-success">
+        <Check size={18} />
+        <p className="text-[14px] font-semibold">Got your reading</p>
+      </div>
+      <ReadingsList status={status} />
+      <p className="text-[11px] text-text-tertiary">Your score will update in a moment.</p>
+      <button
+        type="button"
+        onClick={onDone}
+        className="w-full rounded-2xl gradient-brand py-3 text-[14px] font-semibold text-white active:scale-95"
+      >
+        Done
+      </button>
+    </div>
+  );
+}
+
+function JourneyBPartialParse({ status, onDone }: { status: NonNullable<DeviceUploadStatus>; onDone: () => void }) {
+  const [rhr, setRhr] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const fn = useServerFn(supplementDeviceRhr);
+  const hrv = status.parsed_hrv != null ? Math.round(status.parsed_hrv) : null;
+
+  const addRhr = async () => {
+    const n = Number(rhr);
+    if (!Number.isFinite(n) || n < 25 || n > 140) {
+      setErr("Enter a resting heart rate between 25 and 140 bpm.");
+      return;
+    }
+    setBusy(true); setErr(null);
+    try {
+      await fn({ data: { rhr_bpm: n } });
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't save RHR. Try again.");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-[14px] font-semibold text-white">Got most of it</p>
+        <p className="text-[13px] text-text-secondary mt-1">
+          We caught your HRV{hrv != null ? ` (${hrv} ms)` : ""} but couldn't read your RHR.
+          Add it for a more complete reading, or skip — your score will still update.
+        </p>
+      </div>
+      <ReadingsList status={status} />
+      <div>
+        <label className="text-[12px] uppercase text-text-tertiary tracking-wider">Resting heart rate</label>
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            type="number"
+            inputMode="numeric"
+            value={rhr}
+            onChange={(e) => setRhr(e.target.value)}
+            placeholder="e.g. 58"
+            className="flex-1 rounded-xl px-3 py-3 text-[15px] text-white tabular-nums focus:outline-none"
+            style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.1)" }}
+          />
+          <span className="text-[12px] text-text-tertiary">bpm</span>
+        </div>
+      </div>
+      {err && <p className="text-[12px] text-red-400">{err}</p>}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onDone}
+          disabled={busy}
+          className="flex-1 rounded-2xl py-3 text-[13px] font-semibold text-white active:scale-95 disabled:opacity-50"
+          style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.15)" }}
+        >
+          Skip
+        </button>
+        <button
+          type="button"
+          onClick={addRhr}
+          disabled={busy || !rhr}
+          className="flex-1 rounded-2xl gradient-brand py-3 text-[13px] font-semibold text-white active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          {busy && <Loader2 size={14} className="animate-spin" />}
+          Add RHR
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Per-day manual fallback when the screenshot couldn't be parsed.
+ *  IMPORTANT: writes recovery_source='device_parse_failed_fallback' on
+ *  shield_manual_inputs but does NOT touch profiles.input_path_preference.
+ *  The user remains a device-path user; only today's reading is manual. */
+function JourneyCFallback({ onDone, deviceSource }: { onDone: () => void; deviceSource: string }) {
+  const [rating, setRating] = useState<number | null>(null);
+  const [sleep, setSleep] = useState<number>(7.5);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const fn = useServerFn(upsertManualRecovery);
+
+  const submit = async () => {
+    if (rating == null) return;
+    setBusy(true); setErr(null);
+    try {
+      await fn({
+        data: {
+          recovery_self_rating: rating,
+          sleep_hours: sleep,
+          // Per-day fallback marker. Does NOT change input_path_preference.
+          recovery_source: "device_parse_failed_fallback",
+        },
+      });
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't save. Try again.");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-[14px] font-semibold text-white">Couldn't read that one</p>
+        <p className="text-[13px] text-text-secondary mt-1">
+          We couldn't pull recovery numbers out of your {deviceSource} screenshot today.
+          Want to log how recovered you feel manually instead, just for today?
+        </p>
+      </div>
+      <div>
+        <label className="text-[12px] uppercase text-text-tertiary tracking-wider">How recovered do you feel?</label>
+        <div className="mt-3 grid grid-cols-5 gap-2">
+          {[1, 2, 3, 4, 5].map((n) => {
+            const active = rating === n;
+            return (
+              <button
+                type="button"
+                key={n}
+                onClick={() => setRating(n)}
+                className="h-14 rounded-2xl text-[18px] font-semibold text-white active:scale-95 transition"
+                style={{
+                  background: active ? "linear-gradient(135deg, rgba(124,58,237,0.25), rgba(59,130,246,0.25))" : "#0A0E1A",
+                  border: `1px solid ${active ? "rgba(124,58,237,0.6)" : "rgba(255,255,255,0.08)"}`,
+                }}
+              >
+                {n}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-2 flex justify-between text-[10px] text-text-tertiary"><span>Drained</span><span>Peak</span></div>
+      </div>
+      <div>
+        <label className="text-[12px] uppercase text-text-tertiary tracking-wider">Sleep last night</label>
+        <div className="mt-3 flex items-center gap-3">
+          <button type="button" onClick={() => setSleep((s) => Math.max(0, +(s - 0.5).toFixed(1)))}
+            className="h-11 w-11 rounded-full text-white text-xl active:scale-95"
+            style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)" }}>−</button>
+          <div className="flex-1 text-center">
+            <div className="text-[28px] font-light text-white tabular-nums">{sleep.toFixed(1)}<span className="text-text-tertiary text-[14px] ml-1">hrs</span></div>
+          </div>
+          <button type="button" onClick={() => setSleep((s) => Math.min(24, +(s + 0.5).toFixed(1)))}
+            className="h-11 w-11 rounded-full text-white text-xl active:scale-95"
+            style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)" }}>+</button>
+        </div>
+      </div>
+      <p className="text-[11px] text-text-tertiary">
+        You're still set up on the {deviceSource} path — this is just for today.
+      </p>
+      {err && <p className="text-[12px] text-red-400">{err}</p>}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onDone}
+          disabled={busy}
+          className="flex-1 rounded-2xl py-3 text-[13px] font-semibold text-white active:scale-95 disabled:opacity-50"
+          style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.15)" }}
+        >
+          Skip
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={busy || rating == null}
+          className="flex-1 rounded-2xl gradient-brand py-3 text-[13px] font-semibold text-white active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          {busy && <Loader2 size={14} className="animate-spin" />}
+          Save manual entry
+        </button>
+      </div>
+    </div>
+  );
+}
+
 
 
 /** Quick water-logging modal — icon-paired presets + custom stepper.
