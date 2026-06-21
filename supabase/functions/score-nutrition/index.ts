@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
     }
 
     const trainingContext = training
-      ? `Training session that day: strain=${training.strain ?? "unknown"}, notes=${training.notes ?? "(none)"}.`
+      ? `Training session that day: strain=${training.strain_value ?? "unknown"}, notes=${training.session_notes ?? "(none)"}.`
       : "No training session logged for this day.";
 
     const systemPrompt =
