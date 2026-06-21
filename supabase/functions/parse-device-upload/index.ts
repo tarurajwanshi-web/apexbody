@@ -176,6 +176,17 @@ Deno.serve(async (req) => {
     const parsed_hrv = numOrNull(parsed.hrv_ms);
     const parsed_rhr = numOrNull(parsed.rhr_bpm);
     const parsed_sleep_hours = numOrNull(parsed.sleep_hours);
+    // data_date: only accept a strict YYYY-MM-DD; otherwise null (caller defaults to today).
+    const parsed_date: string | null =
+      typeof parsed.data_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(parsed.data_date)
+        ? parsed.data_date
+        : null;
+
+    // Journey C: total parse failure. If NOTHING usable came back (HRV, RHR,
+    // sleep all null), don't pretend we have data — mark failed so the UI
+    // can route the user into the per-day manual fallback path.
+    const totalFailure = parsed_hrv == null && parsed_rhr == null && parsed_sleep_hours == null;
+    const nextStatus = totalFailure ? "failed" : "parsed";
 
     const { data: updated, error: upErr } = await supabase
       .from("shield_device_uploads")
@@ -183,7 +194,8 @@ Deno.serve(async (req) => {
         parsed_hrv,
         parsed_rhr,
         parsed_sleep_hours,
-        parse_status: "parsed",
+        parsed_date,
+        parse_status: nextStatus,
       })
       .eq("id", row.id)
       .select()
