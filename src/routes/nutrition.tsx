@@ -1,10 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, Plus, Camera, Sparkles, X, Loader2 } from "lucide-react";
+import { ChevronLeft, Plus, Camera, Sparkles, X, Loader2, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { AICard } from "@/components/AIOrb";
 import { RingChart } from "@/components/RingChart";
 import { BottomNav } from "@/components/BottomNav";
+import { RefreshStamp } from "@/components/RefreshStamp";
+import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { analyzePhoto } from "@/lib/coach.functions";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
 import { getTodayMeals, logMeal, type TodayMeal } from "@/lib/shield.functions";
@@ -30,18 +32,58 @@ function Nutrition() {
   const [error, setError] = useState<string | null>(null);
   const [macros, setMacros] = useState<MacroSummary | null>(null);
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [ptrDelta, setPtrDelta] = useState(0);
+  const ptrRef = useRef<HTMLDivElement>(null);
+  const ptrStart = useRef<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const fn = useServerFn(analyzePhoto);
   const fetchMacros = useServerFn(getTodayMacroSummary);
   const fetchMeals = useServerFn(getTodayMeals);
   const logMealFn = useServerFn(logMeal);
 
-  const reload = () => {
-    fetchMacros().then(setMacros).catch(() => {});
-    fetchMeals().then(setMeals).catch(() => setMeals([]));
+  const reload = async () => {
+    setRefreshing(true);
+    await Promise.allSettled([
+      fetchMacros().then(setMacros),
+      fetchMeals().then(setMeals).catch(() => setMeals([])),
+    ]);
+    setLastUpdatedAt(Date.now());
+    setRefreshing(false);
   };
 
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
+  useAutoRefreshOnVisible(reload, lastUpdatedAt);
+
+  // Pull-to-refresh.
+  useEffect(() => {
+    const el = ptrRef.current;
+    if (!el) return;
+    const onStart = (e: TouchEvent) => {
+      if (window.scrollY > 0) return;
+      ptrStart.current = e.touches[0].clientY;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (ptrStart.current == null) return;
+      const d = e.touches[0].clientY - ptrStart.current;
+      if (d > 0) setPtrDelta(Math.min(80, d * 0.5));
+    };
+    const onEnd = () => {
+      if (ptrDelta >= 60) reload();
+      ptrStart.current = null;
+      setPtrDelta(0);
+    };
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: true });
+    el.addEventListener("touchend", onEnd);
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ptrDelta]);
 
   const pct = (a: number, b: number) => (b > 0 ? Math.min(100, Math.round((a / b) * 100)) : 0);
 
@@ -108,12 +150,29 @@ function Nutrition() {
   const proteinShort = tProtein != null ? Math.max(0, tProtein - cProtein) : 0;
 
   return (
-    <div className="min-h-screen bg-bg-1 pb-32">
+    <div
+      ref={ptrRef}
+      className="min-h-screen bg-bg-1 pb-32 relative"
+      style={{
+        transform: ptrDelta ? `translateY(${ptrDelta}px)` : undefined,
+        transition: ptrDelta ? "none" : "transform 0.2s ease",
+      }}
+    >
+      {(ptrDelta > 0 || refreshing) && (
+        <div className="absolute left-1/2 -translate-x-1/2 top-2 z-50 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium text-text-secondary"
+          style={{ background: "rgba(15,21,36,0.85)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(8px)" }}>
+          <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
+          <span>{refreshing ? "Refreshing…" : ptrDelta >= 60 ? "Release to refresh" : "Pull to refresh"}</span>
+        </div>
+      )}
       <header className="flex items-center justify-between px-5 pt-6">
         <Link to="/dashboard" className="text-text-secondary"><ChevronLeft size={24} /></Link>
         <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Nutrition</span>
         <span className="w-6" />
       </header>
+      <div className="px-5 mt-2">
+        <RefreshStamp refreshing={refreshing} lastUpdatedAt={lastUpdatedAt} />
+      </div>
 
       {/* Goal-based framing line */}
       <p className="mx-5 mt-5 text-[12px] text-text-secondary leading-snug">

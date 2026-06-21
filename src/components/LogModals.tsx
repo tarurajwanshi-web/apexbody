@@ -301,9 +301,18 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
         const r = await create({ data: { meal_description: desc.trim(), meal_photo_url: photoUrl } });
         id = r.id;
       }
-      // Kick off scoring + macro estimation. We DO NOT await this — the
-      // MealHistoryList polls and surfaces "scoring…", "scored", or "failed".
-      void supabase.functions.invoke("score-nutrition", { body: { nutrition_log_id: id } }).catch(() => {});
+      // Kick off scoring + macro estimation. We AWAIT this so the request is not
+      // aborted when the modal unmounts (root cause of past "stuck on scoring…"
+      // bugs). MealHistoryList polls + auto-retries any row that still ends up
+      // pending past ~60s, so a transient failure here is still recoverable.
+      try {
+        await supabase.functions.invoke("score-nutrition", { body: { nutrition_log_id: id } });
+      } catch (invokeErr) {
+        console.error("[meal] score-nutrition invoke failed", invokeErr);
+        // Mark the row as failed so the UI can surface "tap to retry" instead
+        // of an indefinite spinner. Best-effort; RLS scopes to current user.
+        try { await supabase.from("shield_nutrition_logs").update({ claude_score_status: "failed" }).eq("id", id); } catch {}
+      }
       onSaved?.();
       onClose();
     } catch (e) {

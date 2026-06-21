@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Pencil, Trash2, Loader2, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Pencil, Trash2, Loader2, Sparkles, RotateCw } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 import {
   getTodayMeals,
@@ -7,6 +7,7 @@ import {
   type TodayMeal,
 } from "@/lib/shield.functions";
 import { MealLogModal } from "@/components/LogModals";
+import { supabase } from "@/integrations/supabase/client";
 
 type Props = {
   /** Called after the user adds, edits, or deletes a meal. Parent uses it to
@@ -16,11 +17,16 @@ type Props = {
   onMutationDone?: () => void;
 };
 
+/** Meals stuck >60s in pending are auto-retried ONCE per row per mount. */
+const STALE_PENDING_MS = 60_000;
+
 export function MealHistoryList({ onMutationStart, onMutationDone }: Props) {
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
   const [editing, setEditing] = useState<TodayMeal | null>(null);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const autoRetriedRef = useRef<Set<string>>(new Set());
   const fetchMeals = useServerFn(getTodayMeals);
   const del = useServerFn(softDeleteMeal);
 
@@ -29,6 +35,43 @@ export function MealHistoryList({ onMutationStart, onMutationDone }: Props) {
   };
 
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
+
+  // Heal stuck-pending rows: any meal that's been pending > 60s gets one
+  // automatic re-invoke of score-nutrition. After that, the user gets a
+  // manual "Retry" button on a row marked failed.
+  useEffect(() => {
+    if (!meals) return;
+    const now = Date.now();
+    for (const m of meals) {
+      if (m.claude_score_status !== "pending") continue;
+      if (autoRetriedRef.current.has(m.id)) continue;
+      const age = now - new Date(m.created_at).getTime();
+      if (age < STALE_PENDING_MS) continue;
+      autoRetriedRef.current.add(m.id);
+      void retryScore(m.id, /*silent*/ true).then(() => setTimeout(reload, 3000));
+    }
+    // Light polling so "scoring…" → "scored" surfaces without a manual reload.
+    const hasPending = meals.some((m) => m.claude_score_status === "pending");
+    if (!hasPending) return;
+    const id = setInterval(reload, 5000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meals]);
+
+  const retryScore = async (id: string, silent = false) => {
+    if (!silent) setRetryingId(id);
+    try {
+      // Reset to pending so the UI shows the spinner instead of "failed".
+      try { await supabase.from("shield_nutrition_logs").update({ claude_score_status: "pending" }).eq("id", id); } catch {}
+      await supabase.functions.invoke("score-nutrition", { body: { nutrition_log_id: id } });
+    } catch (e) {
+      console.error("[meal] retry score-nutrition failed", e);
+      try { await supabase.from("shield_nutrition_logs").update({ claude_score_status: "failed" }).eq("id", id); } catch {}
+    } finally {
+      if (!silent) setRetryingId(null);
+      reload();
+    }
+  };
 
   const handleDelete = async (id: string) => {
     setBusyId(id);
@@ -85,7 +128,16 @@ export function MealHistoryList({ onMutationStart, onMutationDone }: Props) {
                           <Sparkles size={10} /> {m.claude_quality_score}/100
                         </span>
                       ) : m.claude_score_status === "failed" ? (
-                        <span className="text-red-400">scoring failed</span>
+                        <button
+                          onClick={() => retryScore(m.id)}
+                          disabled={retryingId === m.id}
+                          className="inline-flex items-center gap-1 text-red-400 active:scale-95 transition disabled:opacity-50"
+                          aria-label="Retry scoring"
+                        >
+                          {retryingId === m.id
+                            ? <><Loader2 size={10} className="animate-spin" /> retrying…</>
+                            : <><RotateCw size={10} /> scoring failed — tap to retry</>}
+                        </button>
                       ) : (
                         <span className="inline-flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> scoring…</span>
                       )}

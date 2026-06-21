@@ -1,9 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, useCallback, useMemo, useRef, type ReactNode } from "react";
-import { ChevronLeft, Lock, Check, Dumbbell, Sparkles, X, ChevronDown, ChevronUp, Zap, Camera, Trash2, Loader2 } from "lucide-react";
+import { ChevronLeft, Lock, Check, Dumbbell, Sparkles, X, ChevronDown, ChevronUp, Zap, Camera, Trash2, Loader2, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { BottomNav } from "@/components/BottomNav";
 import { AICard } from "@/components/AIOrb";
+import { RefreshStamp } from "@/components/RefreshStamp";
+import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/workouts")({
@@ -34,10 +36,16 @@ function WorkoutsPage() {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [preCheckOpen, setPreCheckOpen] = useState(false);
   const [sessionStarted, setSessionStarted] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [ptrDelta, setPtrDelta] = useState(0);
+  const ptrRef = useRef<HTMLDivElement>(null);
+  const ptrStart = useRef<number | null>(null);
   const todayIdx = todayMondayIndex();
 
   const loadAll = useCallback(async () => {
-    setLoading(true);
+    setLoading((prev) => prev); // no-op to keep prior behavior on first call
+    setRefreshing(true);
     try {
       const { data: u } = await supabase.auth.getUser();
       const uid = u.user?.id;
@@ -82,8 +90,41 @@ function WorkoutsPage() {
       setWeekLogs((wlogs as any) ?? []);
     } finally {
       setLoading(false);
+      setLastUpdatedAt(Date.now());
+      setRefreshing(false);
     }
   }, []);
+
+  useAutoRefreshOnVisible(loadAll, lastUpdatedAt);
+
+  // Pull-to-refresh.
+  useEffect(() => {
+    const el = ptrRef.current;
+    if (!el) return;
+    const onStart = (e: TouchEvent) => {
+      if (window.scrollY > 0) return;
+      ptrStart.current = e.touches[0].clientY;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (ptrStart.current == null) return;
+      const d = e.touches[0].clientY - ptrStart.current;
+      if (d > 0) setPtrDelta(Math.min(80, d * 0.5));
+    };
+    const onEnd = () => {
+      if (ptrDelta >= 60) loadAll();
+      ptrStart.current = null;
+      setPtrDelta(0);
+    };
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: true });
+    el.addEventListener("touchend", onEnd);
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ptrDelta, loadAll]);
 
   const reloadPlanOnly = useCallback(async (uid: string) => {
     const { data: planRow } = await supabase
@@ -111,15 +152,30 @@ function WorkoutsPage() {
   }, [plan, todayIdx]);
 
   return (
-    <div className="min-h-screen bg-bg-1 pb-32">
+    <div
+      ref={ptrRef}
+      className="min-h-screen bg-bg-1 pb-32 relative"
+      style={{
+        transform: ptrDelta ? `translateY(${ptrDelta}px)` : undefined,
+        transition: ptrDelta ? "none" : "transform 0.2s ease",
+      }}
+    >
+      {(ptrDelta > 0 || refreshing) && (
+        <div className="absolute left-1/2 -translate-x-1/2 top-2 z-50 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium text-text-secondary"
+          style={{ background: "rgba(15,21,36,0.85)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(8px)" }}>
+          <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
+          <span>{refreshing ? "Refreshing…" : ptrDelta >= 60 ? "Release to refresh" : "Pull to refresh"}</span>
+        </div>
+      )}
       <header className="flex items-center justify-between px-5 pt-6">
         <Link to="/dashboard" className="text-text-secondary"><ChevronLeft size={24} /></Link>
         <span className="text-[11px] uppercase tracking-wider text-text-tertiary">This week</span>
         <span className="w-6" />
       </header>
 
-      <div className="px-5 mt-3">
+      <div className="px-5 mt-3 flex items-center justify-between">
         <h1 className="text-3xl font-bold">Your Week</h1>
+        <RefreshStamp refreshing={refreshing} lastUpdatedAt={lastUpdatedAt} />
       </div>
 
       {loading && <p className="px-5 mt-10 text-sm text-text-tertiary">Loading…</p>}

@@ -9,6 +9,8 @@ import { RecoveryLogModal, MealLogModal } from "@/components/LogModals";
 import { MealHistoryList } from "@/components/MealHistoryList";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
 import { BottomNav } from "@/components/BottomNav";
+import { RefreshStamp } from "@/components/RefreshStamp";
+import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
@@ -45,13 +47,23 @@ function Dashboard() {
   const [greet, setGreet] = useState("Hello");
   const [insight, setInsight] = useState("Your recovery is strong. Ready to push intensity today.");
   const [insightTime] = useState("Just now");
-  const [insightDismissed, setInsightDismissed] = useState(false);
+  // Lazy-init from localStorage so dismissal persists across remounts within
+  // the same day. The "Got it" button writes today's YYYY-MM-DD; on a fresh
+  // day we reset to false so the new daily insight surfaces.
+  const [insightDismissed, setInsightDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const stored = localStorage.getItem("apex_insight_dismissed_at");
+      return stored === new Date().toISOString().slice(0, 10);
+    } catch { return false; }
+  });
   const [expanded, setExpanded] = useState(false);
   const [readiness, setReadiness] = useState<TodayReadiness>(null);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [mealOpen, setMealOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const fn = useServerFn(getOrCreateDailyInsight);
   const fetchReadiness = useServerFn(getTodayReadiness);
   const fetchMacros = useServerFn(getTodayMacroSummary);
@@ -67,9 +79,17 @@ function Dashboard() {
 
   const reloadAll = async () => {
     setRefreshing(true);
-    await Promise.allSettled([fetchReadiness().then(setReadiness), fetchMacros().then(setMacros), fetchActivity().then(setActivity)]);
+    await Promise.allSettled([
+      fetchReadiness().then(setReadiness),
+      fetchMacros().then(setMacros),
+      fetchActivity().then(setActivity),
+    ]);
+    setLastUpdatedAt(Date.now());
     setRefreshing(false);
   };
+
+  // Silent refresh whenever the PWA comes back to the foreground (>60s gap).
+  useAutoRefreshOnVisible(reloadAll, lastUpdatedAt);
 
   // Hydrate name from server profile (canonical) into the local store
   // so we stop greeting everyone as "Athlete".
@@ -87,9 +107,8 @@ function Dashboard() {
     setDay(getDayOfJourney());
     const h = new Date().getHours();
     setGreet(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
-    reloadReadiness();
-    reloadMacros();
-    reloadActivity();
+    // Initial load — establishes the "Updated [time]" stamp.
+    reloadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -202,10 +221,12 @@ function Dashboard() {
         transition: ptrDelta ? "none" : "transform 0.2s ease",
       }}
     >
-      {/* PTR indicator */}
+      {/* PTR indicator — always shows the word "Refreshing…" so the gesture is unambiguous. */}
       {(ptrDelta > 0 || refreshing) && (
-        <div className="absolute left-1/2 -translate-x-1/2 top-2 z-50 text-text-secondary">
-          <RefreshCw size={18} className={refreshing ? "animate-spin" : ""} style={{ transform: `rotate(${ptrDelta * 4}deg)` }} />
+        <div className="absolute left-1/2 -translate-x-1/2 top-2 z-50 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium text-text-secondary"
+          style={{ background: "rgba(15,21,36,0.85)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(8px)" }}>
+          <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} style={{ transform: refreshing ? undefined : `rotate(${ptrDelta * 4}deg)` }} />
+          <span>{refreshing ? "Refreshing…" : ptrDelta >= 60 ? "Release to refresh" : "Pull to refresh"}</span>
         </div>
       )}
       {/* Subtle radial backdrop */}
@@ -225,6 +246,7 @@ function Dashboard() {
               {greet}, {profile.name || "Athlete"}
             </h1>
             <p className="text-[13px] text-text-secondary mt-1">{subline}</p>
+            <RefreshStamp className="mt-1.5" refreshing={refreshing} lastUpdatedAt={lastUpdatedAt} />
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span
@@ -328,17 +350,46 @@ function Dashboard() {
 
 
 
-        {/* APEX Score Card */}
+        {/* APEX Score Card — instrument-panel treatment */}
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="w-full text-left rounded-[20px] p-6 animate-fade-up active:scale-[0.995] transition"
+          className="w-full text-left rounded-[20px] p-6 animate-fade-up active:scale-[0.995] transition relative overflow-hidden"
           style={{
-            background: "#0F1524",
-            border: "1px solid rgba(255,255,255,0.06)",
+            background:
+              "radial-gradient(120% 90% at 50% 0%, rgba(124,58,237,0.18) 0%, rgba(15,21,36,0.85) 55%, #0B1020 100%)",
+            border: "1px solid rgba(124,58,237,0.22)",
+            boxShadow:
+              "inset 0 1px 0 rgba(255,255,255,0.04), 0 12px 36px -12px rgba(124,58,237,0.35), 0 1px 0 rgba(255,255,255,0.02)",
             animationDelay: "300ms",
           }}
         >
-          <div className="flex items-center justify-between gap-6">
+          {/* Particle texture (CSS-only, no animation → reduced-motion safe) */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 opacity-60 mix-blend-screen"
+            style={{
+              backgroundImage: [
+                "radial-gradient(1px 1px at 12% 28%, rgba(167,139,250,0.55), transparent 60%)",
+                "radial-gradient(1px 1px at 78% 18%, rgba(59,130,246,0.45), transparent 60%)",
+                "radial-gradient(1.5px 1.5px at 88% 64%, rgba(16,185,129,0.4), transparent 60%)",
+                "radial-gradient(1px 1px at 32% 78%, rgba(255,255,255,0.35), transparent 60%)",
+                "radial-gradient(1px 1px at 62% 42%, rgba(167,139,250,0.35), transparent 60%)",
+                "radial-gradient(1px 1px at 48% 12%, rgba(255,255,255,0.25), transparent 60%)",
+              ].join(","),
+            }}
+          />
+          {/* Hairline grid for instrument feel */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 opacity-[0.05]"
+            style={{
+              backgroundImage:
+                "linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)",
+              backgroundSize: "40px 40px",
+            }}
+          />
+
+          <div className="relative flex items-center justify-between gap-6">
             {/* LEFT */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
@@ -354,15 +405,21 @@ function Dashboard() {
                   <div className="mt-2 flex items-baseline gap-1">
                     <span
                       className="text-white tabular-nums"
-                      style={{ fontSize: 56, fontWeight: 300, lineHeight: 1, textShadow: "0 0 20px rgba(124,58,237,0.3)" }}
+                      style={{
+                        fontSize: 64,
+                        fontWeight: 200,
+                        lineHeight: 1,
+                        letterSpacing: "-0.04em",
+                        textShadow: "0 0 28px rgba(124,58,237,0.45), 0 0 2px rgba(255,255,255,0.6)",
+                      }}
                     >
                       {score}
                     </span>
-                    <span className="text-text-tertiary" style={{ fontSize: 18 }}>/100</span>
+                    <span className="text-text-tertiary" style={{ fontSize: 18, fontWeight: 300 }}>/100</span>
                   </div>
                   <div className="mt-3 inline-flex items-center gap-1.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                    <span className="text-[13px] text-success">Today's readiness</span>
+                    <span className="h-1.5 w-1.5 rounded-full bg-success" style={{ boxShadow: "0 0 8px #10B981" }} />
+                    <span className="text-[12px] uppercase tracking-[1.5px] text-success">Today's readiness</span>
                   </div>
                 </>
               ) : (
@@ -381,19 +438,35 @@ function Dashboard() {
               )}
             </div>
 
-            {/* RIGHT — ring */}
+            {/* RIGHT — ring with soft outer glow */}
             <div className="shrink-0 relative">
-              <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`}>
+              <div
+                aria-hidden
+                className="absolute inset-0 rounded-full"
+                style={{
+                  background:
+                    "radial-gradient(circle, rgba(124,58,237,0.35) 0%, rgba(59,130,246,0.18) 45%, transparent 70%)",
+                  filter: "blur(8px)",
+                }}
+              />
+              <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`} className="relative">
                 <defs>
                   <linearGradient id="scoreRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#7C3AED" />
+                    <stop offset="0%" stopColor="#A78BFA" />
                     <stop offset="55%" stopColor="#3B82F6" />
                     <stop offset="100%" stopColor="#10B981" />
                   </linearGradient>
+                  <filter id="scoreRingGlow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="2.2" result="b" />
+                    <feMerge>
+                      <feMergeNode in="b" />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
                 </defs>
                 <circle
                   cx={ringSize / 2} cy={ringSize / 2} r={ringR}
-                  fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={ringStroke}
+                  fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={ringStroke}
                 />
                 {score != null && (
                   <circle
@@ -403,6 +476,7 @@ function Dashboard() {
                     strokeDasharray={ringC}
                     strokeDashoffset={ringC * (1 - fillPct)}
                     transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                    filter="url(#scoreRingGlow)"
                   />
                 )}
                 <text
@@ -494,47 +568,12 @@ function Dashboard() {
             <BookOpen size={18} className="text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[14px] font-semibold text-white">Resources</p>
-            <p className="text-[12px] text-text-secondary mt-0.5">Guides & ebooks from APEX</p>
+            <p className="text-[14px] font-semibold text-white">Guides & resources</p>
+            <p className="text-[12px] text-text-secondary mt-0.5">Coming soon — recipe books, training guides & references</p>
           </div>
           <span className="text-text-tertiary">›</span>
         </button>
 
-
-
-
-
-
-
-        {/* Today's Plan */}
-        <div className="rounded-2xl p-5" style={{ background: "#0F1524", border: "1px solid rgba(255,255,255,0.06)" }}>
-          <div className="flex items-center justify-between">
-            <h3 className="text-[16px] font-bold text-white">Today's Workout</h3>
-            <span
-              className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
-              style={{ background: "rgba(124,58,237,0.15)", color: "#A78BFA", border: "1px solid rgba(124,58,237,0.30)" }}
-            >
-              Day 2: Upper Push
-            </span>
-          </div>
-          <ul className="mt-4 space-y-2">
-            {[
-              "Bench Press — 4x8 @ 80kg",
-              "Incline DB Press — 3x10 @ 30kg",
-              "Cable Flyes — 3x12",
-            ].map((ex) => (
-              <li key={ex} className="text-[13px] text-text-secondary flex gap-2">
-                <span className="text-text-tertiary">•</span> {ex}
-              </li>
-            ))}
-          </ul>
-          <button
-            onClick={() => navigate({ to: "/workouts" })}
-            className="mt-4 w-full block rounded-2xl gradient-brand py-3 text-center text-[14px] font-semibold text-white active:scale-[0.98] transition"
-          >
-            Start Workout →
-          </button>
-        </div>
       </div>
 
       <BottomNav onCenter={() => setMealOpen(true)} />
