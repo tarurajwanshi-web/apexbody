@@ -1,93 +1,61 @@
-# APEX Shield — Project State Audit
+# Diagnostic Findings (no code changed)
 
-Read-only snapshot. No files were modified.
+## 1. AI Insight reappears after "Got it" — Scenario A (dismiss persistence is broken)
 
-## 1. Routes / Screens
+**Root cause:** The dismissed state is written to `localStorage` on tap but is **never read back on mount**. So every time the Dashboard component remounts (which happens on tab navigation away and back, since `/dashboard` unmounts when you go to `/workouts`), `insightDismissed` is re-initialized to `false` and the card renders again.
 
-| File | URL | Gate | Description |
+**Specific code path — `src/routes/_authenticated/dashboard.tsx`:**
+
+- Line 48: `const [insightDismissed, setInsightDismissed] = useState(false);` — always starts `false`, no lazy initializer reading localStorage.
+- Lines 300–303 (the "Got it" button): writes `localStorage.setItem("apex_insight_dismissed_at", <today>)` and sets state to `true`. **Correct write side.**
+- There is **no** `useEffect` / lazy initializer that does `localStorage.getItem("apex_insight_dismissed_at")` and compares to today's date. Grep for the key returns only the write site.
+
+So Scenario B is ruled out — even if the insight text were varying daily, dismissal would still not persist across a remount.
+
+(Secondary observation, not the bug you asked about: the insight itself is cached server-side per user per day via `getOrCreateDailyInsight` → `daily_ai_insights`, so the same text WILL come back across remounts within a day — but that's the expected design.)
+
+**Fix scope (for follow-up Build prompt):** read `apex_insight_dismissed_at` on mount; if it equals today's date (YYYY-MM-DD), initialize `insightDismissed` to `true`.
+
+---
+
+## 2. Meal stuck on "scoring…" — pre-existing row with broken invocation, not a current bug
+
+**Database state:** Exactly one stuck meal exists — `id 15fb46a6-...`, `entry_date 2026-06-21`, `created_at 07:32:50 UTC`. Its `meal_photo_url` is a **proper 30-day signed URL** (`/storage/v1/object/sign/shield-uploads/...?token=...`), i.e. the post-fix format. So this is **not** a stale raw-path row from before the signed-URL fix.
+
+**Function status:** `score-nutrition` is deployed and works correctly. I invoked it directly via curl against `/functions/v1/score-nutrition` with `{nutrition_log_id: "15fb46a6-..."}` — it returned HTTP 200 with valid scores (protein 62 / carbs 48 / timing 70 / quality 59) and a macro estimate (820 kcal, 28P/95C/32F). After that call the row flipped to `claude_score_status='scored'` and `calorie_estimate_status='estimated'` with `estimated_calories=820` populated. Edge-function logs for `score-nutrition` were empty before this manual call, confirming **the function was never invoked for that meal from the client**.
+
+**Why the client invocation never reached the function:** In `src/components/LogModals.tsx` line 306:
+
+```ts
+void supabase.functions.invoke("score-nutrition", { body: { nutrition_log_id: id } }).catch(() => {});
+onSaved?.();
+onClose();
+```
+
+This is fire-and-forget with `.catch(() => {})` swallowing every error, followed immediately by `onClose()` which unmounts the sheet. Plausible reasons for the silent miss on that one row:
+
+1. The function may not have been deployed yet at 07:32 (it's deployed now — proved by curl).
+2. The browser fetch was aborted by the immediate modal close / page state change before the request flushed.
+3. Any transient network/auth error is fully swallowed, so the row is left in `pending` forever and nothing retries.
+
+There is **no retry path** anywhere: nothing re-invokes `score-nutrition` on app reopen or on viewing the meal list. Once a meal misses its single fire-and-forget call, it stays stuck forever.
+
+**Brand-new meal end-to-end:** Cannot fully verify without a fresh user upload, but the manual curl proves the entire scoring + macro-estimation path (Anthropic call, DB write, signed-URL image fetch) is healthy right now. Fresh meals logged from the UI from this point on should score successfully, **assuming** the client fetch is not aborted by the immediate `onClose()`.
+
+**Fix scope (for follow-up Build prompt) — for your review, not implemented:**
+
+- Stop swallowing errors silently — at minimum log them.
+- Don't fire-and-forget through a modal that closes synchronously. Either `await` the invoke before `onClose()`, or move the invocation into a place whose lifetime outlives the modal (e.g. queue it via the parent / a useEffect on the new row, or call it from the row's pending-status polling code).
+- Add a server-side or client-side retry: any meal that sits in `claude_score_status='pending'` for > N seconds should be re-invoked once (either by `MealHistoryList` when it polls, or by a small re-kick from the Dashboard mount).
+- One-shot heal for the existing stuck row: re-invoke `score-nutrition` for `15fb46a6-...` (already done manually above — the row is now scored).
+
+---
+
+## Summary
+
+| Issue | Scenario | Root cause | Action |
 |---|---|---|---|
-| `src/routes/__root.tsx` | — (root layout) | n/a | HTML shell, error + 404 boundaries, providers |
-| `src/routes/index.tsx` | `/` | Public | Splash / landing screen |
-| `src/routes/disclaimer.tsx` | `/disclaimer` | Public | Legal disclaimer screen |
-| `src/routes/onboarding.tsx` | `/onboarding` | Public | 7-step onboarding flow (writes `profiles.input_path_preference` at step 7) |
-| `src/routes/meet-coach.tsx` | `/meet-coach` | Public | Coach intro screen |
-| `src/routes/home.tsx` | `/home` | Public | **Legacy mock home** (rings, mock metrics) |
-| `src/routes/workouts.tsx` | `/workouts` | Public | **Legacy mock** workouts screen |
-| `src/routes/nutrition.tsx` | `/nutrition` | Public | **Legacy mock** nutrition screen |
-| `src/routes/coach.tsx` | `/coach` | Public | Coach chat / insight screen (uses mock metrics) |
-| `src/routes/settings.tsx` | `/settings` | Public | Settings screen |
-| `src/routes/_authenticated/route.tsx` | (pathless layout) | n/a | `ssr:false` gate, redirects unauthenticated users to `/` |
-| `src/routes/_authenticated/dashboard.tsx` | `/dashboard` | **Authenticated** | Real Shield dashboard: readiness score, pillar breakdown, AI insight, log CTAs, today's meals |
+| Insight reappears | A | Dismiss state never re-hydrated from localStorage on mount | Add lazy read of `apex_insight_dismissed_at` |
+| Meal stuck "scoring…" | Pre-existing row | Fire-and-forget client invoke silently failed; no retry path | Await/queue invoke, log errors, add retry on pending rows |
 
-Note: `BottomNav` links only to `/home`, `/workouts`, `/nutrition`, `/coach`. There is no nav link into `/dashboard` from the legacy screens.
-
-## 2. Database Tables (schema `public`)
-
-All tables have RLS enabled. Policy pattern is the same across every Shield table: `SELECT/INSERT/UPDATE/DELETE` restricted to `auth.uid() = user_id`, role `authenticated`.
-
-### `profiles`
-Columns: `id uuid`, `user_id uuid`, `input_path_preference text`, `created_at timestamptz`, `updated_at timestamptz`
-Policies: own-row SELECT / INSERT / UPDATE / DELETE.
-
-### `readiness_scores`
-Columns: `id`, `user_id`, `score_date date`, `final_score numeric`, `confidence_level text`, `confidence_reason text`, `input_path text`, `pillar_breakdown jsonb`, `fatigue_adjustment numeric`, `nudge_message text`, `engine_version text`, `created_at`.
-Policies: own-row SELECT / INSERT / UPDATE / DELETE.
-
-### `shield_manual_inputs`
-Columns: `id`, `user_id`, `entry_date date`, `recovery_self_rating smallint`, `sleep_hours numeric`, `mood_emoji text`, `created_at`.
-Policies: own-row CRUD.
-
-### `shield_device_uploads`
-Columns: `id`, `user_id`, `entry_date date`, `device_source text`, `screenshot_url text`, `parsed_hrv numeric`, `parsed_rhr numeric`, `parsed_sleep_hours numeric`, `parsed_sleep_stages jsonb`, `parse_status text`, `created_at`.
-Policies: own-row CRUD.
-
-### `shield_nutrition_logs`
-Columns: `id`, `user_id`, `entry_date date`, `meal_description text`, `meal_photo_url text`, `claude_score_status text`, `protein_tier smallint`, `carb_quality_score smallint`, `timing_score smallint`, `claude_quality_score smallint` (GENERATED from the three dimensions), `deleted boolean`, `created_at`, `updated_at`.
-Policies: own-row CRUD; SELECT additionally filters `deleted = false`.
-
-### `shield_training_logs`
-Columns: `id`, `user_id`, `entry_date date`, `strain_value numeric`, `session_notes text`, `created_at`.
-Policies: own-row CRUD.
-
-### Triggers / Webhooks — IMPORTANT FINDING
-`information_schema.triggers` returns **zero rows** for schema `public`. The webhook *functions* (`shield_nutrition_logs_webhook`, `shield_manual_inputs_webhook`, `shield_training_logs_webhook`, `shield_device_uploads_webhook`, dispatcher `shield_dispatch_calculate_score`) exist, but **no triggers are attached** to the tables. That means the deterministic engine is NOT auto-recomputed on insert/update. Only the meal flow's explicit `supabase.functions.invoke("score-nutrition", ...)` runs today.
-
-## 3. Edge Functions
-
-| Name | Trigger | External calls | Input | Output |
-|---|---|---|---|---|
-| `score-nutrition` | Manual `supabase.functions.invoke` from `MealLogModal` after meal insert/update | Anthropic Claude (`claude-haiku-4-5-20251001`) via `ANTHROPIC_API_KEY`; reads/updates `shield_nutrition_logs`; reads same-day `shield_training_logs` for timing context | `{ nutrition_log_id: uuid }` | `{ row, scores: { protein_tier, carb_quality_score, timing_score, claude_quality_score }, reasoning }`; on failure sets `claude_score_status='failed'` |
-| `calculate-score` | Intended to be called by DB webhook (`shield_dispatch_calculate_score`) — **currently uncalled in practice** because no triggers are attached. Can also be invoked manually. | No LLM. Reads `shield_manual_inputs`, `shield_device_uploads`, `shield_nutrition_logs`, `shield_training_logs` for last 3 days; upserts `readiness_scores` | `{ user_id: uuid, entry_date: date }` | Upserted `readiness_scores` row with `final_score`, `pillar_breakdown`, `confidence_level`, `nudge_message`, `engine_version='v6.1'` |
-
-## 4. Storage
-
-One bucket: **`shield-uploads`** (private, `public=false`).
-
-Policies on `storage.objects` (role `authenticated`):
-- SELECT / INSERT / UPDATE / DELETE restricted to objects whose first path segment equals `auth.uid()::text` and `bucket_id='shield-uploads'`.
-
-Used for `recovery/` (Whoop/Oura/Garmin screenshots) and `meals/` (meal photos) under each user's UID folder.
-
-## 5. Orphaned / Unused / Legacy
-
-**Legacy mock screens still wired into navigation** — these predate the Shield engine and read from `src/lib/mock.ts`. They are linked by `BottomNav`, so they're reachable, but they don't reflect real data:
-- `src/routes/home.tsx` — mock rings, `todayMetrics`, `aiInsightRotation`
-- `src/routes/workouts.tsx` — `todaySession`, `chips`
-- `src/routes/nutrition.tsx` — `todayMeals`, `macroTargets`, `macroToday`
-- `src/routes/coach.tsx` — `todayMetrics`, `todaySession`, `macroTargets`, `macroToday`
-
-**`src/lib/mock.ts`** — the source of all the legacy mock data (including the `81` hardcoded score, "Body Fat" style placeholders). Still imported by the four legacy screens above; should be removed when those screens are rebuilt against the Shield tables.
-
-**`BottomNav` has no `/dashboard` entry** — the only real-data screen (`/dashboard`) is unreachable via in-app nav. Users currently land on it only via direct URL or post-onboarding redirect.
-
-**No components are fully orphaned.** Every file under `src/components/` is imported somewhere:
-- `AIOrb.tsx` → `home`, `nutrition`, `index`
-- `BottomNav.tsx` → `home`, `workouts`, `nutrition`, `coach`, `settings`
-- `RingChart.tsx` → `home`, `nutrition`
-- `LogModals.tsx` → `_authenticated/dashboard`, `MealHistoryList`
-- `MealHistoryList.tsx` → `_authenticated/dashboard`
-
-**Other observations** (not requested as fixes, just flagged):
-- Webhook triggers missing — see §2 finding above.
-- `src/routes/index.tsx` and `home.tsx` both exist; `/` and `/home` are distinct screens, easy to confuse.
-- Hydration warnings from `data-gr-c-s-check-loaded` / `data-gr-ext-installed` come from the user's Grammarly browser extension, not the app.
+Awaiting your Build-mode prompt with the precise fix you want.
