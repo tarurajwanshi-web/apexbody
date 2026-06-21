@@ -82,17 +82,31 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Fetch image and base64-encode.
+    // Fetch image and base64-encode. `screenshot_url` may be either a fully-qualified
+    // URL (legacy) or a storage path within the `shield-uploads` bucket (current).
     let b64 = "";
     let media_type = "image/jpeg";
     try {
-      const imgRes = await fetch(row.screenshot_url);
-      if (!imgRes.ok) throw new Error(`image fetch ${imgRes.status}`);
-      const buf = new Uint8Array(await imgRes.arrayBuffer());
+      const src: string = row.screenshot_url;
+      const isHttp = /^https?:\/\//i.test(src);
+      let buf: Uint8Array;
+      if (isHttp) {
+        const imgRes = await fetch(src);
+        if (!imgRes.ok) throw new Error(`image fetch ${imgRes.status}`);
+        buf = new Uint8Array(await imgRes.arrayBuffer());
+        media_type = imgRes.headers.get("content-type") || "image/jpeg";
+      } else {
+        // Treat as a storage path. Strip a leading bucket prefix if present.
+        const path = src.replace(/^shield-uploads\//, "");
+        const { data: blob, error: dlErr } = await supabase
+          .storage.from("shield-uploads").download(path);
+        if (dlErr || !blob) throw new Error(`storage download: ${dlErr?.message ?? "no blob"}`);
+        buf = new Uint8Array(await blob.arrayBuffer());
+        media_type = blob.type || (path.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg");
+      }
       let bin = "";
       for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
       b64 = btoa(bin);
-      media_type = imgRes.headers.get("content-type") || "image/jpeg";
     } catch (e) {
       await markFailed(row.user_id, row.entry_date);
       return new Response(JSON.stringify({ error: `image fetch failed: ${String(e)}` }), {
