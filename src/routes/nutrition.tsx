@@ -264,7 +264,7 @@ function Nutrition() {
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs uppercase tracking-wider text-text-tertiary">Meals today</p>
-          <p className="text-[11px] text-text-accent">Tap + to snap a photo and track your macros</p>
+          <p className="text-[11px] text-text-accent">Tap + below to log a meal</p>
         </div>
         {meals == null ? (
           <div className="rounded-2xl bg-bg-2 border border-white/5 p-5 flex justify-center">
@@ -272,52 +272,37 @@ function Nutrition() {
           </div>
         ) : meals.length === 0 ? (
           <div className="rounded-2xl bg-bg-2 border border-white/5 p-5">
-            <p className="text-sm text-text-secondary">No meals logged yet today. Tap the + button to snap your first.</p>
+            <p className="text-sm text-text-secondary">No meals logged yet today. Tap the + in the nav below to log your first.</p>
           </div>
         ) : (
           <div className="space-y-2">
             {meals.map((m) => (
-              <div key={m.id} className="rounded-2xl bg-bg-2 border border-white/5 p-4">
-                <div className="flex items-center justify-between">
+              <button
+                key={m.id}
+                onClick={() => setOpenMeal(m)}
+                className="w-full text-left rounded-2xl bg-bg-2 border border-white/5 p-4 active:scale-[0.99] transition"
+              >
+                <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold truncate">{m.meal_description || "Photo meal"}</p>
                     <p className="text-[11px] text-text-tertiary">
                       {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      {m.estimated_calories != null ? ` · ${Math.round(m.estimated_calories)} kcal` : ""}
                     </p>
                   </div>
-                  <p className="font-mono text-sm tabular-nums text-text-secondary">
+                  <p className="font-mono text-sm tabular-nums text-text-secondary shrink-0">
                     {m.claude_score_status === "scored" && m.claude_quality_score != null ? `${m.claude_quality_score}/100` : "scoring…"}
                   </p>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
       </section>
 
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) onPhoto(f);
-          e.target.value = "";
-        }}
-      />
-
-      <button
-        onClick={() => fileRef.current?.click()}
-        className="fixed bottom-28 right-6 z-40 h-14 w-14 rounded-full gradient-brand ai-glow flex items-center justify-center text-white"
-        aria-label="Snap a photo to log a meal"
-      >
-        <Plus size={26} />
-      </button>
-
       <BottomNav onLogged={reload} />
       <HydrationLogModal open={hydrationOpen} onClose={() => setHydrationOpen(false)} onSaved={reload} />
+      <MealDetailModal meal={openMeal} onClose={() => setOpenMeal(null)} />
     </div>
   );
 }
