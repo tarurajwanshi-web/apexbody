@@ -1,0 +1,2 @@
+REVOKE EXECUTE ON FUNCTION public.shield_dispatch_parse_device_upload(uuid, uuid, date) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.shield_device_uploads_parse_webhook() FROM PUBLIC, anon, authenticated;
