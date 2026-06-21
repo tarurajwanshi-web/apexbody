@@ -255,9 +255,18 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const previous_score: number | null = prev?.final_score != null ? Number(prev.final_score) : null;
 
+    // Profile drives path-aware Nutrition pillar composition + hydration target.
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("input_path_preference, measurement_weight_kg")
+      .eq("user_id", user_id)
+      .maybeSingle();
+    const pathPref: "device" | "manual" = profile?.input_path_preference === "device" ? "device" : "manual";
+    const weightKg: number | null = profile?.measurement_weight_kg != null ? Number(profile.measurement_weight_kg) : null;
+
     // Fetch the last 3 days of inputs in parallel
     const [manualRes, deviceRes, mealsRes, trainingRes] = await Promise.all([
-      supabase.from("shield_manual_inputs").select("entry_date, recovery_self_rating, sleep_hours, mood_emoji")
+      supabase.from("shield_manual_inputs").select("entry_date, recovery_self_rating, sleep_hours, mood_emoji, hydration_ml")
         .eq("user_id", user_id).in("entry_date", dateList),
       supabase.from("shield_device_uploads").select("entry_date, parsed_hrv, parsed_rhr, parsed_sleep_hours, parse_status")
         .eq("user_id", user_id).in("entry_date", dateList).eq("parse_status", "parsed"),
@@ -274,7 +283,16 @@ Deno.serve(async (req) => {
     for (const r of mealsRes.data ?? []) byDate[r.entry_date].meals.push({ claude_quality_score: r.claude_quality_score });
     for (const r of trainingRes.data ?? []) byDate[r.entry_date].training = r as any;
 
-    const perDay = dateList.map((d) => ({ date: d, ...scoreDay(byDate[d]) }));
+    const perDay = dateList.map((d) => {
+      const s = scoreDay(byDate[d]);
+      // Compose Nutrition pillar per user path; mutates s.scores / s.present.
+      const comp = composeNutrition(s.mealQuality, s.hydrationMl, weightKg, s.hadTraining, pathPref);
+      if (comp.score != null) {
+        s.scores.nutrition = comp.score;
+        s.present.nutrition = true;
+      }
+      return { date: d, ...s, hydrationPct: comp.hydrationPct, hydrationTargetMl: comp.hydrationTargetMl };
+    });
     const today_ = perDay[2];
 
     // Weighted 3-day average per pillar (today*3 + yesterday*2 + day_before*1)/6
