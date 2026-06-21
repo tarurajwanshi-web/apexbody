@@ -1,13 +1,15 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Sparkles, Dumbbell, Camera, Apple, Brain, Home as HomeIcon, Flame, Heart, BookOpen } from "lucide-react";
+import { Sparkles, Flame, Heart, BookOpen, RefreshCw } from "lucide-react";
 import { useProfile } from "@/lib/store";
 import { getOrCreateDailyInsight } from "@/lib/coach.functions";
 import { getTodayReadiness, getActivityWeek, type TodayReadiness, type ActivityWeek } from "@/lib/shield.functions";
 import { RecoveryLogModal, MealLogModal } from "@/components/LogModals";
 import { MealHistoryList } from "@/components/MealHistoryList";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
+import { BottomNav } from "@/components/BottomNav";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — APEX" }] }),
@@ -37,17 +39,19 @@ const PILLAR_META: { key: "recovery" | "sleep" | "nutrition" | "training" | "moo
 ];
 
 function Dashboard() {
-  const { profile } = useProfile();
+  const { profile, update } = useProfile();
   const navigate = useNavigate();
   const [day, setDay] = useState(1);
   const [greet, setGreet] = useState("Hello");
   const [insight, setInsight] = useState("Your recovery is strong. Ready to push intensity today.");
   const [insightTime] = useState("Just now");
+  const [insightDismissed, setInsightDismissed] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [readiness, setReadiness] = useState<TodayReadiness>(null);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [mealOpen, setMealOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const fn = useServerFn(getOrCreateDailyInsight);
   const fetchReadiness = useServerFn(getTodayReadiness);
   const fetchMacros = useServerFn(getTodayMacroSummary);
@@ -61,6 +65,24 @@ function Dashboard() {
     fetchReadiness().then(setReadiness).catch(() => setReadiness(null));
   };
 
+  const reloadAll = async () => {
+    setRefreshing(true);
+    await Promise.allSettled([fetchReadiness().then(setReadiness), fetchMacros().then(setMacros), fetchActivity().then(setActivity)]);
+    setRefreshing(false);
+  };
+
+  // Hydrate name from server profile (canonical) into the local store
+  // so we stop greeting everyone as "Athlete".
+  useEffect(() => {
+    (async () => {
+      const { data: u } = await supabase.auth.getUser();
+      if (!u.user) return;
+      const { data } = await supabase.from("profiles").select("name, goal").eq("user_id", u.user.id).maybeSingle();
+      if (data?.name && data.name !== profile.name) update({ name: data.name });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     setDay(getDayOfJourney());
     const h = new Date().getHours();
@@ -70,6 +92,38 @@ function Dashboard() {
     reloadActivity();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Pull-to-refresh (touch only, simple resistance).
+  const ptrRef = useRef<HTMLDivElement>(null);
+  const ptrStart = useRef<number | null>(null);
+  const [ptrDelta, setPtrDelta] = useState(0);
+  useEffect(() => {
+    const el = ptrRef.current;
+    if (!el) return;
+    const onStart = (e: TouchEvent) => {
+      if (window.scrollY > 0) return;
+      ptrStart.current = e.touches[0].clientY;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (ptrStart.current == null) return;
+      const d = e.touches[0].clientY - ptrStart.current;
+      if (d > 0) setPtrDelta(Math.min(80, d * 0.5));
+    };
+    const onEnd = () => {
+      if (ptrDelta >= 60) reloadAll();
+      ptrStart.current = null;
+      setPtrDelta(0);
+    };
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: true });
+    el.addEventListener("touchend", onEnd);
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ptrDelta]);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -137,7 +191,23 @@ function Dashboard() {
   const fillPct = score != null ? score / 100 : 0;
 
   return (
-    <div className="min-h-screen pb-32 relative" style={{ backgroundColor: "#0A0E1A" }}>
+    <div
+      ref={ptrRef}
+      className="min-h-screen relative"
+      style={{
+        backgroundColor: "#0A0E1A",
+        paddingTop: "max(env(safe-area-inset-top, 0px), 0px)",
+        paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 128px)",
+        transform: ptrDelta ? `translateY(${ptrDelta}px)` : undefined,
+        transition: ptrDelta ? "none" : "transform 0.2s ease",
+      }}
+    >
+      {/* PTR indicator */}
+      {(ptrDelta > 0 || refreshing) && (
+        <div className="absolute left-1/2 -translate-x-1/2 top-2 z-50 text-text-secondary">
+          <RefreshCw size={18} className={refreshing ? "animate-spin" : ""} style={{ transform: `rotate(${ptrDelta * 4}deg)` }} />
+        </div>
+      )}
       {/* Subtle radial backdrop */}
       <div
         aria-hidden
@@ -149,19 +219,28 @@ function Dashboard() {
       />
       <div className="relative px-5 pt-6 max-w-[480px] mx-auto space-y-4">
         {/* Header */}
-        <header className="flex items-start justify-between animate-fade-up" style={{ animationDelay: "0ms" }}>
-          <div>
-            <h1 className="text-[20px] font-semibold text-white leading-tight">
+        <header className="flex items-start justify-between gap-3 animate-fade-up" style={{ animationDelay: "0ms" }}>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-[20px] font-semibold text-white leading-tight truncate">
               {greet}, {profile.name || "Athlete"}
             </h1>
             <p className="text-[13px] text-text-secondary mt-1">{subline}</p>
           </div>
-          <span
-            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-semibold text-white"
-            style={{ background: "rgba(124,58,237,0.10)", border: "1px solid rgba(124,58,237,0.20)" }}
-          >
-            <Flame size={12} className="text-warning" /> {activity?.streak ?? 0}
-          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <span
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-semibold text-white"
+              style={{ background: "rgba(124,58,237,0.10)", border: "1px solid rgba(124,58,237,0.20)" }}
+            >
+              <Flame size={12} className="text-warning" /> {activity?.streak ?? 0}
+            </span>
+            <Link
+              to="/settings"
+              aria-label="Profile and settings"
+              className="h-10 w-10 rounded-full gradient-brand flex items-center justify-center text-white font-bold text-[14px] active:scale-95 transition shrink-0"
+            >
+              {(profile.name || "A").trim().charAt(0).toUpperCase()}
+            </Link>
+          </div>
         </header>
 
         {/* Data collection banner (days 1-5) */}
@@ -190,6 +269,7 @@ function Dashboard() {
         )}
 
         {/* AI Insight */}
+        {!insightDismissed && (
         <div
           className="rounded-2xl p-5 animate-fade-up"
           style={{
@@ -217,6 +297,10 @@ function Dashboard() {
               Tell me why
             </button>
             <button
+              onClick={() => {
+                setInsightDismissed(true);
+                try { localStorage.setItem("apex_insight_dismissed_at", new Date().toISOString().slice(0,10)); } catch {}
+              }}
               className="rounded-full px-3 py-1.5 text-[12px] font-medium text-text-secondary active:scale-[0.98] transition"
               style={{ border: "1px solid rgba(255,255,255,0.12)" }}
             >
@@ -224,6 +308,7 @@ function Dashboard() {
             </button>
           </div>
         </div>
+        )}
 
         {/* Pre-workout readiness adjustment note */}
         {readiness?.pre_session_adjustment != null && Number(readiness.pre_session_adjustment) < 0 && (
