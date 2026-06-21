@@ -250,6 +250,12 @@ export const upsertDeviceRecovery = createServerFn({ method: "POST" })
           device_source: data.device_source,
           screenshot_url: data.screenshot_url,
           parse_status: "pending",
+          // Wipe stale parsed values from a prior attempt for the same day
+          // (re-upload replacing a failed/partial parse).
+          parsed_hrv: null,
+          parsed_rhr: null,
+          parsed_sleep_hours: null,
+          parsed_date: null,
         },
         { onConflict: "user_id,entry_date" },
       )
