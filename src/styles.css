@@ -187,6 +187,17 @@
 .ambient-ring { animation: ambient-pulse 6s ease-in-out infinite; }
 .ambient-ring-rotate { animation: ambient-rotate 26s linear infinite; transform-origin: 50% 50%; }
 .ambient-ring-arc { animation: ambient-arc-breathe 6s ease-in-out infinite; }
+
+/* Score-ring ambient halo: slow opacity/blur breathing on the glow layer only.
+   Cycle ~3.6s — deliberately slow so it reads as "instrument idling", NOT a
+   heartbeat. The ring shape itself never changes size. */
+@keyframes score-halo-breathe {
+  0%, 100% { opacity: 0.55; filter: blur(8px); }
+  50%      { opacity: 1;    filter: blur(14px); }
+}
+.score-halo-breathe { animation: score-halo-breathe 3.6s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
-  .ambient-ring, .ambient-ring-rotate, .ambient-ring-arc { animation: none; }
+  .ambient-ring, .ambient-ring-rotate, .ambient-ring-arc,
+  .score-halo-breathe { animation: none; }
 }
