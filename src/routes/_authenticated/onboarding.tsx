@@ -646,11 +646,10 @@ function ReviewStep({ draft }: { draft: Draft }) {
         <Row label="Training days" value={`${draft.days} / week`} />
         <Row label="Equipment" value={eqLabel} />
         <Row label="Body data"
-          value={draft.bodyDataType === "dexa"
-            ? `DEXA · ${draft.dexaBf}% · ${draft.dexaLean}kg`
-            : draft.bodyDataType === "measurements"
-            ? `${draft.weight}kg · ${draft.height}cm`
-            : "Not provided"} />
+          value={draft.bodyDataType === null
+            ? "Not provided"
+            : `${draft.bodyDataType === "dexa" ? "DEXA/InBody" : "Manual"} · ${draft.weight || "—"}kg · ${draft.dexaBf || "—"}%`} />
+
       </div>
       <p className="mt-4 text-center text-[11px] text-text-tertiary">Your plan unlocks for customization 7 days from now.</p>
     </>
