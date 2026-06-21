@@ -403,14 +403,14 @@ function Dashboard() {
               ].join(","),
             }}
           />
-          {/* Hairline grid for instrument feel */}
+          {/* Hairline grid for instrument feel — toned way down so it reads as ambient depth, not a noisy artifact. */}
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-0 opacity-[0.05]"
+            className="pointer-events-none absolute inset-0 opacity-[0.015]"
             style={{
               backgroundImage:
                 "linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)",
-              backgroundSize: "40px 40px",
+              backgroundSize: "48px 48px",
             }}
           />
 
