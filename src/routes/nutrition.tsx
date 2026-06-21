@@ -33,6 +33,8 @@ function Nutrition() {
   const [error, setError] = useState<string | null>(null);
   const [macros, setMacros] = useState<MacroSummary | null>(null);
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
+  const [hydration, setHydration] = useState<HydrationSummary | null>(null);
+  const [hydrationOpen, setHydrationOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [ptrDelta, setPtrDelta] = useState(0);
@@ -42,6 +44,7 @@ function Nutrition() {
   const fn = useServerFn(analyzePhoto);
   const fetchMacros = useServerFn(getTodayMacroSummary);
   const fetchMeals = useServerFn(getTodayMeals);
+  const fetchHydration = useServerFn(getTodayHydration);
   const logMealFn = useServerFn(logMeal);
 
   const reload = async () => {
@@ -49,6 +52,7 @@ function Nutrition() {
     await Promise.allSettled([
       fetchMacros().then(setMacros),
       fetchMeals().then(setMeals).catch(() => setMeals([])),
+      fetchHydration().then(setHydration).catch(() => {}),
     ]);
     setLastUpdatedAt(Date.now());
     setRefreshing(false);
