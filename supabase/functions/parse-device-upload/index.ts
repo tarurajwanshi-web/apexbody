@@ -1,0 +1,193 @@
+// Parse a wearable screenshot (Whoop/Oura/Garmin) into structured recovery
+// metrics using Anthropic Claude vision. On success, sets parse_status='parsed'
+// on shield_device_uploads, which triggers calculate-score via DB webhook.
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function stripFences(text: string): string {
+  let t = text.trim();
+  if (t.startsWith("```")) t = t.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  return t.trim();
+}
+
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === "" || v === "null") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
+  const supabase = createClient(supabaseUrl, serviceKey);
+
+  const markFailed = async (uid: string, date: string) => {
+    await supabase
+      .from("shield_device_uploads")
+      .update({ parse_status: "failed" })
+      .eq("user_id", uid)
+      .eq("entry_date", date);
+  };
+
+  try {
+    const body = await req.json();
+    const { user_id, entry_date, upload_id } = body ?? {};
+
+    let row: any = null;
+    if (upload_id) {
+      const { data } = await supabase
+        .from("shield_device_uploads")
+        .select("*")
+        .eq("id", upload_id)
+        .single();
+      row = data;
+    } else if (user_id && entry_date) {
+      const { data } = await supabase
+        .from("shield_device_uploads")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("entry_date", entry_date)
+        .single();
+      row = data;
+    }
+
+    if (!row) {
+      return new Response(JSON.stringify({ error: "upload not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!anthropicKey) {
+      await markFailed(row.user_id, row.entry_date);
+      return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY missing" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!row.screenshot_url) {
+      await markFailed(row.user_id, row.entry_date);
+      return new Response(JSON.stringify({ error: "screenshot_url missing" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Fetch image and base64-encode.
+    let b64 = "";
+    let media_type = "image/jpeg";
+    try {
+      const imgRes = await fetch(row.screenshot_url);
+      if (!imgRes.ok) throw new Error(`image fetch ${imgRes.status}`);
+      const buf = new Uint8Array(await imgRes.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+      b64 = btoa(bin);
+      media_type = imgRes.headers.get("content-type") || "image/jpeg";
+    } catch (e) {
+      await markFailed(row.user_id, row.entry_date);
+      return new Response(JSON.stringify({ error: `image fetch failed: ${String(e)}` }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const systemPrompt =
+      `You are extracting recovery metrics from a screenshot of a ${row.device_source} wearable app. ` +
+      `Respond with ONLY a single JSON object, no prose, no markdown fences: ` +
+      `{ "hrv_ms": <number|null>, "rhr_bpm": <number|null>, "sleep_hours": <number|null> }. ` +
+      `hrv_ms: heart rate variability in milliseconds (RMSSD-style; typical 20-150). ` +
+      `rhr_bpm: resting heart rate in beats per minute (typical 40-90). ` +
+      `sleep_hours: total sleep time in hours (decimal, e.g. 7.5). ` +
+      `If a metric is not clearly visible in the screenshot, return null for that field. ` +
+      `Do not guess. Convert units if needed (e.g. "7h 30m" → 7.5).`;
+
+    const aRes = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 300,
+        system: systemPrompt,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type, data: b64 } },
+            { type: "text", text: `Extract HRV, RHR, and sleep hours from this ${row.device_source} screenshot.` },
+          ],
+        }],
+      }),
+    });
+
+    if (!aRes.ok) {
+      await markFailed(row.user_id, row.entry_date);
+      const txt = await aRes.text();
+      console.error("Anthropic error:", aRes.status, txt);
+      return new Response(JSON.stringify({ error: `anthropic ${aRes.status}` }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const aJson = await aRes.json();
+    const text = aJson?.content?.[0]?.text ?? "";
+    let parsed: any;
+    try {
+      parsed = JSON.parse(stripFences(text));
+    } catch (e) {
+      await markFailed(row.user_id, row.entry_date);
+      return new Response(JSON.stringify({ error: "parse failed", raw: text }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const parsed_hrv = numOrNull(parsed.hrv_ms);
+    const parsed_rhr = numOrNull(parsed.rhr_bpm);
+    const parsed_sleep_hours = numOrNull(parsed.sleep_hours);
+
+    const { data: updated, error: upErr } = await supabase
+      .from("shield_device_uploads")
+      .update({
+        parsed_hrv,
+        parsed_rhr,
+        parsed_sleep_hours,
+        parse_status: "parsed",
+      })
+      .eq("id", row.id)
+      .select()
+      .single();
+
+    if (upErr) {
+      console.error("update failed:", upErr);
+      return new Response(JSON.stringify({ error: upErr.message }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(
+      JSON.stringify({ row: updated, parsed: { parsed_hrv, parsed_rhr, parsed_sleep_hours } }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  } catch (err) {
+    console.error("Unhandled:", err);
+    return new Response(JSON.stringify({ error: String(err instanceof Error ? err.message : err) }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
