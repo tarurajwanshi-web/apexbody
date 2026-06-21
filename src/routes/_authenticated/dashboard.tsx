@@ -466,11 +466,10 @@ function Dashboard() {
             <div className="shrink-0 relative">
               <div
                 aria-hidden
-                className="absolute inset-0 rounded-full"
+                className="absolute inset-0 rounded-full score-halo-breathe"
                 style={{
                   background:
-                    "radial-gradient(circle, rgba(124,58,237,0.35) 0%, rgba(59,130,246,0.18) 45%, transparent 70%)",
-                  filter: "blur(8px)",
+                    "radial-gradient(circle, rgba(124,58,237,0.45) 0%, rgba(59,130,246,0.22) 45%, transparent 70%)",
                 }}
               />
               <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`} className="relative">
