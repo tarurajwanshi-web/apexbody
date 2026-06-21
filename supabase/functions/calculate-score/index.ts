@@ -303,6 +303,14 @@ Deno.serve(async (req) => {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    // Audit #3: only callable via DB-dispatch internal secret, or by the user
+    // whose data is being scored (JWT user.id must match body.user_id).
+    const authz = await authorizeCaller(req, supabase, user_id);
+    if (!authz.ok) {
+      return new Response(JSON.stringify({ error: authz.error }), {
+        status: authz.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const today = entry_date as string;
     const yesterday = dateOffset(today, 1);
