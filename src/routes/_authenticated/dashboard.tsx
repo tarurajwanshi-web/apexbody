@@ -1,12 +1,11 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Sparkles, Flame, Heart, BookOpen, RefreshCw } from "lucide-react";
+import { Sparkles, Flame, Heart, BookOpen, RefreshCw, Dumbbell, Droplet } from "lucide-react";
 import { useProfile } from "@/lib/store";
 import { getOrCreateDailyInsight } from "@/lib/coach.functions";
-import { getTodayReadiness, getActivityWeek, type TodayReadiness, type ActivityWeek } from "@/lib/shield.functions";
+import { getTodayReadiness, getActivityWeek, getTodayHydration, type TodayReadiness, type ActivityWeek, type HydrationSummary } from "@/lib/shield.functions";
 import { RecoveryLogModal, MealLogModal } from "@/components/LogModals";
-import { MealHistoryList } from "@/components/MealHistoryList";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
 import { BottomNav } from "@/components/BottomNav";
 import { RefreshStamp } from "@/components/RefreshStamp";
