@@ -456,108 +456,90 @@ function inToCm(inches: number) { return inches * 2.54; }
 function kgToLb(kg: number) { return kg * 2.20462; }
 function lbToKg(lb: number) { return lb / 2.20462; }
 
-function BodyStep({ draft, patch, onSkip }: { draft: Draft; patch: (p: Partial<Draft>) => void; onSkip: () => void }) {
-  const [lenUnit, setLenUnit] = useState<LengthUnit>("cm");
+function BodyStep({
+  draft, patch, subStep, onSkip,
+}: { draft: Draft; patch: (p: Partial<Draft>) => void; subStep: "A" | "B"; onSkip: () => void }) {
   const [wUnit, setWUnit] = useState<WeightUnit>("kg");
-  const [uploading, setUploading] = useState(false);
+  const [lUnit, setLUnit] = useState<LengthUnit>("cm");
 
-  const tabBtn = (id: Exclude<BodyDataType, null>, label: string) => {
+  const pathBtn = (id: Exclude<BodyDataType, null>, label: string, sub: string) => {
     const active = draft.bodyDataType === id;
     return (
-      <button type="button" onClick={() => patch({ bodyDataType: id })}
-        className={`flex-1 rounded-xl py-2.5 text-xs font-semibold border transition ${active ? "text-white" : "border-white/5 bg-bg-2 text-text-secondary"}`}
-        style={active ? SELECTED_STYLE : undefined}>{label}</button>
+      <button
+        type="button"
+        onClick={() => patch({ bodyDataType: id })}
+        className={`flex-1 rounded-xl py-3 px-3 text-left border transition ${active ? "text-white" : "border-white/5 bg-bg-2 text-text-secondary"}`}
+        style={active ? SELECTED_STYLE : undefined}
+      >
+        <p className="text-[13px] font-semibold">{label}</p>
+        <p className="text-[11px] text-text-tertiary mt-0.5">{sub}</p>
+      </button>
     );
   };
 
-  const onDexaFile = async (file: File) => {
-    setUploading(true);
-    try {
-      const { data: u } = await supabase.auth.getUser();
-      const uid = u.user?.id;
-      if (!uid) throw new Error("Not signed in");
-      const ext = file.name.split(".").pop() || "pdf";
-      const path = `${uid}/dexa/${Date.now()}.${ext}`;
-      const { error } = await supabase.storage.from("shield-uploads").upload(path, file);
-      if (error) throw error;
-      patch({ dexaFileName: file.name, dexaBf: draft.dexaBf || "?", dexaLean: draft.dexaLean || "?" });
-      toast.success("DEXA uploaded — confirm extracted values below.");
-    } catch (e: any) {
-      toast.error(e?.message ?? "Upload failed");
-    } finally {
-      setUploading(false);
-    }
-  };
+  if (subStep === "A") {
+    return (
+      <>
+        <StepHeader title="Body composition" sub="Required for accurate macro targets — takes 20 seconds." />
 
+        <div className="flex gap-2 mb-2">
+          {pathBtn("dexa", "I have DEXA / InBody", "Enter scan results")}
+          {pathBtn("measurements", "Estimate manually", "Quick visual estimate")}
+        </div>
+        <div className="text-right mb-5">
+          <button type="button" onClick={onSkip} className="text-xs underline underline-offset-2 text-text-tertiary">
+            Skip for now →
+          </button>
+        </div>
+
+        {draft.bodyDataType !== null && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Weight unit</span>
+              <UnitToggle options={[{ id: "kg", label: "kg" }, { id: "lb", label: "lb" }]} value={wUnit} onChange={(v) => setWUnit(v as WeightUnit)} />
+            </div>
+            <UnitField label="Weight" cmValue={draft.weight} onChangeCm={(v) => patch({ weight: v })} unit={wUnit} convertToDisplay={kgToLb} convertFromDisplay={lbToKg} />
+            <UnitField label="Height" cmValue={draft.height} onChangeCm={(v) => patch({ height: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+            <Field label="Body fat %" value={draft.dexaBf} onChange={(v) => patch({ dexaBf: v })} suffix="%" />
+            {draft.bodyDataType === "dexa" && (
+              <UnitField label="Lean mass (optional)" cmValue={draft.dexaLean} onChangeCm={(v) => patch({ dexaLean: v })} unit={wUnit} convertToDisplay={kgToLb} convertFromDisplay={lbToKg} />
+            )}
+            <p className="text-[11px] text-text-tertiary px-1">
+              {draft.bodyDataType === "dexa"
+                ? "Enter values directly from your DEXA or InBody report."
+                : "A rough visual estimate is fine — we'll refine this from your circumference history over time."}
+            </p>
+          </div>
+        )}
+
+        {draft.bodyDataType === null && (
+          <p className="text-center text-xs text-text-tertiary mt-10">
+            Pick one to continue, or skip and add this later from the Log tab.
+          </p>
+        )}
+      </>
+    );
+  }
+
+  // Sub-step B — circumferences (all optional).
   return (
     <>
-      <StepHeader title="Body data" sub="Optional — improves accuracy." />
+      <StepHeader title="Circumferences" sub="Optional — improves progress tracking." />
 
-      <div className="flex gap-2 mb-2">
-        {tabBtn("dexa", "DEXA scan")}
-        {tabBtn("measurements", "Measurements")}
-      </div>
-      <div className="text-right mb-5">
-        <button type="button" onClick={onSkip} className="text-xs underline underline-offset-2 text-text-tertiary">
-          Skip for now →
-        </button>
-      </div>
-
-      {draft.bodyDataType === "dexa" && (
-        <div className="space-y-3">
-          <label
-            className="block rounded-2xl p-5 cursor-pointer text-center"
-            style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.10), rgba(59,130,246,0.08))", border: "1px dashed rgba(124,58,237,0.4)" }}
-          >
-            <input type="file" accept="application/pdf,image/*" className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) onDexaFile(f); }} />
-            {draft.dexaFileName ? (
-              <>
-                <FileText size={22} className="mx-auto text-text-accent" />
-                <p className="mt-2 text-[13px] font-semibold text-white">{draft.dexaFileName}</p>
-                <p className="text-[11px] text-text-tertiary mt-1">Tap to replace</p>
-              </>
-            ) : (
-              <>
-                <Upload size={22} className="mx-auto text-text-accent" />
-                <p className="mt-2 text-[13px] font-semibold text-white">{uploading ? "Uploading…" : "Upload your DEXA results"}</p>
-                <p className="text-[11px] text-text-tertiary mt-1">PDF or photo of the report</p>
-              </>
-            )}
-          </label>
-          <p className="text-[11px] text-text-tertiary">
-            We'll extract body-fat % and lean mass automatically and ask you to confirm. For now you can also enter the numbers manually below.
-          </p>
-          <Field label="Body fat %" value={draft.dexaBf === "?" ? "" : draft.dexaBf} onChange={(v) => patch({ dexaBf: v })} suffix="%" />
-          <Field label="Lean mass" value={draft.dexaLean === "?" ? "" : draft.dexaLean} onChange={(v) => patch({ dexaLean: v })} suffix="kg" />
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Length unit</span>
+          <UnitToggle options={[{ id: "cm", label: "cm" }, { id: "in", label: "in" }]} value={lUnit} onChange={(v) => setLUnit(v as LengthUnit)} />
         </div>
-      )}
-
-      {draft.bodyDataType === "measurements" && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Length</span>
-            <UnitToggle options={[{ id: "cm", label: "cm" }, { id: "in", label: "in" }]} value={lenUnit} onChange={(v) => setLenUnit(v as LengthUnit)} />
-          </div>
-          <UnitField label="Waist" cmValue={draft.waist} onChangeCm={(v) => patch({ waist: v })} unit={lenUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-          <UnitField label="Hip" cmValue={draft.hip} onChangeCm={(v) => patch({ hip: v })} unit={lenUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-          <UnitField label="Height" cmValue={draft.height} onChangeCm={(v) => patch({ height: v })} unit={lenUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-          <div className="flex items-center justify-between gap-2 pt-2">
-            <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Weight</span>
-            <UnitToggle options={[{ id: "kg", label: "kg" }, { id: "lb", label: "lb" }]} value={wUnit} onChange={(v) => setWUnit(v as WeightUnit)} />
-          </div>
-          <UnitField label="Weight" cmValue={draft.weight} onChangeCm={(v) => patch({ weight: v })} unit={wUnit} convertToDisplay={kgToLb} convertFromDisplay={lbToKg} />
-        </div>
-      )}
-
-      {draft.bodyDataType === null && (
-        <p className="text-center text-xs text-text-tertiary mt-10">
-          No body data shared — you can add this later in Settings.
-        </p>
-      )}
+        <UnitField label="Waist" cmValue={draft.waist} onChangeCm={(v) => patch({ waist: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+        <UnitField label="Hip" cmValue={draft.hip} onChangeCm={(v) => patch({ hip: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+        <UnitField label="Arm" cmValue={draft.arm} onChangeCm={(v) => patch({ arm: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+        <UnitField label="Thigh" cmValue={draft.thigh} onChangeCm={(v) => patch({ thigh: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+      </div>
     </>
   );
 }
+
 
 function UnitToggle({ options, value, onChange }: { options: { id: string; label: string }[]; value: string; onChange: (v: string) => void }) {
   return (
