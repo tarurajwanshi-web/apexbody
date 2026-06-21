@@ -15,11 +15,11 @@ export function FloatingCoach() {
   return (
     <Link
       to="/coach"
-      aria-label="Open APEX Coach"
-      className="fixed z-50 h-14 w-14 rounded-full flex items-center justify-center text-white active:scale-95 transition"
+      aria-label="Open APEX Intelligence"
+      className="fixed z-[60] h-14 w-14 rounded-full flex items-center justify-center text-white active:scale-95 transition"
       style={{
-        left: "calc(env(safe-area-inset-left, 0px) + 16px)",
-        bottom: "calc(env(safe-area-inset-bottom, 0px) + 104px)",
+        right: "calc(env(safe-area-inset-right, 0px) + 16px)",
+        bottom: "calc(env(safe-area-inset-bottom, 0px) + 84px)",
         background:
           "radial-gradient(circle at 30% 28%, rgba(167,139,250,0.98), rgba(124,58,237,0.95) 50%, rgba(59,130,246,0.95) 85%)",
         border: "1px solid rgba(255,255,255,0.22)",
@@ -27,6 +27,7 @@ export function FloatingCoach() {
           "inset 0 1px 0 rgba(255,255,255,0.35), 0 0 0 1px rgba(124,58,237,0.35), 0 0 24px rgba(124,58,237,0.45), 0 8px 24px rgba(0,0,0,0.55)",
       }}
     >
+
       {/* Inner darker disc creates the "ring" silhouette of the app icon */}
       <span
         className="absolute inset-[5px] rounded-full flex items-center justify-center"
