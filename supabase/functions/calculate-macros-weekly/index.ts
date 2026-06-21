@@ -43,18 +43,18 @@ type WeeklyResult = {
 
 /** Compute the user-local Monday (date) for "now" in IANA tz. */
 function userLocalMonday(tz: string, now: Date = new Date()): string {
-  // Format the current instant in the user's local tz
+  // Format the current instant as YYYY-MM-DD in the user's local tz.
   const fmt = new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
-    year: "numeric", month: "2-digit", day: "2-digit", weekday: "short",
+    year: "numeric", month: "2-digit", day: "2-digit",
   });
   const parts = fmt.formatToParts(now);
   const get = (t: string) => parts.find(p => p.type === t)!.value;
-  const localDateStr = `${get("year")}-${get("month")}-${get("day")}`; // YYYY-MM-DD
-  const weekday = get("weekday"); // 'Mon'…'Sun'
-  const dayIdx = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].indexOf(weekday);
-  // Subtract dayIdx days from localDateStr
+  const localDateStr = `${get("year")}-${get("month")}-${get("day")}`;
+  // Derive ISO weekday from the local date (Sun=0..Sat=6 in JS; Mon-anchored
+  // index = (jsDay+6)%7 so Mon→0, Tue→1, ..., Sun→6).
   const d = new Date(`${localDateStr}T00:00:00Z`);
+  const dayIdx = (d.getUTCDay() + 6) % 7;
   d.setUTCDate(d.getUTCDate() - dayIdx);
   return d.toISOString().slice(0, 10);
 }
