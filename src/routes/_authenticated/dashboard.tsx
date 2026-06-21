@@ -647,6 +647,35 @@ function ConfidenceBadge({ level }: { level: "HIGH" | "MEDIUM" | "LOW" }) {
   );
 }
 
+/** Inline explanation for the confidence badge so "HIGH" never reads as
+ *  "your score is good". Lists which pillars actually fed today's number. */
+function ConfidenceExplainer({ readiness }: { readiness: TodayReadiness }) {
+  const level = readiness?.confidence_level ?? null;
+  const breakdown = readiness?.pillar_breakdown ?? null;
+  const logged = PILLAR_META.filter((p) => {
+    const v = breakdown?.[p.key];
+    return typeof v === "number" || (typeof v === "string" && v !== "" && v !== "—");
+  }).map((p) => p.label);
+
+  const phrase =
+    level === "HIGH" ? "High confidence" :
+    level === "MEDIUM" ? "Medium confidence" :
+    level === "LOW" ? "Low confidence" : "Confidence";
+
+  const basis =
+    logged.length === 0
+      ? "nothing logged yet today"
+      : logged.length === 1
+        ? `based on ${logged[0]}`
+        : `based on ${logged.slice(0, -1).join(", ")} & ${logged[logged.length - 1]}`;
+
+  return (
+    <p className="mt-3 text-[11px] text-text-tertiary leading-snug max-w-[240px]">
+      <span className="text-text-secondary">{phrase}</span> — {basis}.
+    </p>
+  );
+}
+
 function MetricRow({
   color, name, value, trend, note, last, hideNote,
 }: {
