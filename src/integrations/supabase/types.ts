@@ -232,6 +232,24 @@ export type Database = {
         }
         Relationships: []
       }
+      internal_secrets: {
+        Row: {
+          created_at: string
+          name: string
+          value: string
+        }
+        Insert: {
+          created_at?: string
+          name: string
+          value: string
+        }
+        Update: {
+          created_at?: string
+          name?: string
+          value?: string
+        }
+        Relationships: []
+      }
       nutrition_weekly_reviews: {
         Row: {
           abnormal_week: boolean
@@ -719,6 +737,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      apply_onboarding_macros: {
+        Args: {
+          p_bmr: number
+          p_effective_start_date: string
+          p_formula_used: string
+          p_target_calories: number
+          p_target_carbs_g: number
+          p_target_fat_g: number
+          p_target_protein_g: number
+          p_tdee: number
+          p_user_id: string
+        }
+        Returns: string
+      }
       apply_weekly_macro_review: {
         Args: {
           p_abnormal_week: boolean

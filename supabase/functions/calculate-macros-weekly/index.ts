@@ -14,9 +14,47 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+// Audit #3: authorize caller. Accepts either:
+//   (a) x-internal-secret header matching public.internal_secrets.dispatch_secret
+//       (DB-trigger / cron path), OR
+//   (b) Bearer JWT whose user.id equals body_user_id (signed-in user calling
+//       a function operating on their own data).
+// Rejects unauthenticated calls and cross-user attempts.
+let _cachedInternalSecret: string | null = null;
+async function authorizeCaller(
+  req: Request,
+  supa: SupabaseClient,
+  body_user_id?: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const internalSecret = req.headers.get("x-internal-secret");
+  if (internalSecret) {
+    if (!_cachedInternalSecret) {
+      const { data } = await supa
+        .from("internal_secrets")
+        .select("value")
+        .eq("name", "dispatch_secret")
+        .maybeSingle();
+      _cachedInternalSecret = (data as { value?: string } | null)?.value ?? null;
+    }
+    if (_cachedInternalSecret && internalSecret === _cachedInternalSecret) return { ok: true };
+    return { ok: false, status: 401, error: "invalid internal secret" };
+  }
+  const authHeader = req.headers.get("authorization") || req.headers.get("Authorization");
+  if (!authHeader || !authHeader.toLowerCase().startsWith("bearer ")) {
+    return { ok: false, status: 401, error: "unauthorized: missing bearer token or internal secret" };
+  }
+  const token = authHeader.slice(7).trim();
+  const { data: userData, error } = await supa.auth.getUser(token);
+  if (error || !userData?.user) return { ok: false, status: 401, error: "unauthorized: invalid token" };
+  if (body_user_id && body_user_id !== userData.user.id) {
+    return { ok: false, status: 403, error: "forbidden: user_id does not match authenticated caller" };
+  }
+  return { ok: true };
+}
 
 type Profile = {
   user_id: string;
@@ -110,9 +148,16 @@ function recomputeMacros(targetCalories: number, weightKg: number, goal: string 
 
 async function processUser(supa: SupabaseClient, p: Profile, force: boolean): Promise<WeeklyResult> {
   const tz = p.timezone || "Asia/Dubai";
-  const week_start_date = userLocalMonday(tz);
-  const week_end_date = addDays(week_start_date, 6);
-  const window_end_exclusive = addDays(week_start_date, 7);
+  // Audit #1 fix: the cron runs Monday 13:00 UTC, which is AFTER local-Monday
+  // 00:00 in every supported timezone. userLocalMonday() therefore returns
+  // the Monday that just BEGAN. We want to review the week that just ENDED.
+  //   review window:  [prior Monday, prior Sunday]   (7 days, the week we evaluate)
+  //   new target activates today (current local Monday)
+  const current_week_start_date = userLocalMonday(tz);
+  const week_start_date = addDays(current_week_start_date, -7);   // prior Monday (review window start, inclusive)
+  const week_end_date = addDays(current_week_start_date, -1);     // prior Sunday (review window end, inclusive)
+  const window_end_exclusive = current_week_start_date;            // exclusive upper bound for all data queries
+  const new_effective_start_date = current_week_start_date;        // new target activates today
 
   // Step 1: idempotency
   if (!force) {
@@ -406,7 +451,7 @@ async function processUser(supa: SupabaseClient, p: Profile, force: boolean): Pr
     p_user_id: p.user_id,
     p_week_start_date: week_start_date,
     p_week_end_date: week_end_date,
-    p_effective_start_date: week_start_date,
+    p_effective_start_date: new_effective_start_date,
     p_weigh_in_count: weigh_in_count,
     p_days_logged: days_logged,
     p_adherence_pct: adherence_pct,
@@ -446,6 +491,16 @@ Deno.serve(async (req) => {
   let body: { user_id?: string; force_recalculate?: boolean } = {};
   try { body = await req.json(); } catch { /* empty body OK for cron */ }
   const force = body.force_recalculate === true;
+
+  // Audit #3: gate the function. Cron path → x-internal-secret header.
+  // Manual force-recalc for a specific user → JWT bearer matching body.user_id.
+  // Unauthenticated calls (no internal secret AND no valid JWT) are rejected.
+  const authz = await authorizeCaller(req, supa, body.user_id);
+  if (!authz.ok) {
+    return new Response(JSON.stringify({ error: authz.error }), {
+      status: authz.status, headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
 
   let profiles: Profile[];
   try {

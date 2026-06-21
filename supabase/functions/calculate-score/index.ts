@@ -1,10 +1,11 @@
 // APEX Shield deterministic readiness engine (v6.1).
 // NO LLM CALLS. Pure formulas per spec.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { authorizeCaller, corsAllowHeaders } from "../_shared/authorize.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": corsAllowHeaders,
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -300,6 +301,14 @@ Deno.serve(async (req) => {
     if (!user_id || !entry_date) {
       return new Response(JSON.stringify({ error: "user_id and entry_date required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    // Audit #3: only callable via DB-dispatch internal secret, or by the user
+    // whose data is being scored (JWT user.id must match body.user_id).
+    const authz = await authorizeCaller(req, supabase, user_id);
+    if (!authz.ok) {
+      return new Response(JSON.stringify({ error: authz.error }), {
+        status: authz.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 

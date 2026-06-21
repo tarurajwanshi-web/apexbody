@@ -13,10 +13,11 @@
 //      hormonal/EFA health; carbs fill the remaining kcal.
 // Input: { user_id }. Upserts into public.daily_macro_targets.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { authorizeCaller, corsAllowHeaders } from "../_shared/authorize.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": corsAllowHeaders,
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -79,6 +80,13 @@ Deno.serve(async (req) => {
         status: 400, headers: { ...cors, "Content-Type": "application/json" },
       });
     }
+    // Audit #3: caller's JWT user.id must match body.user_id (or internal-secret).
+    const authz = await authorizeCaller(req, supa, user_id);
+    if (!authz.ok) {
+      return new Response(JSON.stringify({ error: authz.error }), {
+        status: authz.status, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
     const { data: p, error } = await supa.from("profiles").select("*").eq("user_id", user_id).maybeSingle();
     if (error || !p) {
       return new Response(JSON.stringify({ error: "profile not found" }), {
@@ -126,7 +134,6 @@ Deno.serve(async (req) => {
     const today = new Date().toISOString().slice(0, 10);
     const row = {
       user_id,
-      calculated_at: new Date().toISOString(),
       bmr: Math.round(bmr),
       tdee: Math.round(tdee),
       target_calories: Math.round(target_calories),
@@ -135,25 +142,24 @@ Deno.serve(async (req) => {
       target_fat_g: Math.round(target_fat_g),
       formula_used,
       effective_start_date: today,
-      effective_end_date: null as string | null,
-      source: "onboarding",
     };
 
-    // Close any prior active target row that started before today. (If a
-    // target already exists with start=today, the upsert below will update it
-    // in place.)
-    const { error: closeErr } = await supa
-      .from("daily_macro_targets")
-      .update({ effective_end_date: today })
-      .eq("user_id", user_id)
-      .is("effective_end_date", null)
-      .lt("effective_start_date", today);
-    if (closeErr) throw closeErr;
-
-    const { error: upErr } = await supa
-      .from("daily_macro_targets")
-      .upsert(row, { onConflict: "user_id,effective_start_date" });
-    if (upErr) throw upErr;
+    // Audit #7: atomic close-prior + insert-new via single-transaction RPC.
+    // Eliminates the race where two separate HTTP calls (UPDATE then UPSERT)
+    // could collide with the partial unique index and leave the user with
+    // zero active macro targets after onboarding.
+    const { error: rpcErr } = await supa.rpc("apply_onboarding_macros", {
+      p_user_id: user_id,
+      p_effective_start_date: today,
+      p_bmr: row.bmr,
+      p_tdee: row.tdee,
+      p_target_calories: row.target_calories,
+      p_target_protein_g: row.target_protein_g,
+      p_target_carbs_g: row.target_carbs_g,
+      p_target_fat_g: row.target_fat_g,
+      p_formula_used: row.formula_used,
+    });
+    if (rpcErr) throw rpcErr;
 
     return new Response(JSON.stringify({ ok: true, ...row }), {
       headers: { ...cors, "Content-Type": "application/json" },

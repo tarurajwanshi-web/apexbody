@@ -1,10 +1,11 @@
 // Score nutrition logs across protein / carb-quality / timing dimensions
 // using Anthropic Claude Haiku.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { authorizeCaller, corsAllowHeaders } from "../_shared/authorize.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": corsAllowHeaders,
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -61,6 +62,16 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "log not found", details: fetchErr?.message }), {
         status: 404,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Audit #3: ownership check — caller must be the row's user (via JWT) or
+    // an internal-secret dispatcher. Performed AFTER fetch since the body
+    // identifies the row by id, not by user_id.
+    const authz = await authorizeCaller(req, supabase, row.user_id);
+    if (!authz.ok) {
+      return new Response(JSON.stringify({ error: authz.error }), {
+        status: authz.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
