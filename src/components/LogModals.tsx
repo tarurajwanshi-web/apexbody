@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Upload, Loader2 } from "lucide-react";
+import { X, Upload, Loader2, Sparkles, Check } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -10,6 +10,7 @@ import {
   updateMeal,
   upsertTraining,
 } from "@/lib/shield.functions";
+import { analyzePhoto } from "@/lib/coach.functions";
 
 type Props = { open: boolean; onClose: () => void; onSaved?: () => void };
 
@@ -18,8 +19,13 @@ function Sheet({ open, onClose, title, children }: { open: boolean; onClose: () 
   return (
     <div className="fixed inset-0 z-[100] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onClose}>
       <div
-        className="w-full max-w-[480px] rounded-t-[24px] p-5 animate-fade-up max-h-[90vh] overflow-y-auto"
-        style={{ background: "#0F1524", border: "1px solid rgba(255,255,255,0.06)" }}
+        className="w-full max-w-[480px] rounded-t-[24px] p-5 animate-fade-up overflow-y-auto"
+        style={{
+          background: "#0F1524",
+          border: "1px solid rgba(255,255,255,0.06)",
+          maxHeight: "calc(90vh - env(safe-area-inset-bottom, 0px))",
+          paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 20px)",
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
@@ -210,46 +216,93 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
 type MealEditing = { id: string; meal_description: string | null; meal_photo_url: string | null } | null;
 type MealProps = Props & { editing?: MealEditing };
 
+type _VisionGuess = { description: string };
+void ({} as _VisionGuess);
+
+/**
+ * Meal log modal — two-step:
+ *  1) Upload photo (and/or type description). If a photo is present, run a quick
+ *     vision pass to draft a description for the user to edit.
+ *  2) User confirms / edits the description, then we persist + kick off scoring.
+ *  After success, the parent reloads and the per-meal nutrient callout appears
+ *  in MealHistoryList once estimated_* values arrive.
+ */
 export function MealLogModal({ open, onClose, onSaved, editing = null }: MealProps) {
+  const [step, setStep] = useState<"capture" | "confirm">("capture");
   const [desc, setDesc] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [visionBusy, setVisionBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const create = useServerFn(logMeal);
   const update = useServerFn(updateMeal);
 
   useEffect(() => {
-    if (!open) { setDesc(""); setFile(null); setErr(null); return; }
+    if (!open) { setStep("capture"); setDesc(""); setFile(null); setPhotoUrl(null); setErr(null); return; }
+    setStep(editing ? "confirm" : "capture");
     setDesc(editing?.meal_description ?? "");
+    setPhotoUrl(editing?.meal_photo_url ?? null);
     setFile(null);
     setErr(null);
   }, [open, editing]);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!desc.trim() && !file && !editing) return;
-    setBusy(true); setErr(null);
+  /** Upload photo, generate vision draft, advance to confirm step. */
+  const handleNext = async () => {
+    if (!file && !desc.trim()) return;
+    setErr(null);
+    setBusy(true);
     try {
-      let photoPath: string | null = editing?.meal_photo_url ?? null;
+      let url: string | null = photoUrl;
       if (file) {
         const { data: u } = await supabase.auth.getUser();
         const uid = u.user?.id;
         if (!uid) throw new Error("Not signed in.");
-        const ext = file.name.split(".").pop() || "jpg";
-        photoPath = `${uid}/meals/${Date.now()}.${ext}`;
-        const { error: upErr } = await supabase.storage.from("shield-uploads").upload(photoPath, file);
-        if (upErr) throw new Error(upErr.message);
+        const ext = (file.type.split("/")[1] || "jpg").replace("jpeg", "jpg");
+        const path = `${uid}/meals/${Date.now()}.${ext}`;
+        const up = await supabase.storage.from("shield-uploads").upload(path, file, { contentType: file.type });
+        if (up.error) throw new Error(up.error.message);
+        // Use a long-lived signed URL so score-nutrition can fetch the photo
+        // server-side. (Previously we stored the raw storage path here, which
+        // caused score-nutrition to fail silently → meal stuck on "scoring…".)
+        const { data: signed } = await supabase.storage.from("shield-uploads").createSignedUrl(path, 60 * 60 * 24 * 30);
+        url = signed?.signedUrl ?? null;
+        setPhotoUrl(url);
+
+        // Quick vision pass to seed the description (optional, fail-soft).
+        if (url) {
+          setVisionBusy(true);
+          try {
+            const guess = await runVisionDraft(file);
+            if (!desc.trim() && guess) setDesc(guess);
+          } catch {/* ignore — user can type their own */}
+          finally { setVisionBusy(false); }
+        }
       }
+      setStep("confirm");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not prepare meal.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!desc.trim() && !photoUrl) return;
+    setBusy(true); setErr(null);
+    try {
       let id: string;
       if (editing) {
-        const r = await update({ data: { id: editing.id, meal_description: desc.trim(), meal_photo_url: photoPath } });
+        const r = await update({ data: { id: editing.id, meal_description: desc.trim(), meal_photo_url: photoUrl } });
         id = r.id;
       } else {
-        const r = await create({ data: { meal_description: desc.trim(), meal_photo_url: photoPath } });
+        const r = await create({ data: { meal_description: desc.trim(), meal_photo_url: photoUrl } });
         id = r.id;
       }
-      // Fire-and-forget rescore; calculate-score is triggered via DB webhook.
+      // Kick off scoring + macro estimation. We DO NOT await this — the
+      // MealHistoryList polls and surfaces "scoring…", "scored", or "failed".
       void supabase.functions.invoke("score-nutrition", { body: { nutrition_log_id: id } }).catch(() => {});
       onSaved?.();
       onClose();
@@ -259,45 +312,101 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
   };
 
   return (
-    <Sheet open={open} onClose={onClose} title={editing ? "Edit meal" : "Log a meal"}>
-      <form onSubmit={submit} className="space-y-5">
-        {/* Primary: photo */}
-        <div>
-          <label className="text-[12px] uppercase text-text-tertiary tracking-wider">
-            Photo {editing?.meal_photo_url ? "(replace optional)" : "(recommended)"}
-          </label>
-          <button type="button" onClick={() => inputRef.current?.click()}
-            className="mt-3 w-full rounded-2xl py-7 flex flex-col items-center gap-2 text-white active:scale-[0.99] transition"
-            style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.18), rgba(59,130,246,0.12))", border: "1px solid rgba(16,185,129,0.5)" }}>
-            <Upload size={22} />
-            <span className="text-[14px] font-semibold">
-              {file ? file.name : editing?.meal_photo_url ? "Photo on file — tap to replace" : "Tap to add a photo"}
-            </span>
-            <span className="text-[11px] text-text-tertiary">AI estimates calories & macros</span>
+    <Sheet open={open} onClose={onClose} title={editing ? "Edit meal" : step === "capture" ? "Log a meal" : "Confirm what's in this meal"}>
+      {step === "capture" ? (
+        <div className="space-y-5">
+          <div>
+            <label className="text-[12px] uppercase text-text-tertiary tracking-wider">
+              Photo (recommended)
+            </label>
+            <button type="button" onClick={() => inputRef.current?.click()}
+              className="mt-3 w-full rounded-2xl py-7 flex flex-col items-center gap-2 text-white active:scale-[0.99] transition"
+              style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.18), rgba(59,130,246,0.12))", border: "1px solid rgba(16,185,129,0.5)" }}>
+              <Upload size={22} />
+              <span className="text-[14px] font-semibold">{file ? file.name : "Tap to add a photo"}</span>
+              <span className="text-[11px] text-text-tertiary">We'll identify the food, then you confirm</span>
+            </button>
+            <input ref={inputRef} type="file" accept="image/*" capture="environment" className="hidden"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          </div>
+          <div>
+            <label className="text-[12px] uppercase text-text-tertiary tracking-wider">Or type it</label>
+            <textarea
+              value={desc} onChange={(e) => setDesc(e.target.value)}
+              placeholder="e.g. Grilled chicken, rice, broccoli"
+              rows={2}
+              className="mt-3 w-full rounded-2xl p-4 text-white placeholder:text-text-tertiary resize-none focus:outline-none"
+              style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)", fontSize: 16 }}
+            />
+          </div>
+          {err && <p className="text-[12px] text-red-400">{err}</p>}
+          <button
+            type="button"
+            disabled={busy || (!file && !desc.trim())}
+            onClick={handleNext}
+            className="w-full rounded-2xl gradient-brand py-3 text-[14px] font-semibold text-white active:scale-[0.98] transition disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {busy ? <><Loader2 size={16} className="animate-spin" /> Reading photo…</> : "Next: confirm"}
           </button>
-          <input ref={inputRef} type="file" accept="image/*" capture="environment" className="hidden"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-          <p className="mt-2 text-[11px] text-text-tertiary">
-            Estimates are approximate — useful for trends, not precise tracking.
-          </p>
         </div>
-
-        {/* Secondary: text description */}
-        <div>
-          <label className="text-[12px] uppercase text-text-tertiary tracking-wider">Description (optional but helps accuracy)</label>
-          <textarea
-            value={desc} onChange={(e) => setDesc(e.target.value)}
-            placeholder="e.g. Grilled chicken, rice, broccoli"
-            rows={2}
-            className="mt-3 w-full rounded-2xl p-4 text-[14px] text-white placeholder:text-text-tertiary resize-none focus:outline-none"
-            style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)" }}
-          />
-        </div>
-        {err && <p className="text-[12px] text-red-400">{err}</p>}
-        <SubmitBtn busy={busy} label={editing ? "Save changes" : "Log meal"} disabled={!file && !desc.trim()} />
-      </form>
+      ) : (
+        <form onSubmit={submit} className="space-y-5">
+          {photoUrl && (
+            <img src={photoUrl} alt="Meal" className="w-full max-h-44 object-cover rounded-xl" />
+          )}
+          <div>
+            <label className="text-[12px] uppercase text-text-tertiary tracking-wider flex items-center gap-2">
+              {visionBusy ? <><Sparkles size={12} className="text-ai animate-pulse" /> AI is reading…</> : <><Check size={12} className="text-success" /> Edit if needed</>}
+            </label>
+            <textarea
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              placeholder="e.g. 2 puri, sambar, coconut chutney"
+              rows={3}
+              className="mt-3 w-full rounded-2xl p-4 text-white placeholder:text-text-tertiary resize-none focus:outline-none"
+              style={{ background: "#0A0E1A", border: "1px solid rgba(124,58,237,0.4)", fontSize: 16 }}
+              autoFocus
+            />
+            <p className="mt-2 text-[11px] text-text-tertiary">
+              If quantity looks off, correct it here (e.g. "1 puri" instead of "2"). Macros are calculated from this description.
+            </p>
+          </div>
+          {err && <p className="text-[12px] text-red-400">{err}</p>}
+          <div className="flex gap-2">
+            {!editing && (
+              <button type="button" onClick={() => setStep("capture")} className="rounded-2xl px-4 py-3 text-[14px] text-text-secondary border border-white/10">
+                Back
+              </button>
+            )}
+            <SubmitBtn busy={busy} label={editing ? "Save changes" : "Confirm & log"} disabled={!desc.trim() && !photoUrl} />
+          </div>
+        </form>
+      )}
     </Sheet>
   );
+}
+
+/** Fast Claude Sonnet vision pass to seed the description; user edits before logging. */
+async function runVisionDraft(file: File): Promise<string> {
+  const reader = new FileReader();
+  const dataUrl: string = await new Promise((resolve, reject) => {
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  try {
+    const r = await analyzePhoto({
+      data: {
+        base64Image: dataUrl,
+        mediaType: file.type || "image/jpeg",
+        prompt:
+          "Identify the food in this image in one short phrase suitable as a meal-log description. Include visible quantity (e.g. '2 puri') when obvious. Reply with just the description text, no preamble.",
+      },
+    });
+    return (r.content || "").trim();
+  } catch {
+    return "";
+  }
 }
 
 export function WorkoutLogModal({ open, onClose, onSaved }: Props) {
@@ -333,8 +442,8 @@ export function WorkoutLogModal({ open, onClose, onSaved }: Props) {
           <input
             inputMode="decimal" value={strain} onChange={(e) => setStrain(e.target.value)}
             placeholder="e.g. 14.5"
-            className="mt-3 w-full rounded-2xl p-4 text-[14px] text-white placeholder:text-text-tertiary focus:outline-none"
-            style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)" }}
+            className="mt-3 w-full rounded-2xl p-4 text-white placeholder:text-text-tertiary focus:outline-none"
+            style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)", fontSize: 16 }}
           />
         </div>
         <div>
@@ -342,8 +451,8 @@ export function WorkoutLogModal({ open, onClose, onSaved }: Props) {
           <textarea
             value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
             placeholder="How did the session feel?"
-            className="mt-3 w-full rounded-2xl p-4 text-[14px] text-white placeholder:text-text-tertiary resize-none focus:outline-none"
-            style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)" }}
+            className="mt-3 w-full rounded-2xl p-4 text-white placeholder:text-text-tertiary resize-none focus:outline-none"
+            style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)", fontSize: 16 }}
           />
         </div>
         {err && <p className="text-[12px] text-red-400">{err}</p>}
