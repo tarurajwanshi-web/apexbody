@@ -11,6 +11,10 @@ import {
   updateMeal,
   upsertTraining,
   logHydration,
+  getTodayDeviceUploadStatus,
+  supplementDeviceRhr,
+  reassignDeviceUploadDate,
+  type DeviceUploadStatus,
 } from "@/lib/shield.functions";
 import { analyzePhoto } from "@/lib/coach.functions";
 
