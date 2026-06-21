@@ -2,10 +2,11 @@
 // metrics using Anthropic Claude vision. On success, sets parse_status='parsed'
 // on shield_device_uploads, which triggers calculate-score via DB webhook.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { authorizeCaller, corsAllowHeaders } from "../_shared/authorize.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": corsAllowHeaders,
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
