@@ -306,16 +306,22 @@ Deno.serve(async (req) => {
     const previous_score: number | null = prev?.final_score != null ? Number(prev.final_score) : null;
 
     // Profile drives path-aware Nutrition pillar composition + hydration target.
+    // We also read DEXA fields so weight resolution mirrors getTodayHydration
+    // exactly — without this, DEXA-path users silently get hydrationPct=null
+    // and their hydration never contributes to the Nutrition pillar score.
     const { data: profile } = await supabase
       .from("profiles")
-      .select("input_path_preference, measurement_weight_kg")
+      .select("input_path_preference, measurement_weight_kg, dexa_lean_mass_kg, dexa_body_fat_pct")
       .eq("user_id", user_id)
       .maybeSingle();
     const pathPref: "device" | "manual" = profile?.input_path_preference === "device" ? "device" : "manual";
-    const weightKg: number | null = profile?.measurement_weight_kg != null ? Number(profile.measurement_weight_kg) : null;
+    const weightKg: number | null = resolveEffectiveWeight(profile);
 
-    // Fetch the last 3 days of inputs in parallel
-    const [manualRes, deviceRes, mealsRes, trainingRes] = await Promise.all([
+    // Fetch the last 3 days of inputs + a 14-day HRV/RHR baseline window for
+    // device-path users (uses any parsed device upload, today included as a
+    // reasonable prior for single-day users).
+    const baselineFrom = dateOffset(today, 14);
+    const [manualRes, deviceRes, mealsRes, trainingRes, baselineRes] = await Promise.all([
       supabase.from("shield_manual_inputs").select("entry_date, recovery_self_rating, sleep_hours, mood_emoji, hydration_ml")
         .eq("user_id", user_id).in("entry_date", dateList),
       supabase.from("shield_device_uploads").select("entry_date, parsed_hrv, parsed_rhr, parsed_sleep_hours, parse_status")
@@ -324,7 +330,17 @@ Deno.serve(async (req) => {
         .eq("user_id", user_id).in("entry_date", dateList).eq("deleted", false),
       supabase.from("shield_training_logs").select("entry_date, strain_value")
         .eq("user_id", user_id).in("entry_date", dateList),
+      supabase.from("shield_device_uploads").select("parsed_hrv, parsed_rhr")
+        .eq("user_id", user_id).eq("parse_status", "parsed")
+        .gte("entry_date", baselineFrom).lte("entry_date", today),
     ]);
+
+    const baselineRows = (baselineRes.data ?? []) as Array<{ parsed_hrv: number | null; parsed_rhr: number | null }>;
+    const mean = (vals: number[]) => vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    const recoveryBaseline: RecoveryBaseline = {
+      hrv: mean(baselineRows.map((r) => r.parsed_hrv).filter((v): v is number => v != null && v > 0)),
+      rhr: mean(baselineRows.map((r) => r.parsed_rhr).filter((v): v is number => v != null && v > 0)),
+    };
 
     const byDate: Record<string, DayInputs> = {};
     for (const d of dateList) byDate[d] = { meals: [] };
@@ -334,7 +350,7 @@ Deno.serve(async (req) => {
     for (const r of trainingRes.data ?? []) byDate[r.entry_date].training = r as any;
 
     const perDay = dateList.map((d) => {
-      const s = scoreDay(byDate[d]);
+      const s = scoreDay(byDate[d], recoveryBaseline);
       // Compose Nutrition pillar per user path; mutates s.scores / s.present.
       const comp = composeNutrition(s.mealQuality, s.hydrationMl, weightKg, s.hadTraining, pathPref);
       if (comp.score != null) {
