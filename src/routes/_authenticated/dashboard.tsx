@@ -568,8 +568,8 @@ function Dashboard() {
             <BookOpen size={18} className="text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[14px] font-semibold text-white">Resources</p>
-            <p className="text-[12px] text-text-secondary mt-0.5">Guides & ebooks from APEX</p>
+            <p className="text-[14px] font-semibold text-white">Guides & resources</p>
+            <p className="text-[12px] text-text-secondary mt-0.5">Coming soon — recipe books, training guides & references</p>
           </div>
           <span className="text-text-tertiary">›</span>
         </button>
