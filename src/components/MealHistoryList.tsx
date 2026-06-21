@@ -128,7 +128,16 @@ export function MealHistoryList({ onMutationStart, onMutationDone }: Props) {
                           <Sparkles size={10} /> {m.claude_quality_score}/100
                         </span>
                       ) : m.claude_score_status === "failed" ? (
-                        <span className="text-red-400">scoring failed</span>
+                        <button
+                          onClick={() => retryScore(m.id)}
+                          disabled={retryingId === m.id}
+                          className="inline-flex items-center gap-1 text-red-400 active:scale-95 transition disabled:opacity-50"
+                          aria-label="Retry scoring"
+                        >
+                          {retryingId === m.id
+                            ? <><Loader2 size={10} className="animate-spin" /> retrying…</>
+                            : <><RotateCw size={10} /> scoring failed — tap to retry</>}
+                        </button>
                       ) : (
                         <span className="inline-flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> scoring…</span>
                       )}
