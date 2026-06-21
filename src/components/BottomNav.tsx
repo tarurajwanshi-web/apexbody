@@ -69,10 +69,10 @@ export function BottomNav({ onCenter, onLogged }: Props = {}) {
   return (
     <>
       <nav
-        className="fixed left-1/2 -translate-x-1/2 z-50"
+        className="fixed left-0 right-0 z-50 px-4"
         style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)" }}
       >
-        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-bg-2/85 backdrop-blur-xl px-2 py-2 card-shadow">
+        <div className="flex items-center justify-between gap-1 rounded-full border border-white/10 bg-bg-2/85 backdrop-blur-xl px-3 py-2 card-shadow">
           {renderTab(TABS[0])}
           {renderTab(TABS[1])}
           {renderTab(TABS[2])}
@@ -80,7 +80,7 @@ export function BottomNav({ onCenter, onLogged }: Props = {}) {
             type="button"
             onClick={handleCenter}
             aria-label="Quick log"
-            className="ml-1 flex h-12 w-12 items-center justify-center rounded-full gradient-brand ai-glow text-white active:scale-95 transition"
+            className="flex h-12 w-12 items-center justify-center rounded-full gradient-brand ai-glow text-white active:scale-95 transition"
           >
             <Plus size={24} />
           </button>
