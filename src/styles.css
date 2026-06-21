@@ -208,3 +208,17 @@
   .ambient-ring, .ambient-ring-rotate, .ambient-ring-arc,
   .score-halo-breathe, .score-ring-breathe { animation: none; }
 }
+
+.legal-prose { color: hsl(var(--text-secondary)); font-size: 14px; line-height: 1.65; }
+.legal-prose h1 { font-size: 20px; font-weight: 700; color: hsl(var(--text-primary)); margin-top: 2rem; margin-bottom: 0.75rem; }
+.legal-prose h2 { font-size: 17px; font-weight: 600; color: hsl(var(--text-primary)); margin-top: 1.75rem; margin-bottom: 0.5rem; }
+.legal-prose h3 { font-size: 15px; font-weight: 600; color: hsl(var(--text-primary)); margin-top: 1.25rem; margin-bottom: 0.5rem; }
+.legal-prose p { margin: 0.75rem 0; }
+.legal-prose ul, .legal-prose ol { margin: 0.75rem 0; padding-left: 1.25rem; }
+.legal-prose ul { list-style: disc; }
+.legal-prose ol { list-style: decimal; }
+.legal-prose li { margin: 0.35rem 0; }
+.legal-prose strong { color: hsl(var(--text-primary)); font-weight: 600; }
+.legal-prose em { font-style: italic; }
+.legal-prose a { color: hsl(var(--accent, 220 90% 60%)); text-decoration: underline; }
+.legal-prose hr { border-color: hsl(var(--border, 0 0% 20%)); margin: 1.5rem 0; }
