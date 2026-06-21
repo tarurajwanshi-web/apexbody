@@ -225,8 +225,9 @@ function LockedHero({
 }: { name: string; daysUntilUnlock: number | null; activity: ActivityWeek | null }) {
   const last7 = activity?.last7 ?? Array.from({ length: 7 }, () => false);
   const streak = activity?.streak ?? 0;
-
-  // Build labels: oldest..today. Index 6 = today.
+  const totalDays = 7;
+  const dayOfJourney = daysUntilUnlock != null ? Math.max(1, totalDays - daysUntilUnlock) : 1;
+  const progressPct = Math.min(100, Math.round((dayOfJourney / totalDays) * 100));
   const today = new Date();
 
   return (
@@ -234,9 +235,7 @@ function LockedHero({
       <div className="mx-5 mt-4 flex items-center gap-2 rounded-full border border-white/10 bg-bg-2 px-3 py-1.5 w-fit">
         <Lock size={12} className="text-text-tertiary" />
         <span className="text-[11px] font-semibold text-text-secondary">
-          {daysUntilUnlock != null
-            ? `Personalized coaching unlocks in ${daysUntilUnlock} day${daysUntilUnlock === 1 ? "" : "s"}`
-            : "Personalized coaching unlocks soon"}
+          Day {dayOfJourney} of {totalDays} — personalized coaching unlocking
         </span>
       </div>
 
@@ -252,13 +251,30 @@ function LockedHero({
             <Sparkles size={18} className="text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[11px] uppercase tracking-wider text-text-accent font-semibold">
-              APEX Coach
-            </p>
+            <p className="text-[11px] uppercase tracking-wider text-text-accent font-semibold">APEX Coach</p>
             <p className="mt-1 text-sm leading-relaxed text-text-primary">
-              Hey {name}, I'm collecting baseline data so my coaching is genuinely personalized — not generic. Keep logging recovery, meals, and workouts each day.
+              Hey {name}, I'm learning your patterns from your first {totalDays} days of logs so coaching is genuinely personalized — not generic advice. Until then I can answer general fitness, nutrition, and sleep questions below.
             </p>
           </div>
+        </div>
+
+        {/* Unlock progress */}
+        <div className="mt-5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Unlock progress</p>
+            <span className="text-[11px] text-text-secondary tabular-nums">{progressPct}%</span>
+          </div>
+          <div className="h-1.5 w-full rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+            <div className="h-full gradient-brand transition-all" style={{ width: `${progressPct}%` }} />
+          </div>
+        </div>
+
+        {/* What unlocks preview */}
+        <div className="mt-5 rounded-xl p-3 space-y-1.5" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <p className="text-[10px] uppercase tracking-wider text-text-tertiary">What unlocks on day {totalDays}</p>
+          <p className="text-[12px] text-text-secondary">• "Should I push or recover today?" — based on your real HRV & sleep</p>
+          <p className="text-[12px] text-text-secondary">• Workout modifications tailored to your readiness</p>
+          <p className="text-[12px] text-text-secondary">• Weekly assessments using your actual logged data</p>
         </div>
 
         {/* Streak strip — last 7 days */}
@@ -274,7 +290,7 @@ function LockedHero({
             {last7.map((logged, i) => {
               const d = new Date(today);
               d.setDate(d.getDate() - (6 - i));
-              const dow = (d.getDay() + 6) % 7; // 0=Mon..6=Sun
+              const dow = (d.getDay() + 6) % 7;
               const letter = DAY_LETTERS[dow];
               const isTodayCell = i === 6;
               return (
@@ -283,16 +299,8 @@ function LockedHero({
                     className="h-9 w-9 rounded-xl flex items-center justify-center text-[11px] font-bold transition"
                     style={
                       logged
-                        ? {
-                            background: "linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%)",
-                            color: "white",
-                            boxShadow: "0 0 10px rgba(124,58,237,0.4)",
-                          }
-                        : {
-                            background: "rgba(255,255,255,0.04)",
-                            border: "1px solid rgba(255,255,255,0.08)",
-                            color: "#6B7280",
-                          }
+                        ? { background: "linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%)", color: "white", boxShadow: "0 0 10px rgba(124,58,237,0.4)" }
+                        : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#6B7280" }
                     }
                   >
                     {letter}

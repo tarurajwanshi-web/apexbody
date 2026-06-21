@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ChevronLeft, Check, Trophy, Flame, Dumbbell, Zap, Activity, Sparkles } from "lucide-react";
+import { ChevronLeft, Check, Trophy, Flame, Dumbbell, Zap, Activity, Sparkles, Watch, Pencil, Upload, FileText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -14,6 +14,8 @@ type Equipment = "home_gym_db_only" | "commercial_gym" | "limited_equipment" | "
 type BodyDataType = "dexa" | "measurements" | null;
 type LengthUnit = "cm" | "in";
 type WeightUnit = "kg" | "lb";
+type Sex = "male" | "female";
+type InputPath = "device" | "manual";
 
 const GOALS: { id: Goal; label: string; desc: string; Icon: typeof Trophy }[] = [
   { id: "recomposition", label: "Recomposition", desc: "Build muscle, lose fat", Icon: Activity },
@@ -30,20 +32,20 @@ const EQUIPMENT: { id: Equipment; label: string; desc: string }[] = [
   { id: "bodyweight_only", label: "Bodyweight only", desc: "No equipment" },
 ];
 
-const TOTAL = 6;
-
-type Sex = "male" | "female";
+const TOTAL = 8; // 1 About-you  2 Recovery-method  3 Goal  4 Days  5 Equipment  6 Body-data  7 Review
 
 type Draft = {
+  name: string;
   age: string;
   sex: Sex | null;
+  inputPath: InputPath | null;
   goal: Goal | null;
   days: number;
   equipment: Equipment | null;
   bodyDataType: BodyDataType;
   dexaBf: string;
   dexaLean: string;
-  // Stored in cm/kg always:
+  dexaFileName: string | null;
   waist: string;
   hip: string;
   weight: string;
@@ -51,9 +53,10 @@ type Draft = {
 };
 
 const EMPTY: Draft = {
-  age: "", sex: null,
+  name: "", age: "", sex: null, inputPath: null,
   goal: null, days: 3, equipment: null, bodyDataType: null,
-  dexaBf: "", dexaLean: "", waist: "", hip: "", weight: "", height: "",
+  dexaBf: "", dexaLean: "", dexaFileName: null,
+  waist: "", hip: "", weight: "", height: "",
 };
 
 function ProfileSetup() {
@@ -74,18 +77,19 @@ function ProfileSetup() {
     switch (step) {
       case 1: {
         const a = Number(draft.age);
-        return !!draft.sex && Number.isFinite(a) && a >= 10 && a <= 100;
+        return draft.name.trim().length >= 1 && !!draft.sex && Number.isFinite(a) && a >= 10 && a <= 100;
       }
-      case 2: return !!draft.goal;
-      case 3: return draft.days >= 1 && draft.days <= 6;
-      case 4: return !!draft.equipment;
-      case 5: return bodyPathValid;
-      case 6: return true;
+      case 2: return !!draft.inputPath;
+      case 3: return !!draft.goal;
+      case 4: return draft.days >= 1 && draft.days <= 6;
+      case 5: return !!draft.equipment;
+      case 6: return bodyPathValid;
+      case 7: return true;
       default: return false;
     }
   })();
 
-  const next = () => setStep((s) => Math.min(s + 1, TOTAL));
+  const next = () => setStep((s) => Math.min(s + 1, TOTAL - 1));
   const back = () => setStep((s) => Math.max(s - 1, 1));
 
   const submit = async () => {
@@ -101,8 +105,10 @@ function ProfileSetup() {
 
       const payload = {
         user_id: userId,
+        name: draft.name.trim(),
         age: Number(draft.age),
         biological_sex: draft.sex,
+        input_path_preference: draft.inputPath,
         goal: draft.goal,
         training_days_per_week: draft.days,
         equipment_access: draft.equipment,
@@ -117,12 +123,18 @@ function ProfileSetup() {
         plan_unlock_date: unlockDate,
       };
 
-      const { error } = await supabase
-        .from("profiles")
-        .upsert(payload, { onConflict: "user_id" });
+      const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "user_id" });
       if (error) throw error;
 
-      // Fire deterministic macro calc + Claude plan generation in parallel.
+      // Mirror name to local store so the dashboard greets immediately.
+      try {
+        const raw = localStorage.getItem("apex_user_profile");
+        const obj = raw ? JSON.parse(raw) : {};
+        obj.name = draft.name.trim();
+        obj.goal = draft.goal;
+        localStorage.setItem("apex_user_profile", JSON.stringify(obj));
+      } catch {}
+
       const [macroRes, planRes] = await Promise.allSettled([
         supabase.functions.invoke("calculate-macros", { body: { user_id: userId } }),
         supabase.functions.invoke("generate-plan", { body: { user_id: userId } }),
@@ -139,40 +151,41 @@ function ProfileSetup() {
 
   if (submitting) return <BuildingPlanScreen />;
 
-
   return (
-    <div className="min-h-screen bg-bg-1 pb-32">
+    <div className="min-h-screen bg-bg-1 pb-32" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
       <header className="flex items-center justify-between px-5 pt-6">
         <button onClick={step === 1 ? () => navigate({ to: "/" }) : back} className="text-text-secondary">
           <ChevronLeft size={24} />
         </button>
         <span className="text-[11px] uppercase tracking-wider text-text-tertiary">
-          Step {step} of {TOTAL}
+          Step {step} of {TOTAL - 1}
         </span>
         <span className="w-6" />
       </header>
 
       <div className="mx-5 mt-4 h-1 rounded-full bg-white/5 overflow-hidden">
-        <div className="h-full gradient-brand transition-all" style={{ width: `${(step / TOTAL) * 100}%` }} />
+        <div className="h-full gradient-brand transition-all" style={{ width: `${(step / (TOTAL - 1)) * 100}%` }} />
       </div>
 
       <main className="px-5 mt-8 max-w-[480px] mx-auto">
-        {step === 1 && <AboutYouStep age={draft.age} sex={draft.sex} onAge={(age) => patch({ age })} onSex={(sex) => patch({ sex })} />}
-        {step === 2 && <GoalStep value={draft.goal} onChange={(goal) => patch({ goal })} />}
-        {step === 3 && <DaysStep value={draft.days} onChange={(days) => patch({ days })} />}
-        {step === 4 && <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />}
-        {step === 5 && <BodyStep draft={draft} patch={patch} onSkip={() => { patch({ bodyDataType: null, dexaBf: "", dexaLean: "", waist: "", hip: "", weight: "", height: "" }); next(); }} />}
-        {step === 6 && <ReviewStep draft={draft} />}
+        {step === 1 && <AboutYouStep name={draft.name} age={draft.age} sex={draft.sex} onName={(n) => patch({ name: n })} onAge={(age) => patch({ age })} onSex={(sex) => patch({ sex })} />}
+        {step === 2 && <RecoveryMethodStep value={draft.inputPath} onChange={(v) => patch({ inputPath: v })} />}
+        {step === 3 && <GoalStep value={draft.goal} onChange={(goal) => patch({ goal })} />}
+        {step === 4 && <DaysStep value={draft.days} onChange={(days) => patch({ days })} />}
+        {step === 5 && <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />}
+        {step === 6 && <BodyStep draft={draft} patch={patch} onSkip={() => { patch({ bodyDataType: null, dexaBf: "", dexaLean: "", dexaFileName: null, waist: "", hip: "", weight: "", height: "" }); next(); }} />}
+        {step === 7 && <ReviewStep draft={draft} />}
       </main>
 
       <footer
-        className="fixed inset-x-0 bottom-0 z-20 pt-10 pb-5"
+        className="fixed inset-x-0 bottom-0 z-20 pt-10"
         style={{
           background: "linear-gradient(to top, var(--bg-1) 0%, var(--bg-1) 60%, transparent 100%)",
+          paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 20px)",
         }}
       >
         <div className="mx-auto max-w-[480px] px-5">
-          {step < TOTAL ? (
+          {step < TOTAL - 1 ? (
             <button
               disabled={!canContinue}
               onClick={next}
@@ -206,7 +219,6 @@ function StepHeader({ title, sub }: { title: string; sub?: string }) {
   );
 }
 
-/* ---------- Selected-state helpers (gradient tint) ---------- */
 const SELECTED_STYLE: React.CSSProperties = {
   background: "linear-gradient(135deg, rgba(124,58,237,0.28), rgba(59,130,246,0.22))",
   borderColor: "rgba(167,139,250,0.7)",
@@ -214,43 +226,96 @@ const SELECTED_STYLE: React.CSSProperties = {
 };
 
 function AboutYouStep({
-  age, sex, onAge, onSex,
-}: { age: string; sex: Sex | null; onAge: (v: string) => void; onSex: (v: Sex) => void }) {
+  name, age, sex, onName, onAge, onSex,
+}: { name: string; age: string; sex: Sex | null; onName: (v: string) => void; onAge: (v: string) => void; onSex: (v: Sex) => void }) {
   return (
     <>
       <StepHeader title="About you" sub="Quick basics so we can calculate your targets." />
-      <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3">
-        <span className="text-sm text-text-secondary">Age</span>
-        <span className="flex items-center gap-1">
+
+      <div className="space-y-3">
+        <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3">
+          <span className="text-sm text-text-secondary">Name</span>
           <input
-            type="number" inputMode="numeric" min={10} max={100}
-            value={age} onChange={(e) => onAge(e.target.value)}
-            placeholder="—"
-            className="w-20 bg-transparent text-right text-sm font-semibold focus:outline-none"
+            type="text"
+            value={name}
+            onChange={(e) => onName(e.target.value)}
+            placeholder="What should we call you?"
+            className="w-44 bg-transparent text-right text-sm font-semibold focus:outline-none placeholder:text-text-tertiary"
+            autoComplete="given-name"
+            style={{ fontSize: 16 }}
           />
-          <span className="text-xs text-text-tertiary">yrs</span>
-        </span>
-      </label>
-      <p className="mt-5 mb-2 text-[11px] uppercase tracking-wider text-text-tertiary">Biological sex</p>
-      <div className="grid grid-cols-2 gap-2">
-        {(["male", "female"] as Sex[]).map((s) => {
-          const active = sex === s;
-          return (
-            <button
-              key={s} type="button" onClick={() => onSex(s)}
-              className={`rounded-2xl py-3 text-sm font-semibold border transition ${active ? "" : "border-white/5 bg-bg-2 text-text-secondary"}`}
-              style={active ? SELECTED_STYLE : undefined}
-            >
-              {s === "male" ? "Male" : "Female"}
-            </button>
-          );
-        })}
+        </label>
+
+        <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3">
+          <span className="text-sm text-text-secondary">Age</span>
+          <span className="flex items-center gap-1">
+            <input
+              type="number" inputMode="numeric" min={10} max={100} step={1}
+              value={age}
+              onChange={(e) => onAge(e.target.value.replace(/[^\d]/g, ""))}
+              placeholder="—"
+              className="w-20 bg-transparent text-right text-sm font-semibold focus:outline-none"
+              style={{ fontSize: 16 }}
+            />
+            <span className="text-xs text-text-tertiary">yrs</span>
+          </span>
+        </label>
+
+        <div>
+          <p className="mb-2 text-[11px] uppercase tracking-wider text-text-tertiary">Biological sex</p>
+          <div className="grid grid-cols-2 gap-2">
+            {(["male", "female"] as Sex[]).map((s) => {
+              const active = sex === s;
+              return (
+                <button
+                  key={s} type="button" onClick={() => onSex(s)}
+                  className={`rounded-2xl py-3 text-sm font-semibold border transition ${active ? "" : "border-white/5 bg-bg-2 text-text-secondary"}`}
+                  style={active ? SELECTED_STYLE : undefined}
+                >
+                  {s === "male" ? "Male" : "Female"}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-[11px] text-text-tertiary">Used to estimate metabolic rate (Mifflin-St Jeor).</p>
+        </div>
       </div>
-      <p className="mt-4 text-[11px] text-text-tertiary">Used to estimate metabolic rate (Mifflin-St Jeor).</p>
     </>
   );
 }
 
+function RecoveryMethodStep({ value, onChange }: { value: InputPath | null; onChange: (v: InputPath) => void }) {
+  const opts: { id: InputPath; label: string; desc: string; Icon: typeof Watch }[] = [
+    { id: "device", label: "I have a wearable", desc: "WHOOP, Oura, Garmin, Apple Watch — we'll read your recovery and sleep data directly.", Icon: Watch },
+    { id: "manual", label: "I'll log manually", desc: "Quick daily check-in — takes 10 seconds.", Icon: Pencil },
+  ];
+  return (
+    <>
+      <StepHeader title="How will you track recovery?" sub="This shapes how your APEX score is calculated. You can change this later in Settings." />
+      <div className="space-y-2">
+        {opts.map(({ id, label, desc, Icon }) => {
+          const active = value === id;
+          return (
+            <button
+              key={id} type="button" onClick={() => onChange(id)}
+              className={`w-full flex items-start gap-3 rounded-2xl p-4 text-left border transition ${active ? "" : "border-white/5 bg-bg-2"}`}
+              style={active ? SELECTED_STYLE : undefined}
+            >
+              <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${active ? "gradient-brand text-white" : "bg-bg-1 text-text-secondary"}`}>
+                <Icon size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-sm">{label}</p>
+                <p className="text-xs text-text-tertiary mt-0.5 leading-snug">{desc}</p>
+              </div>
+              {active && <Check size={18} className="text-white shrink-0 mt-1" />}
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
 
 function GoalStep({ value, onChange }: { value: Goal | null; onChange: (g: Goal) => void }) {
   return (
@@ -260,15 +325,9 @@ function GoalStep({ value, onChange }: { value: Goal | null; onChange: (g: Goal)
         {GOALS.map(({ id, label, desc, Icon }) => {
           const active = value === id;
           return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => onChange(id)}
-              className={`w-full flex items-center gap-3 rounded-2xl p-4 text-left border transition ${
-                active ? "" : "border-white/5 bg-bg-2"
-              }`}
-              style={active ? SELECTED_STYLE : undefined}
-            >
+            <button key={id} type="button" onClick={() => onChange(id)}
+              className={`w-full flex items-center gap-3 rounded-2xl p-4 text-left border transition ${active ? "" : "border-white/5 bg-bg-2"}`}
+              style={active ? SELECTED_STYLE : undefined}>
               <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${active ? "gradient-brand text-white" : "bg-bg-1 text-text-secondary"}`}>
                 <Icon size={18} />
               </div>
@@ -285,7 +344,6 @@ function GoalStep({ value, onChange }: { value: Goal | null; onChange: (g: Goal)
   );
 }
 
-/* ---------- Training-days slider ---------- */
 function DaysStep({ value, onChange }: { value: number; onChange: (n: number) => void }) {
   const pct = ((value - 1) / 5) * 100;
   return (
@@ -295,54 +353,26 @@ function DaysStep({ value, onChange }: { value: number; onChange: (n: number) =>
         <span className="text-6xl font-bold tabular-nums text-white">{value}</span>
         <span className="ml-2 text-base text-text-tertiary">{value === 1 ? "day" : "days"} / week</span>
       </div>
-
       <div className="px-2">
         <div className="relative h-10 flex items-center">
-          {/* Track */}
           <div className="absolute inset-x-0 h-2 rounded-full bg-white/10" />
-          {/* Filled portion */}
-          <div
-            className="absolute h-2 rounded-full gradient-brand pointer-events-none"
-            style={{ width: `${pct}%` }}
-          />
-          {/* Thumb */}
-          <div
-            className="absolute h-6 w-6 rounded-full bg-white shadow-lg pointer-events-none -translate-x-1/2"
-            style={{ left: `${pct}%`, boxShadow: "0 0 0 4px rgba(124,58,237,0.25)" }}
-          />
-          {/* Range input (transparent, on top) */}
-          <input
-            type="range"
-            min={1}
-            max={6}
-            step={1}
-            value={value}
+          <div className="absolute h-2 rounded-full gradient-brand pointer-events-none" style={{ width: `${pct}%` }} />
+          <div className="absolute h-6 w-6 rounded-full bg-white shadow-lg pointer-events-none -translate-x-1/2"
+            style={{ left: `${pct}%`, boxShadow: "0 0 0 4px rgba(124,58,237,0.25)" }} />
+          <input type="range" min={1} max={6} step={1} value={value}
             onChange={(e) => onChange(Number(e.target.value))}
-            className="relative w-full h-10 opacity-0 cursor-pointer z-10"
-            aria-label="Training days per week"
-          />
+            className="relative w-full h-10 opacity-0 cursor-pointer z-10" aria-label="Training days per week" />
         </div>
-
-        {/* Tick labels */}
         <div className="mt-3 flex justify-between px-0.5">
           {[1, 2, 3, 4, 5, 6].map((n) => (
-            <button
-              key={n}
-              type="button"
-              onClick={() => onChange(n)}
-              className={`text-xs tabular-nums w-6 h-6 rounded-full transition ${
-                n === value ? "text-white font-semibold" : "text-text-tertiary hover:text-text-secondary"
-              }`}
-            >
+            <button key={n} type="button" onClick={() => onChange(n)}
+              className={`text-xs tabular-nums w-6 h-6 rounded-full transition ${n === value ? "text-white font-semibold" : "text-text-tertiary"}`}>
               {n}
             </button>
           ))}
         </div>
       </div>
-
-      <p className="mt-10 text-center text-xs text-text-tertiary">
-        Drag the slider or tap a number.
-      </p>
+      <p className="mt-10 text-center text-xs text-text-tertiary">Drag the slider or tap a number.</p>
     </>
   );
 }
@@ -355,24 +385,14 @@ function EquipmentStep({ value, onChange }: { value: Equipment | null; onChange:
         {EQUIPMENT.map(({ id, label, desc }) => {
           const active = value === id;
           return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => onChange(id)}
-              className={`w-full flex items-center justify-between rounded-2xl p-4 text-left border transition ${
-                active ? "" : "border-white/5 bg-bg-2"
-              }`}
-              style={active ? SELECTED_STYLE : undefined}
-            >
+            <button key={id} type="button" onClick={() => onChange(id)}
+              className={`w-full flex items-center justify-between rounded-2xl p-4 text-left border transition ${active ? "" : "border-white/5 bg-bg-2"}`}
+              style={active ? SELECTED_STYLE : undefined}>
               <div>
                 <p className="font-semibold text-sm text-white">{label}</p>
                 <p className="text-xs text-text-tertiary">{desc}</p>
               </div>
-              {active && (
-                <div className="h-7 w-7 rounded-full gradient-brand flex items-center justify-center">
-                  <Check size={16} className="text-white" />
-                </div>
-              )}
+              {active && <div className="h-7 w-7 rounded-full gradient-brand flex items-center justify-center"><Check size={16} className="text-white" /></div>}
             </button>
           );
         })}
@@ -380,8 +400,6 @@ function EquipmentStep({ value, onChange }: { value: Equipment | null; onChange:
     </>
   );
 }
-
-/* ---------- Body data: tabs + skip link + unit toggles ---------- */
 
 function cmToIn(cm: number) { return cm / 2.54; }
 function inToCm(inches: number) { return inches * 2.54; }
@@ -391,21 +409,34 @@ function lbToKg(lb: number) { return lb / 2.20462; }
 function BodyStep({ draft, patch, onSkip }: { draft: Draft; patch: (p: Partial<Draft>) => void; onSkip: () => void }) {
   const [lenUnit, setLenUnit] = useState<LengthUnit>("cm");
   const [wUnit, setWUnit] = useState<WeightUnit>("kg");
+  const [uploading, setUploading] = useState(false);
 
   const tabBtn = (id: Exclude<BodyDataType, null>, label: string) => {
     const active = draft.bodyDataType === id;
     return (
-      <button
-        type="button"
-        onClick={() => patch({ bodyDataType: id })}
-        className={`flex-1 rounded-xl py-2.5 text-xs font-semibold border transition ${
-          active ? "text-white" : "border-white/5 bg-bg-2 text-text-secondary"
-        }`}
-        style={active ? SELECTED_STYLE : undefined}
-      >
-        {label}
-      </button>
+      <button type="button" onClick={() => patch({ bodyDataType: id })}
+        className={`flex-1 rounded-xl py-2.5 text-xs font-semibold border transition ${active ? "text-white" : "border-white/5 bg-bg-2 text-text-secondary"}`}
+        style={active ? SELECTED_STYLE : undefined}>{label}</button>
     );
+  };
+
+  const onDexaFile = async (file: File) => {
+    setUploading(true);
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const uid = u.user?.id;
+      if (!uid) throw new Error("Not signed in");
+      const ext = file.name.split(".").pop() || "pdf";
+      const path = `${uid}/dexa/${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from("shield-uploads").upload(path, file);
+      if (error) throw error;
+      patch({ dexaFileName: file.name, dexaBf: draft.dexaBf || "?", dexaLean: draft.dexaLean || "?" });
+      toast.success("DEXA uploaded — confirm extracted values below.");
+    } catch (e: any) {
+      toast.error(e?.message ?? "Upload failed");
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -417,19 +448,38 @@ function BodyStep({ draft, patch, onSkip }: { draft: Draft; patch: (p: Partial<D
         {tabBtn("measurements", "Measurements")}
       </div>
       <div className="text-right mb-5">
-        <button
-          type="button"
-          onClick={onSkip}
-          className="text-xs underline underline-offset-2 text-text-tertiary hover:text-text-secondary"
-        >
+        <button type="button" onClick={onSkip} className="text-xs underline underline-offset-2 text-text-tertiary">
           Skip for now →
         </button>
       </div>
 
       {draft.bodyDataType === "dexa" && (
         <div className="space-y-3">
-          <Field label="Body fat %" value={draft.dexaBf} onChange={(v) => patch({ dexaBf: v })} suffix="%" />
-          <Field label="Lean mass" value={draft.dexaLean} onChange={(v) => patch({ dexaLean: v })} suffix="kg" />
+          <label
+            className="block rounded-2xl p-5 cursor-pointer text-center"
+            style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.10), rgba(59,130,246,0.08))", border: "1px dashed rgba(124,58,237,0.4)" }}
+          >
+            <input type="file" accept="application/pdf,image/*" className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onDexaFile(f); }} />
+            {draft.dexaFileName ? (
+              <>
+                <FileText size={22} className="mx-auto text-text-accent" />
+                <p className="mt-2 text-[13px] font-semibold text-white">{draft.dexaFileName}</p>
+                <p className="text-[11px] text-text-tertiary mt-1">Tap to replace</p>
+              </>
+            ) : (
+              <>
+                <Upload size={22} className="mx-auto text-text-accent" />
+                <p className="mt-2 text-[13px] font-semibold text-white">{uploading ? "Uploading…" : "Upload your DEXA results"}</p>
+                <p className="text-[11px] text-text-tertiary mt-1">PDF or photo of the report</p>
+              </>
+            )}
+          </label>
+          <p className="text-[11px] text-text-tertiary">
+            We'll extract body-fat % and lean mass automatically and ask you to confirm. For now you can also enter the numbers manually below.
+          </p>
+          <Field label="Body fat %" value={draft.dexaBf === "?" ? "" : draft.dexaBf} onChange={(v) => patch({ dexaBf: v })} suffix="%" />
+          <Field label="Lean mass" value={draft.dexaLean === "?" ? "" : draft.dexaLean} onChange={(v) => patch({ dexaLean: v })} suffix="kg" />
         </div>
       )}
 
@@ -437,53 +487,16 @@ function BodyStep({ draft, patch, onSkip }: { draft: Draft; patch: (p: Partial<D
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Length</span>
-            <UnitToggle
-              options={[{ id: "cm", label: "cm" }, { id: "in", label: "in" }]}
-              value={lenUnit}
-              onChange={(v) => setLenUnit(v as LengthUnit)}
-            />
+            <UnitToggle options={[{ id: "cm", label: "cm" }, { id: "in", label: "in" }]} value={lenUnit} onChange={(v) => setLenUnit(v as LengthUnit)} />
           </div>
-          <UnitField
-            label="Waist"
-            cmValue={draft.waist}
-            onChangeCm={(v) => patch({ waist: v })}
-            unit={lenUnit}
-            convertToDisplay={cmToIn}
-            convertFromDisplay={inToCm}
-          />
-          <UnitField
-            label="Hip"
-            cmValue={draft.hip}
-            onChangeCm={(v) => patch({ hip: v })}
-            unit={lenUnit}
-            convertToDisplay={cmToIn}
-            convertFromDisplay={inToCm}
-          />
-          <UnitField
-            label="Height"
-            cmValue={draft.height}
-            onChangeCm={(v) => patch({ height: v })}
-            unit={lenUnit}
-            convertToDisplay={cmToIn}
-            convertFromDisplay={inToCm}
-          />
-
+          <UnitField label="Waist" cmValue={draft.waist} onChangeCm={(v) => patch({ waist: v })} unit={lenUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+          <UnitField label="Hip" cmValue={draft.hip} onChangeCm={(v) => patch({ hip: v })} unit={lenUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+          <UnitField label="Height" cmValue={draft.height} onChangeCm={(v) => patch({ height: v })} unit={lenUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
           <div className="flex items-center justify-between gap-2 pt-2">
             <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Weight</span>
-            <UnitToggle
-              options={[{ id: "kg", label: "kg" }, { id: "lb", label: "lb" }]}
-              value={wUnit}
-              onChange={(v) => setWUnit(v as WeightUnit)}
-            />
+            <UnitToggle options={[{ id: "kg", label: "kg" }, { id: "lb", label: "lb" }]} value={wUnit} onChange={(v) => setWUnit(v as WeightUnit)} />
           </div>
-          <UnitField
-            label="Weight"
-            cmValue={draft.weight}
-            onChangeCm={(v) => patch({ weight: v })}
-            unit={wUnit}
-            convertToDisplay={kgToLb}
-            convertFromDisplay={lbToKg}
-          />
+          <UnitField label="Weight" cmValue={draft.weight} onChangeCm={(v) => patch({ weight: v })} unit={wUnit} convertToDisplay={kgToLb} convertFromDisplay={lbToKg} />
         </div>
       )}
 
@@ -496,26 +509,14 @@ function BodyStep({ draft, patch, onSkip }: { draft: Draft; patch: (p: Partial<D
   );
 }
 
-function UnitToggle({
-  options, value, onChange,
-}: {
-  options: { id: string; label: string }[];
-  value: string;
-  onChange: (v: string) => void;
-}) {
+function UnitToggle({ options, value, onChange }: { options: { id: string; label: string }[]; value: string; onChange: (v: string) => void }) {
   return (
     <div className="inline-flex rounded-full bg-bg-2 border border-white/10 p-0.5">
       {options.map((o) => {
         const active = o.id === value;
         return (
-          <button
-            key={o.id}
-            type="button"
-            onClick={() => onChange(o.id)}
-            className={`px-3 py-1 text-xs rounded-full transition ${
-              active ? "gradient-brand text-white" : "text-text-tertiary"
-            }`}
-          >
+          <button key={o.id} type="button" onClick={() => onChange(o.id)}
+            className={`px-3 py-1 text-xs rounded-full transition ${active ? "gradient-brand text-white" : "text-text-tertiary"}`}>
             {o.label}
           </button>
         );
@@ -524,32 +525,35 @@ function UnitToggle({
   );
 }
 
-/* Stores cm or kg internally; displays converted value while typing in display unit. */
+/* Stores canonical (cm or kg). Typed input is parsed as a literal number — no implied decimals. */
 function UnitField({
   label, cmValue, onChangeCm, unit, convertToDisplay, convertFromDisplay,
 }: {
-  label: string;
-  cmValue: string; // stored canonical (cm or kg)
-  onChangeCm: (v: string) => void;
-  unit: string; // "cm" | "in" | "kg" | "lb"
-  convertToDisplay: (n: number) => number;
-  convertFromDisplay: (n: number) => number;
+  label: string; cmValue: string; onChangeCm: (v: string) => void;
+  unit: string; convertToDisplay: (n: number) => number; convertFromDisplay: (n: number) => number;
 }) {
   const isCanonical = unit === "cm" || unit === "kg";
-  const display = (() => {
-    if (!cmValue) return "";
-    if (isCanonical) return cmValue;
+  const [localDisplay, setLocalDisplay] = useState<string>("");
+
+  // Initialize / sync display whenever the canonical value or unit changes from outside.
+  useEffect(() => {
+    if (cmValue === "") { setLocalDisplay(""); return; }
+    if (isCanonical) { setLocalDisplay(cmValue); return; }
     const n = Number(cmValue);
-    if (Number.isNaN(n)) return "";
-    return convertToDisplay(n).toFixed(1);
-  })();
+    if (!Number.isFinite(n)) { setLocalDisplay(""); return; }
+    setLocalDisplay(String(Number(convertToDisplay(n).toFixed(1))));
+  }, [cmValue, unit, isCanonical, convertToDisplay]);
 
   const handle = (raw: string) => {
-    if (raw === "") return onChangeCm("");
-    if (isCanonical) return onChangeCm(raw);
+    // Allow empty, digits, optional single '.'
+    if (raw === "") { setLocalDisplay(""); onChangeCm(""); return; }
+    if (!/^\d*\.?\d*$/.test(raw)) return;
+    setLocalDisplay(raw);
+    if (raw === "." || raw === "") return;
     const n = Number(raw);
-    if (Number.isNaN(n)) return onChangeCm("");
-    onChangeCm(String(Number(convertFromDisplay(n).toFixed(2))));
+    if (!Number.isFinite(n)) return;
+    if (isCanonical) onChangeCm(String(n));
+    else onChangeCm(String(Number(convertFromDisplay(n).toFixed(2))));
   };
 
   return (
@@ -557,12 +561,13 @@ function UnitField({
       <span className="text-sm text-text-secondary">{label}</span>
       <span className="flex items-center gap-1">
         <input
-          type="number"
+          type="text"
           inputMode="decimal"
-          value={display}
+          value={localDisplay}
           onChange={(e) => handle(e.target.value)}
           className="w-24 bg-transparent text-right text-sm font-semibold focus:outline-none"
           placeholder="—"
+          style={{ fontSize: 16 }}
         />
         <span className="text-xs text-text-tertiary">{unit}</span>
       </span>
@@ -571,17 +576,23 @@ function UnitField({
 }
 
 function Field({ label, value, onChange, suffix }: { label: string; value: string; onChange: (v: string) => void; suffix?: string }) {
+  const handle = (raw: string) => {
+    if (raw === "") return onChange("");
+    if (!/^\d*\.?\d*$/.test(raw)) return;
+    onChange(raw);
+  };
   return (
     <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3">
       <span className="text-sm text-text-secondary">{label}</span>
       <span className="flex items-center gap-1">
         <input
-          type="number"
+          type="text"
           inputMode="decimal"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => handle(e.target.value)}
           className="w-20 bg-transparent text-right text-sm font-semibold focus:outline-none"
           placeholder="—"
+          style={{ fontSize: 16 }}
         />
         {suffix && <span className="text-xs text-text-tertiary">{suffix}</span>}
       </span>
@@ -592,27 +603,24 @@ function Field({ label, value, onChange, suffix }: { label: string; value: strin
 function ReviewStep({ draft }: { draft: Draft }) {
   const goalLabel = GOALS.find((g) => g.id === draft.goal)?.label ?? "—";
   const eqLabel = EQUIPMENT.find((e) => e.id === draft.equipment)?.label ?? "—";
+  const pathLabel = draft.inputPath === "device" ? "Wearable device" : draft.inputPath === "manual" ? "Manual log" : "—";
   return (
     <>
       <StepHeader title="Review" sub="Confirm and we'll build your plan." />
       <div className="rounded-2xl bg-bg-2 border border-white/5 divide-y divide-white/5">
+        <Row label="Name" value={draft.name || "—"} />
+        <Row label="Recovery method" value={pathLabel} />
         <Row label="Goal" value={goalLabel} />
         <Row label="Training days" value={`${draft.days} / week`} />
         <Row label="Equipment" value={eqLabel} />
-        <Row
-          label="Body data"
-          value={
-            draft.bodyDataType === "dexa"
-              ? `DEXA · ${draft.dexaBf}% · ${draft.dexaLean}kg`
-              : draft.bodyDataType === "measurements"
-              ? `Waist ${draft.waist}cm · Hip ${draft.hip}cm · ${draft.weight}kg · ${draft.height}cm`
-              : "Not provided"
-          }
-        />
+        <Row label="Body data"
+          value={draft.bodyDataType === "dexa"
+            ? `DEXA · ${draft.dexaBf}% · ${draft.dexaLean}kg`
+            : draft.bodyDataType === "measurements"
+            ? `${draft.weight}kg · ${draft.height}cm`
+            : "Not provided"} />
       </div>
-      <p className="mt-4 text-center text-[11px] text-text-tertiary">
-        Your plan unlocks for customization 7 days from now.
-      </p>
+      <p className="mt-4 text-center text-[11px] text-text-tertiary">Your plan unlocks for customization 7 days from now.</p>
     </>
   );
 }
@@ -641,21 +649,12 @@ function BuildingPlanScreen() {
   }, []);
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ backgroundColor: "#06080F" }}>
-      <div
-        className="flex items-center justify-center rounded-full"
-        style={{
-          width: 96, height: 96,
-          backgroundImage: "linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%)",
-          boxShadow: "0 0 60px rgba(124, 58, 237, 0.45)",
-          animation: "coach-breathe 2.4s ease-in-out infinite",
-        }}
-      >
+      <div className="flex items-center justify-center rounded-full"
+        style={{ width: 96, height: 96, backgroundImage: "linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%)", boxShadow: "0 0 60px rgba(124, 58, 237, 0.45)", animation: "coach-breathe 2.4s ease-in-out infinite" }}>
         <Sparkles size={28} color="#fff" strokeWidth={2.5} />
       </div>
       <h1 className="mt-8 text-2xl font-semibold text-white text-center">Generating your plan</h1>
-      <p key={idx} className="mt-3 text-[14px] text-text-secondary text-center animate-fade-up min-h-[20px]">
-        {MESSAGES[idx]}
-      </p>
+      <p key={idx} className="mt-3 text-[14px] text-text-secondary text-center animate-fade-up min-h-[20px]">{MESSAGES[idx]}</p>
       <div className="mt-8 flex gap-1.5">
         <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite" }} />
         <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "150ms" }} />

@@ -10,11 +10,14 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkoutsRouteImport } from './routes/workouts'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ResourcesRouteImport } from './routes/resources'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as NutritionRouteImport } from './routes/nutrition'
 import { Route as MeetCoachRouteImport } from './routes/meet-coach'
 import { Route as HomeRouteImport } from './routes/home'
+import { Route as HealthDataRouteImport } from './routes/health-data'
 import { Route as DisclaimerRouteImport } from './routes/disclaimer'
 import { Route as CoachRouteImport } from './routes/coach'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
@@ -27,6 +30,11 @@ const WorkoutsRoute = WorkoutsRouteImport.update({
   path: '/workouts',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -35,6 +43,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const ResourcesRoute = ResourcesRouteImport.update({
   id: '/resources',
   path: '/resources',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NutritionRoute = NutritionRouteImport.update({
@@ -50,6 +63,11 @@ const MeetCoachRoute = MeetCoachRouteImport.update({
 const HomeRoute = HomeRouteImport.update({
   id: '/home',
   path: '/home',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HealthDataRoute = HealthDataRouteImport.update({
+  id: '/health-data',
+  path: '/health-data',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DisclaimerRoute = DisclaimerRouteImport.update({
@@ -86,11 +104,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/coach': typeof CoachRoute
   '/disclaimer': typeof DisclaimerRoute
+  '/health-data': typeof HealthDataRoute
   '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
   '/nutrition': typeof NutritionRoute
+  '/privacy': typeof PrivacyRoute
   '/resources': typeof ResourcesRoute
   '/settings': typeof SettingsRoute
+  '/terms': typeof TermsRoute
   '/workouts': typeof WorkoutsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
@@ -99,11 +120,14 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/coach': typeof CoachRoute
   '/disclaimer': typeof DisclaimerRoute
+  '/health-data': typeof HealthDataRoute
   '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
   '/nutrition': typeof NutritionRoute
+  '/privacy': typeof PrivacyRoute
   '/resources': typeof ResourcesRoute
   '/settings': typeof SettingsRoute
+  '/terms': typeof TermsRoute
   '/workouts': typeof WorkoutsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
@@ -114,11 +138,14 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/coach': typeof CoachRoute
   '/disclaimer': typeof DisclaimerRoute
+  '/health-data': typeof HealthDataRoute
   '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
   '/nutrition': typeof NutritionRoute
+  '/privacy': typeof PrivacyRoute
   '/resources': typeof ResourcesRoute
   '/settings': typeof SettingsRoute
+  '/terms': typeof TermsRoute
   '/workouts': typeof WorkoutsRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/onboarding': typeof AuthenticatedOnboardingRoute
@@ -129,11 +156,14 @@ export interface FileRouteTypes {
     | '/'
     | '/coach'
     | '/disclaimer'
+    | '/health-data'
     | '/home'
     | '/meet-coach'
     | '/nutrition'
+    | '/privacy'
     | '/resources'
     | '/settings'
+    | '/terms'
     | '/workouts'
     | '/dashboard'
     | '/onboarding'
@@ -142,11 +172,14 @@ export interface FileRouteTypes {
     | '/'
     | '/coach'
     | '/disclaimer'
+    | '/health-data'
     | '/home'
     | '/meet-coach'
     | '/nutrition'
+    | '/privacy'
     | '/resources'
     | '/settings'
+    | '/terms'
     | '/workouts'
     | '/dashboard'
     | '/onboarding'
@@ -156,11 +189,14 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/coach'
     | '/disclaimer'
+    | '/health-data'
     | '/home'
     | '/meet-coach'
     | '/nutrition'
+    | '/privacy'
     | '/resources'
     | '/settings'
+    | '/terms'
     | '/workouts'
     | '/_authenticated/dashboard'
     | '/_authenticated/onboarding'
@@ -171,11 +207,14 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   CoachRoute: typeof CoachRoute
   DisclaimerRoute: typeof DisclaimerRoute
+  HealthDataRoute: typeof HealthDataRoute
   HomeRoute: typeof HomeRoute
   MeetCoachRoute: typeof MeetCoachRoute
   NutritionRoute: typeof NutritionRoute
+  PrivacyRoute: typeof PrivacyRoute
   ResourcesRoute: typeof ResourcesRoute
   SettingsRoute: typeof SettingsRoute
+  TermsRoute: typeof TermsRoute
   WorkoutsRoute: typeof WorkoutsRoute
 }
 
@@ -186,6 +225,13 @@ declare module '@tanstack/react-router' {
       path: '/workouts'
       fullPath: '/workouts'
       preLoaderRoute: typeof WorkoutsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -200,6 +246,13 @@ declare module '@tanstack/react-router' {
       path: '/resources'
       fullPath: '/resources'
       preLoaderRoute: typeof ResourcesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/nutrition': {
@@ -221,6 +274,13 @@ declare module '@tanstack/react-router' {
       path: '/home'
       fullPath: '/home'
       preLoaderRoute: typeof HomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/health-data': {
+      id: '/health-data'
+      path: '/health-data'
+      fullPath: '/health-data'
+      preLoaderRoute: typeof HealthDataRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/disclaimer': {
@@ -286,11 +346,14 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   CoachRoute: CoachRoute,
   DisclaimerRoute: DisclaimerRoute,
+  HealthDataRoute: HealthDataRoute,
   HomeRoute: HomeRoute,
   MeetCoachRoute: MeetCoachRoute,
   NutritionRoute: NutritionRoute,
+  PrivacyRoute: PrivacyRoute,
   ResourcesRoute: ResourcesRoute,
   SettingsRoute: SettingsRoute,
+  TermsRoute: TermsRoute,
   WorkoutsRoute: WorkoutsRoute,
 }
 export const routeTree = rootRouteImport
