@@ -5,6 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { AICard } from "@/components/AIOrb";
 import { RingChart } from "@/components/RingChart";
+import { scoreColor } from "@/lib/score-color";
 import { BottomNav } from "@/components/BottomNav";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { HydrationLogModal } from "@/components/LogModals";
