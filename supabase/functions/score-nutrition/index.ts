@@ -180,25 +180,26 @@ Deno.serve(async (req) => {
           estContent.push({
             type: "text",
             text:
-              `Description: ${row.meal_description ?? "(none)"}. ` +
-              `Step 1: list the specific foods you actually identify on the plate (be concrete: "two puris", "potato curry ~1 cup", not "carbs + protein"). ` +
-              `Step 2: for each food, recall its real nutritional profile per typical serving — protein is dominated by what's actually present (meat, fish, eggs, dairy, legumes, tofu, protein powder); refined-flour breads, rice, potatoes, fried doughs, fruits and most vegetables are LOW protein regardless of how much is on the plate. ` +
-              `Step 3: sum the per-food estimates into a plate total. ` +
-              `Return only the final JSON.`,
+              `Description (user override, takes priority): ${row.meal_description ?? "(none)"}. ` +
+              `Decompose this plate into its visible components. For each component, estimate weight in grams (for discrete items like fries or nuggets, also include approximate count, e.g. "~85g (approx. 25 fries)"). ` +
+              `Use visible reference cues: plate diameter (~26-28cm standard), utensil size, hand size, and branded packaging known sizes (e.g. McDonald's medium fries ≈ 110g, Hardee's small burger patty ≈ 60-80g). ` +
+              `For each component, recall its real nutritional profile per estimated weight — protein is dominated by what's actually present (meat, fish, eggs, dairy, legumes, tofu, protein powder); refined-flour breads, rice, potatoes, fried doughs, fruits and most vegetables are LOW protein regardless of portion. ` +
+              `If a sauce, oil, or hidden ingredient is likely but uncertain, include it as a labelled line with a sensible default — never silently omit. ` +
+              `Sum item macros to plate totals. Return only the final JSON.`,
           });
           const estRes = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
             body: JSON.stringify({
               model: "claude-haiku-4-5-20251001",
-              max_tokens: 400,
+              max_tokens: 900,
               system:
-                "You estimate calories and macros from a meal photo + description. " +
-                "Ground every macro in the specific foods you identify and their actual nutritional profile — do NOT distribute macros proportionally across total calories, and do NOT infer 'plausible plate macros' from portion volume alone. " +
-                "A larger portion of a low-protein food (puri, rice, potato, pasta, bread, fried dough) is still low protein. Only count protein from foods that genuinely contain it (meat, fish, eggs, dairy, legumes, tofu, tempeh, seitan, protein powder, nuts/seeds in smaller amounts). " +
-                "If the dish is a high-carb staple with no obvious protein source, protein should be in the single digits to low teens, not 20g+. " +
+                "You estimate the itemized contents of a meal photo. " +
+                "Always decompose the plate into 1+ named components — never return a single combined dish-label. Even for a single-item meal, return the item + estimated grams. " +
+                "Ground every macro in the specific food + estimated grams, not in proportional distribution of total calories. A larger portion of a low-protein food is still low protein. " +
                 "Respond with ONLY a single JSON object, no prose, no fences: " +
-                "{ \"estimated_calories\": <number>, \"estimated_protein_g\": <number>, \"estimated_carbs_g\": <number>, \"estimated_fat_g\": <number> }. " +
+                "{ \"items\": [ { \"name\": <string, includes qty/approx if useful e.g. 'French fries, small (~25 fries)'>, \"grams\": <number>, \"calories\": <number>, \"protein_g\": <number>, \"carbs_g\": <number>, \"fat_g\": <number> } ], " +
+                "\"estimated_calories\": <sum>, \"estimated_protein_g\": <sum>, \"estimated_carbs_g\": <sum>, \"estimated_fat_g\": <sum> }. " +
                 "Be realistic; this is an estimate, not precise tracking.",
               messages: [{ role: "user", content: estContent }],
             }),
@@ -207,12 +208,24 @@ Deno.serve(async (req) => {
             const j = await estRes.json();
             const txt = j?.content?.[0]?.text ?? "";
             const ep = JSON.parse(stripFences(txt));
+            const rawItems = Array.isArray(ep.items) ? ep.items : [];
+            const items = rawItems.map((it: any) => ({
+              name: String(it.name ?? "item"),
+              grams: Math.max(0, Math.round(Number(it.grams) || 0)),
+              calories: Math.max(0, Math.round(Number(it.calories) || 0)),
+              protein_g: Math.max(0, Math.round(Number(it.protein_g) || 0)),
+              carbs_g: Math.max(0, Math.round(Number(it.carbs_g) || 0)),
+              fat_g: Math.max(0, Math.round(Number(it.fat_g) || 0)),
+            }));
+            const sumOr = (k: "calories"|"protein_g"|"carbs_g"|"fat_g", fallback: number) =>
+              items.length ? items.reduce((a: number, b: any) => a + (b[k]||0), 0) : Math.max(0, Math.round(Number(fallback) || 0));
             estimate = {
-              calories: Math.max(0, Math.round(Number(ep.estimated_calories))),
-              protein_g: Math.max(0, Math.round(Number(ep.estimated_protein_g))),
-              carbs_g: Math.max(0, Math.round(Number(ep.estimated_carbs_g))),
-              fat_g: Math.max(0, Math.round(Number(ep.estimated_fat_g))),
+              calories: sumOr("calories", ep.estimated_calories),
+              protein_g: sumOr("protein_g", ep.estimated_protein_g),
+              carbs_g: sumOr("carbs_g", ep.estimated_carbs_g),
+              fat_g: sumOr("fat_g", ep.estimated_fat_g),
             };
+            (estimate as any).items = items;
           }
         } catch (e) { console.error("Macro estimate failed:", e); }
       }
@@ -223,6 +236,7 @@ Deno.serve(async (req) => {
           estimated_protein_g: estimate.protein_g,
           estimated_carbs_g: estimate.carbs_g,
           estimated_fat_g: estimate.fat_g,
+          estimated_items: (estimate as any).items ?? null,
           calorie_estimate_status: "estimated",
         }).eq("id", nutrition_log_id);
       } else {

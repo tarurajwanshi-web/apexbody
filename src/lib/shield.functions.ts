@@ -363,6 +363,15 @@ export const logMeal = createServerFn({ method: "POST" })
     return { id: row.id };
   });
 
+export type MealItem = {
+  name: string;
+  grams: number;
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+};
+
 export type TodayMeal = {
   id: string;
   meal_description: string | null;
@@ -373,6 +382,7 @@ export type TodayMeal = {
   estimated_protein_g: number | null;
   estimated_carbs_g: number | null;
   estimated_fat_g: number | null;
+  estimated_items: MealItem[] | null;
   created_at: string;
 };
 
@@ -381,7 +391,7 @@ export const getTodayMeals = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<TodayMeal[]> => {
     const { data, error } = await context.supabase
       .from("shield_nutrition_logs")
-      .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, created_at, deleted, entry_date")
+      .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, estimated_items, created_at, deleted, entry_date")
       .eq("user_id", context.userId)
       .eq("entry_date", today())
       .eq("deleted", false)
@@ -397,6 +407,7 @@ export const getTodayMeals = createServerFn({ method: "GET" })
       estimated_protein_g: r.estimated_protein_g,
       estimated_carbs_g: r.estimated_carbs_g,
       estimated_fat_g: r.estimated_fat_g,
+      estimated_items: Array.isArray(r.estimated_items) ? r.estimated_items : null,
       created_at: r.created_at,
     }));
   });
@@ -412,7 +423,6 @@ export const updateMeal = createServerFn({ method: "POST" })
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    // Reset the three dimension scores + status so score-nutrition reruns clean.
     const { error } = await context.supabase
       .from("shield_nutrition_logs")
       .update({
@@ -426,12 +436,47 @@ export const updateMeal = createServerFn({ method: "POST" })
         estimated_protein_g: null,
         estimated_carbs_g: null,
         estimated_fat_g: null,
+        estimated_items: null,
         calorie_estimate_status: "pending",
       })
       .eq("id", data.id)
       .eq("user_id", context.userId);
     if (error) throw new Error(error.message);
     return { id: data.id };
+  });
+
+const MealItemSchema = z.object({
+  name: z.string(),
+  grams: z.number().min(0),
+  calories: z.number().min(0),
+  protein_g: z.number().min(0),
+  carbs_g: z.number().min(0),
+  fat_g: z.number().min(0),
+});
+
+/** Edit itemized components (e.g. user adjusts grams). Does NOT re-run scoring. */
+export const updateMealItems = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), items: z.array(MealItemSchema) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const sum = (k: "calories"|"protein_g"|"carbs_g"|"fat_g") =>
+      Math.round(data.items.reduce((a, b) => a + (b[k] || 0), 0));
+    const { error } = await context.supabase
+      .from("shield_nutrition_logs")
+      .update({
+        estimated_items: data.items,
+        estimated_calories: sum("calories"),
+        estimated_protein_g: sum("protein_g"),
+        estimated_carbs_g: sum("carbs_g"),
+        estimated_fat_g: sum("fat_g"),
+        calorie_estimate_status: "estimated",
+      })
+      .eq("id", data.id)
+      .eq("user_id", context.userId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
   });
 
 export const softDeleteMeal = createServerFn({ method: "POST" })
@@ -445,6 +490,73 @@ export const softDeleteMeal = createServerFn({ method: "POST" })
       .eq("user_id", context.userId);
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+// ---------- Body measurement events ----------
+
+export type BodyMeasurement = {
+  id: string;
+  entry_date: string;
+  source: string;
+  weight_kg: number | null;
+  body_fat_pct: number | null;
+  lean_mass_kg: number | null;
+  waist_cm: number | null;
+  hip_cm: number | null;
+  arm_cm: number | null;
+  thigh_cm: number | null;
+  created_at: string;
+};
+
+export const logBodyMeasurement = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      source: z.enum(["manual", "dexa", "inbody"]).default("manual"),
+      weight_kg: z.number().positive().nullable().optional(),
+      body_fat_pct: z.number().min(0).max(100).nullable().optional(),
+      lean_mass_kg: z.number().positive().nullable().optional(),
+      waist_cm: z.number().positive().nullable().optional(),
+      hip_cm: z.number().positive().nullable().optional(),
+      arm_cm: z.number().positive().nullable().optional(),
+      thigh_cm: z.number().positive().nullable().optional(),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase.from("body_measurement_events").insert({
+      user_id: context.userId,
+      source: data.source ?? "manual",
+      weight_kg: data.weight_kg ?? null,
+      body_fat_pct: data.body_fat_pct ?? null,
+      lean_mass_kg: data.lean_mass_kg ?? null,
+      waist_cm: data.waist_cm ?? null,
+      hip_cm: data.hip_cm ?? null,
+      arm_cm: data.arm_cm ?? null,
+      thigh_cm: data.thigh_cm ?? null,
+    });
+    if (error) throw new Error(error.message);
+    // Mirror latest weight/body-fat to profile so other surfaces see the freshest value.
+    const profileUpdate: Record<string, unknown> = {};
+    if (data.weight_kg != null) profileUpdate.weight_kg = data.weight_kg;
+    if (data.body_fat_pct != null) profileUpdate.body_fat_pct = data.body_fat_pct;
+    if (Object.keys(profileUpdate).length) {
+      await context.supabase.from("profiles")
+        .upsert({ user_id: context.userId, ...profileUpdate }, { onConflict: "user_id" });
+    }
+    return { ok: true };
+  });
+
+export const getLatestBodyMeasurement = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<BodyMeasurement | null> => {
+    const { data } = await context.supabase
+      .from("body_measurement_events")
+      .select("id, entry_date, source, weight_kg, body_fat_pct, lean_mass_kg, waist_cm, hip_cm, arm_cm, thigh_cm, created_at")
+      .eq("user_id", context.userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return (data as BodyMeasurement) ?? null;
   });
 
 export const upsertTraining = createServerFn({ method: "POST" })
