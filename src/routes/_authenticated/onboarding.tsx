@@ -1,13 +1,16 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ChevronLeft, Check, Trophy, Flame, Dumbbell, Zap, Activity, Sparkles, Watch, Pencil, Upload, FileText } from "lucide-react";
+import { ChevronLeft, Check, Trophy, Flame, Dumbbell, Zap, Activity, Sparkles, Watch, Pencil } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useServerFn } from "@tanstack/react-start";
+import { logBodyMeasurement } from "@/lib/shield.functions";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/onboarding")({
   head: () => ({ meta: [{ title: "Profile setup — APEX" }] }),
   component: ProfileSetup,
 });
+
 
 type Goal = "recomposition" | "muscle_gain" | "fat_loss" | "strength" | "athletic_performance";
 type Equipment = "home_gym_db_only" | "commercial_gym" | "limited_equipment" | "bodyweight_only";
@@ -42,36 +45,43 @@ type Draft = {
   goal: Goal | null;
   days: number;
   equipment: Equipment | null;
-  bodyDataType: BodyDataType;
-  dexaBf: string;
-  dexaLean: string;
-  dexaFileName: string | null;
-  waist: string;
-  hip: string;
-  weight: string;
-  height: string;
+  bodyDataType: BodyDataType;       // "dexa" | "measurements" | null  (null = skipped)
+  dexaBf: string;                   // body-fat %  (path-agnostic; named for legacy column)
+  dexaLean: string;                 // lean mass kg (device path only)
+  dexaFileName: null;               // legacy; always null now
+  waist: string;                    // cm canonical
+  hip: string;                      // cm canonical
+  arm: string;                      // cm canonical
+  thigh: string;                    // cm canonical
+  weight: string;                   // kg canonical
+  height: string;                   // cm canonical
 };
 
 const EMPTY: Draft = {
   name: "", age: "", sex: null, inputPath: null,
   goal: null, days: 3, equipment: null, bodyDataType: null,
   dexaBf: "", dexaLean: "", dexaFileName: null,
-  waist: "", hip: "", weight: "", height: "",
+  waist: "", hip: "", arm: "", thigh: "", weight: "", height: "",
 };
+
 
 function ProfileSetup() {
   const navigate = useNavigate();
+  const logMeasure = useServerFn(logBodyMeasurement);
   const [step, setStep] = useState(1);
+  const [bodySub, setBodySub] = useState<"A" | "B">("A"); // sub-step inside step 6
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [submitting, setSubmitting] = useState(false);
 
   const patch = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }));
 
-  const bodyPathValid = (() => {
-    if (draft.bodyDataType === null) return true;
-    if (draft.bodyDataType === "dexa") return !!draft.dexaBf && !!draft.dexaLean;
-    return !!draft.waist && !!draft.hip && !!draft.weight && !!draft.height;
+  // Step 6 sub-A requires: a path picked + weight + body-fat + height (needed for BMR).
+  const bodyAValid = (() => {
+    if (draft.bodyDataType === null) return false;
+    return !!draft.weight && !!draft.dexaBf && !!draft.height;
   })();
+  // Step 6 sub-B circumferences are always optional.
+  const bodyBValid = true;
 
   const canContinue = (() => {
     switch (step) {
@@ -83,14 +93,32 @@ function ProfileSetup() {
       case 3: return !!draft.goal;
       case 4: return draft.days >= 1 && draft.days <= 6;
       case 5: return !!draft.equipment;
-      case 6: return bodyPathValid;
+      case 6: return bodySub === "A" ? bodyAValid : bodyBValid;
       case 7: return true;
       default: return false;
     }
   })();
 
-  const next = () => setStep((s) => Math.min(s + 1, TOTAL - 1));
-  const back = () => setStep((s) => Math.max(s - 1, 1));
+  const next = () => {
+    if (step === 6 && bodySub === "A") { setBodySub("B"); return; }
+    if (step === 6 && bodySub === "B") { setBodySub("A"); setStep((s) => Math.min(s + 1, TOTAL - 1)); return; }
+    setStep((s) => Math.min(s + 1, TOTAL - 1));
+  };
+  const back = () => {
+    if (step === 6 && bodySub === "B") { setBodySub("A"); return; }
+    setStep((s) => Math.max(s - 1, 1));
+  };
+
+  const skipBody = () => {
+    patch({
+      bodyDataType: null,
+      dexaBf: "", dexaLean: "",
+      waist: "", hip: "", arm: "", thigh: "",
+      weight: "", height: "",
+    });
+    setBodySub("A");
+    setStep((s) => Math.min(s + 1, TOTAL - 1));
+  };
 
   const submit = async () => {
     setSubmitting(true);
@@ -113,23 +141,39 @@ function ProfileSetup() {
         training_days_per_week: draft.days,
         equipment_access: draft.equipment,
         body_data_type: draft.bodyDataType,
-        dexa_body_fat_pct: draft.bodyDataType === "dexa" ? Number(draft.dexaBf) : null,
-        dexa_lean_mass_kg: draft.bodyDataType === "dexa" ? Number(draft.dexaLean) : null,
-        measurement_waist_cm: draft.bodyDataType === "measurements" ? Number(draft.waist) : null,
-        measurement_hip_cm: draft.bodyDataType === "measurements" ? Number(draft.hip) : null,
-        // Weight is captured in either body-data path now (DEXA users still
-        // need it for hydration targets / macro recalcs); the form on the
-        // measurements path collects it directly, and the DEXA path will fall
-        // back to deriving from lean mass / body-fat if the user didn't enter
-        // weight. We always persist whatever weight the user typed if any.
+        dexa_body_fat_pct: draft.bodyDataType === "dexa" && draft.dexaBf ? Number(draft.dexaBf) : null,
+        dexa_lean_mass_kg: draft.bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
+        measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
+        measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
         measurement_weight_kg: draft.weight ? Number(draft.weight) : null,
-        measurement_height_cm: draft.bodyDataType === "measurements" ? Number(draft.height) : null,
+        measurement_height_cm: draft.height ? Number(draft.height) : null,
         profile_completed_at: now.toISOString(),
         plan_unlock_date: unlockDate,
       };
 
       const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "user_id" });
       if (error) throw error;
+
+      // Persist a per-entry row in body_measurement_events so the new history table
+      // gets seeded from onboarding (Section 6 requirement: every save = a dated row).
+      if (draft.bodyDataType !== null) {
+        try {
+          await logMeasure({
+            data: {
+              source: draft.bodyDataType === "dexa" ? "dexa" : "manual",
+              weight_kg: draft.weight ? Number(draft.weight) : null,
+              body_fat_pct: draft.dexaBf ? Number(draft.dexaBf) : null,
+              lean_mass_kg: draft.bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
+              waist_cm: draft.waist ? Number(draft.waist) : null,
+              hip_cm: draft.hip ? Number(draft.hip) : null,
+              arm_cm: draft.arm ? Number(draft.arm) : null,
+              thigh_cm: draft.thigh ? Number(draft.thigh) : null,
+            },
+          });
+        } catch (e) {
+          console.warn("logBodyMeasurement failed", e);
+        }
+      }
 
       // Mirror name to local store so the dashboard greets immediately.
       try {
@@ -156,15 +200,15 @@ function ProfileSetup() {
 
   if (submitting) return <BuildingPlanScreen />;
 
+  const stepLabel = step === 6 ? `Step 6${bodySub} of ${TOTAL - 1}` : `Step ${step} of ${TOTAL - 1}`;
+
   return (
     <div className="min-h-screen bg-bg-1 pb-32" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
       <header className="flex items-center justify-between px-5 pt-6">
         <button onClick={step === 1 ? () => navigate({ to: "/" }) : back} className="text-text-secondary">
           <ChevronLeft size={24} />
         </button>
-        <span className="text-[11px] uppercase tracking-wider text-text-tertiary">
-          Step {step} of {TOTAL - 1}
-        </span>
+        <span className="text-[11px] uppercase tracking-wider text-text-tertiary">{stepLabel}</span>
         <span className="w-6" />
       </header>
 
@@ -178,7 +222,7 @@ function ProfileSetup() {
         {step === 3 && <GoalStep value={draft.goal} onChange={(goal) => patch({ goal })} />}
         {step === 4 && <DaysStep value={draft.days} onChange={(days) => patch({ days })} />}
         {step === 5 && <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />}
-        {step === 6 && <BodyStep draft={draft} patch={patch} onSkip={() => { patch({ bodyDataType: null, dexaBf: "", dexaLean: "", dexaFileName: null, waist: "", hip: "", weight: "", height: "" }); next(); }} />}
+        {step === 6 && <BodyStep draft={draft} patch={patch} subStep={bodySub} onSkip={skipBody} />}
         {step === 7 && <ReviewStep draft={draft} />}
       </main>
 
@@ -197,7 +241,7 @@ function ProfileSetup() {
               className="block w-full rounded-2xl gradient-brand text-white py-3.5 text-sm font-semibold disabled:opacity-40"
               style={{ borderRadius: 18 }}
             >
-              Continue
+              {step === 6 && bodySub === "A" ? "Next: measurements" : "Continue"}
             </button>
           ) : (
             <button
@@ -212,6 +256,7 @@ function ProfileSetup() {
         </div>
       </footer>
     </div>
+
   );
 }
 
@@ -411,108 +456,90 @@ function inToCm(inches: number) { return inches * 2.54; }
 function kgToLb(kg: number) { return kg * 2.20462; }
 function lbToKg(lb: number) { return lb / 2.20462; }
 
-function BodyStep({ draft, patch, onSkip }: { draft: Draft; patch: (p: Partial<Draft>) => void; onSkip: () => void }) {
-  const [lenUnit, setLenUnit] = useState<LengthUnit>("cm");
+function BodyStep({
+  draft, patch, subStep, onSkip,
+}: { draft: Draft; patch: (p: Partial<Draft>) => void; subStep: "A" | "B"; onSkip: () => void }) {
   const [wUnit, setWUnit] = useState<WeightUnit>("kg");
-  const [uploading, setUploading] = useState(false);
+  const [lUnit, setLUnit] = useState<LengthUnit>("cm");
 
-  const tabBtn = (id: Exclude<BodyDataType, null>, label: string) => {
+  const pathBtn = (id: Exclude<BodyDataType, null>, label: string, sub: string) => {
     const active = draft.bodyDataType === id;
     return (
-      <button type="button" onClick={() => patch({ bodyDataType: id })}
-        className={`flex-1 rounded-xl py-2.5 text-xs font-semibold border transition ${active ? "text-white" : "border-white/5 bg-bg-2 text-text-secondary"}`}
-        style={active ? SELECTED_STYLE : undefined}>{label}</button>
+      <button
+        type="button"
+        onClick={() => patch({ bodyDataType: id })}
+        className={`flex-1 rounded-xl py-3 px-3 text-left border transition ${active ? "text-white" : "border-white/5 bg-bg-2 text-text-secondary"}`}
+        style={active ? SELECTED_STYLE : undefined}
+      >
+        <p className="text-[13px] font-semibold">{label}</p>
+        <p className="text-[11px] text-text-tertiary mt-0.5">{sub}</p>
+      </button>
     );
   };
 
-  const onDexaFile = async (file: File) => {
-    setUploading(true);
-    try {
-      const { data: u } = await supabase.auth.getUser();
-      const uid = u.user?.id;
-      if (!uid) throw new Error("Not signed in");
-      const ext = file.name.split(".").pop() || "pdf";
-      const path = `${uid}/dexa/${Date.now()}.${ext}`;
-      const { error } = await supabase.storage.from("shield-uploads").upload(path, file);
-      if (error) throw error;
-      patch({ dexaFileName: file.name, dexaBf: draft.dexaBf || "?", dexaLean: draft.dexaLean || "?" });
-      toast.success("DEXA uploaded — confirm extracted values below.");
-    } catch (e: any) {
-      toast.error(e?.message ?? "Upload failed");
-    } finally {
-      setUploading(false);
-    }
-  };
+  if (subStep === "A") {
+    return (
+      <>
+        <StepHeader title="Body composition" sub="Required for accurate macro targets — takes 20 seconds." />
 
+        <div className="flex gap-2 mb-2">
+          {pathBtn("dexa", "I have DEXA / InBody", "Enter scan results")}
+          {pathBtn("measurements", "Estimate manually", "Quick visual estimate")}
+        </div>
+        <div className="text-right mb-5">
+          <button type="button" onClick={onSkip} className="text-xs underline underline-offset-2 text-text-tertiary">
+            Skip for now →
+          </button>
+        </div>
+
+        {draft.bodyDataType !== null && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Weight unit</span>
+              <UnitToggle options={[{ id: "kg", label: "kg" }, { id: "lb", label: "lb" }]} value={wUnit} onChange={(v) => setWUnit(v as WeightUnit)} />
+            </div>
+            <UnitField label="Weight" cmValue={draft.weight} onChangeCm={(v) => patch({ weight: v })} unit={wUnit} convertToDisplay={kgToLb} convertFromDisplay={lbToKg} />
+            <UnitField label="Height" cmValue={draft.height} onChangeCm={(v) => patch({ height: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+            <Field label="Body fat %" value={draft.dexaBf} onChange={(v) => patch({ dexaBf: v })} suffix="%" />
+            {draft.bodyDataType === "dexa" && (
+              <UnitField label="Lean mass (optional)" cmValue={draft.dexaLean} onChangeCm={(v) => patch({ dexaLean: v })} unit={wUnit} convertToDisplay={kgToLb} convertFromDisplay={lbToKg} />
+            )}
+            <p className="text-[11px] text-text-tertiary px-1">
+              {draft.bodyDataType === "dexa"
+                ? "Enter values directly from your DEXA or InBody report."
+                : "A rough visual estimate is fine — we'll refine this from your circumference history over time."}
+            </p>
+          </div>
+        )}
+
+        {draft.bodyDataType === null && (
+          <p className="text-center text-xs text-text-tertiary mt-10">
+            Pick one to continue, or skip and add this later from the Log tab.
+          </p>
+        )}
+      </>
+    );
+  }
+
+  // Sub-step B — circumferences (all optional).
   return (
     <>
-      <StepHeader title="Body data" sub="Optional — improves accuracy." />
+      <StepHeader title="Circumferences" sub="Optional — improves progress tracking." />
 
-      <div className="flex gap-2 mb-2">
-        {tabBtn("dexa", "DEXA scan")}
-        {tabBtn("measurements", "Measurements")}
-      </div>
-      <div className="text-right mb-5">
-        <button type="button" onClick={onSkip} className="text-xs underline underline-offset-2 text-text-tertiary">
-          Skip for now →
-        </button>
-      </div>
-
-      {draft.bodyDataType === "dexa" && (
-        <div className="space-y-3">
-          <label
-            className="block rounded-2xl p-5 cursor-pointer text-center"
-            style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.10), rgba(59,130,246,0.08))", border: "1px dashed rgba(124,58,237,0.4)" }}
-          >
-            <input type="file" accept="application/pdf,image/*" className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) onDexaFile(f); }} />
-            {draft.dexaFileName ? (
-              <>
-                <FileText size={22} className="mx-auto text-text-accent" />
-                <p className="mt-2 text-[13px] font-semibold text-white">{draft.dexaFileName}</p>
-                <p className="text-[11px] text-text-tertiary mt-1">Tap to replace</p>
-              </>
-            ) : (
-              <>
-                <Upload size={22} className="mx-auto text-text-accent" />
-                <p className="mt-2 text-[13px] font-semibold text-white">{uploading ? "Uploading…" : "Upload your DEXA results"}</p>
-                <p className="text-[11px] text-text-tertiary mt-1">PDF or photo of the report</p>
-              </>
-            )}
-          </label>
-          <p className="text-[11px] text-text-tertiary">
-            We'll extract body-fat % and lean mass automatically and ask you to confirm. For now you can also enter the numbers manually below.
-          </p>
-          <Field label="Body fat %" value={draft.dexaBf === "?" ? "" : draft.dexaBf} onChange={(v) => patch({ dexaBf: v })} suffix="%" />
-          <Field label="Lean mass" value={draft.dexaLean === "?" ? "" : draft.dexaLean} onChange={(v) => patch({ dexaLean: v })} suffix="kg" />
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Length unit</span>
+          <UnitToggle options={[{ id: "cm", label: "cm" }, { id: "in", label: "in" }]} value={lUnit} onChange={(v) => setLUnit(v as LengthUnit)} />
         </div>
-      )}
-
-      {draft.bodyDataType === "measurements" && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Length</span>
-            <UnitToggle options={[{ id: "cm", label: "cm" }, { id: "in", label: "in" }]} value={lenUnit} onChange={(v) => setLenUnit(v as LengthUnit)} />
-          </div>
-          <UnitField label="Waist" cmValue={draft.waist} onChangeCm={(v) => patch({ waist: v })} unit={lenUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-          <UnitField label="Hip" cmValue={draft.hip} onChangeCm={(v) => patch({ hip: v })} unit={lenUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-          <UnitField label="Height" cmValue={draft.height} onChangeCm={(v) => patch({ height: v })} unit={lenUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-          <div className="flex items-center justify-between gap-2 pt-2">
-            <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Weight</span>
-            <UnitToggle options={[{ id: "kg", label: "kg" }, { id: "lb", label: "lb" }]} value={wUnit} onChange={(v) => setWUnit(v as WeightUnit)} />
-          </div>
-          <UnitField label="Weight" cmValue={draft.weight} onChangeCm={(v) => patch({ weight: v })} unit={wUnit} convertToDisplay={kgToLb} convertFromDisplay={lbToKg} />
-        </div>
-      )}
-
-      {draft.bodyDataType === null && (
-        <p className="text-center text-xs text-text-tertiary mt-10">
-          No body data shared — you can add this later in Settings.
-        </p>
-      )}
+        <UnitField label="Waist" cmValue={draft.waist} onChangeCm={(v) => patch({ waist: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+        <UnitField label="Hip" cmValue={draft.hip} onChangeCm={(v) => patch({ hip: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+        <UnitField label="Arm" cmValue={draft.arm} onChangeCm={(v) => patch({ arm: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+        <UnitField label="Thigh" cmValue={draft.thigh} onChangeCm={(v) => patch({ thigh: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+      </div>
     </>
   );
 }
+
 
 function UnitToggle({ options, value, onChange }: { options: { id: string; label: string }[]; value: string; onChange: (v: string) => void }) {
   return (
@@ -619,11 +646,10 @@ function ReviewStep({ draft }: { draft: Draft }) {
         <Row label="Training days" value={`${draft.days} / week`} />
         <Row label="Equipment" value={eqLabel} />
         <Row label="Body data"
-          value={draft.bodyDataType === "dexa"
-            ? `DEXA · ${draft.dexaBf}% · ${draft.dexaLean}kg`
-            : draft.bodyDataType === "measurements"
-            ? `${draft.weight}kg · ${draft.height}cm`
-            : "Not provided"} />
+          value={draft.bodyDataType === null
+            ? "Not provided"
+            : `${draft.bodyDataType === "dexa" ? "DEXA/InBody" : "Manual"} · ${draft.weight || "—"}kg · ${draft.dexaBf || "—"}%`} />
+
       </div>
       <p className="mt-4 text-center text-[11px] text-text-tertiary">Your plan unlocks for customization 7 days from now.</p>
     </>

@@ -1,61 +1,47 @@
-# Diagnostic Findings (no code changed)
+# APEX Round 2 — Section-by-Section Plan
 
-## 1. AI Insight reappears after "Got it" — Scenario A (dismiss persistence is broken)
+Following your own recommendation: ship and confirm one section at a time, not all at once. Section 6 is the priority per your note.
 
-**Root cause:** The dismissed state is written to `localStorage` on tap but is **never read back on mount**. So every time the Dashboard component remounts (which happens on tab navigation away and back, since `/dashboard` unmounts when you go to `/workouts`), `insightDismissed` is re-initialized to `false` and the card renders again.
+## Diagnosis of Section 6 (why the old body data screen is still live)
 
-**Specific code path — `src/routes/_authenticated/dashboard.tsx`:**
+The new `BodyMeasurementModal` exists in `src/components/LogModals.tsx` and *is* wired into one place: `src/components/BottomNav.tsx` (opened from the floating `+` / quick-launcher).
 
-- Line 48: `const [insightDismissed, setInsightDismissed] = useState(false);` — always starts `false`, no lazy initializer reading localStorage.
-- Lines 300–303 (the "Got it" button): writes `localStorage.setItem("apex_insight_dismissed_at", <today>)` and sets state to `true`. **Correct write side.**
-- There is **no** `useEffect` / lazy initializer that does `localStorage.getItem("apex_insight_dismissed_at")` and compares to today's date. Grep for the key returns only the write site.
+But the screen you're still seeing is **onboarding Step 6** in `src/routes/_authenticated/onboarding.tsx` — the inline `BodyStep` component with the legacy "DEXA scan / Measurements" tab UI, writing legacy `measurement_*` / `dexa_*` columns on the `profiles` table. That step was never converted to the new flow, and the new `body_measurement_events` table is never written to from onboarding.
 
-So Scenario B is ruled out — even if the insight text were varying daily, dismissal would still not persist across a remount.
+So "old screen still live" is accurate, and the fix is:
+1. Replace onboarding Step 6's inline `BodyStep` with the new Step A / Step B flow (same UX as `BodyMeasurementModal`).
+2. Write to `body_measurement_events` on submit (per-entry dated row), not only to `profiles`.
+3. Audit every other entry point (Settings, profile edit, Log tab) and confirm each routes to the new flow.
+4. Verify by submitting twice → two rows in `body_measurement_events`.
 
-(Secondary observation, not the bug you asked about: the insight itself is cached server-side per user per day via `getOrCreateDailyInsight` → `daily_ai_insights`, so the same text WILL come back across remounts within a day — but that's the expected design.)
+That's the actual Section 6 work. Round 1's claim was true for the modal but missed onboarding, which is the entry point users actually hit.
 
-**Fix scope (for follow-up Build prompt):** read `apex_insight_dismissed_at` on mount; if it equals today's date (YYYY-MM-DD), initialize `insightDismissed` to `true`.
+## Order I will ship this round (one section per turn, you confirm before next)
 
----
+Per your "section-by-section, not all at once" instruction, here's the order. I will stop after each and wait for your "ok" before the next:
 
-## 2. Meal stuck on "scoring…" — pre-existing row with broken invocation, not a current bug
+1. **Section 6 — Body data Step A/B everywhere (priority).** Replace onboarding Step 6 with the Step A/B flow, wire to `body_measurement_events`, audit all entry points, verify two submits → two rows.
+2. **Section 2 — Nav cleanup.** Remove the "A —" segment from BottomNav, rename "More" → "Log" (opens the existing quick-launcher with Recovery / Meal / Body), delete the floating `+`, reposition the floating "A" (FloatingCoach) to bottom-right.
+3. **Section 1 — Food photo reveal sequence.** Change `MealDetailModal` / capture flow to show **description + totals first**, with confirm/edit, then expand itemized breakdown only after confirm. Keep existing estimation + persistence. Confirm Fuel dashboard reads from the same saved per-entry records (already dated, already queryable across a range — no schema change).
+4. **Section 7 — "Redo Program" button in Settings.** Rename, narrow inputs to Goal / Days / Equipment, slide-to-confirm, regenerate plan via existing `generate-plan` function, land on Training tab. Leave all history untouched.
+5. **Section 3 — Onboarding "About Me" 5-field consolidation.** Merge Name / Age / Sex / Height (compound ft+in under Imperial, cm under Metric) / Weight (kg/lb) into one step, with toggles that convert existing values.
+6. **Section 4 — Duolingo-style loading screen.** Build the rotating-fact loader for plan generation (~20–30s). I will draft the fact list from the APEX evidence base already in the codebase and **surface it for your human review before shipping** — per your accuracy requirement, I will not let AI-drafted facts ship silently.
+7. **Section 5 — Settings footer copy.** Replace the trademark block with the shorter version exactly as specified.
 
-**Database state:** Exactly one stuck meal exists — `id 15fb46a6-...`, `entry_date 2026-06-21`, `created_at 07:32:50 UTC`. Its `meal_photo_url` is a **proper 30-day signed URL** (`/storage/v1/object/sign/shield-uploads/...?token=...`), i.e. the post-fix format. So this is **not** a stale raw-path row from before the signed-URL fix.
+## Why this order
 
-**Function status:** `score-nutrition` is deployed and works correctly. I invoked it directly via curl against `/functions/v1/score-nutrition` with `{nutrition_log_id: "15fb46a6-..."}` — it returned HTTP 200 with valid scores (protein 62 / carbs 48 / timing 70 / quality 59) and a macro estimate (820 kcal, 28P/95C/32F). After that call the row flipped to `claude_score_status='scored'` and `calorie_estimate_status='estimated'` with `estimated_calories=820` populated. Edge-function logs for `score-nutrition` were empty before this manual call, confirming **the function was never invoked for that meal from the client**.
+- 6 first because it's explicitly the priority and a data-integrity item.
+- 2 next because it changes nav, which Section 1's flow depends on for "where Fuel reads from."
+- 1, 7 are user-facing flow changes that benefit from a stable nav.
+- 3, 4, 5 are scoped and low-risk; 4 needs your fact-list review before it can be considered done.
 
-**Why the client invocation never reached the function:** In `src/components/LogModals.tsx` line 306:
+## What I will NOT do
 
-```ts
-void supabase.functions.invoke("score-nutrition", { body: { nutrition_log_id: id } }).catch(() => {});
-onSaved?.();
-onClose();
-```
-
-This is fire-and-forget with `.catch(() => {})` swallowing every error, followed immediately by `onClose()` which unmounts the sheet. Plausible reasons for the silent miss on that one row:
-
-1. The function may not have been deployed yet at 07:32 (it's deployed now — proved by curl).
-2. The browser fetch was aborted by the immediate modal close / page state change before the request flushed.
-3. Any transient network/auth error is fully swallowed, so the row is left in `pending` forever and nothing retries.
-
-There is **no retry path** anywhere: nothing re-invokes `score-nutrition` on app reopen or on viewing the meal list. Once a meal misses its single fire-and-forget call, it stays stuck forever.
-
-**Brand-new meal end-to-end:** Cannot fully verify without a fresh user upload, but the manual curl proves the entire scoring + macro-estimation path (Anthropic call, DB write, signed-URL image fetch) is healthy right now. Fresh meals logged from the UI from this point on should score successfully, **assuming** the client fetch is not aborted by the immediate `onClose()`.
-
-**Fix scope (for follow-up Build prompt) — for your review, not implemented:**
-
-- Stop swallowing errors silently — at minimum log them.
-- Don't fire-and-forget through a modal that closes synchronously. Either `await` the invoke before `onClose()`, or move the invocation into a place whose lifetime outlives the modal (e.g. queue it via the parent / a useEffect on the new row, or call it from the row's pending-status polling code).
-- Add a server-side or client-side retry: any meal that sits in `claude_score_status='pending'` for > N seconds should be re-invoked once (either by `MealHistoryList` when it polls, or by a small re-kick from the Dashboard mount).
-- One-shot heal for the existing stuck row: re-invoke `score-nutrition` for `15fb46a6-...` (already done manually above — the row is now scored).
+- Ship all sections in one turn.
+- Touch food estimation logic, gram accuracy, or the DB schema for nutrition/hydration (Section 1 explicitly says these are unchanged).
+- Ship AI-drafted facts in Section 4 without your review.
+- Touch the GPT/Claude switching logic (deferred per Round 1 founder instruction).
 
 ---
 
-## Summary
-
-| Issue | Scenario | Root cause | Action |
-|---|---|---|---|
-| Insight reappears | A | Dismiss state never re-hydrated from localStorage on mount | Add lazy read of `apex_insight_dismissed_at` |
-| Meal stuck "scoring…" | Pre-existing row | Fire-and-forget client invoke silently failed; no retry path | Await/queue invoke, log errors, add retry on pending rows |
-
-Awaiting your Build-mode prompt with the precise fix you want.
+**Approve this plan and I'll start with Section 6.** If you want a different order (e.g. Section 1 first), tell me before I begin.
