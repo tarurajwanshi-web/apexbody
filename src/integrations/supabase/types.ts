@@ -148,6 +148,7 @@ export type Database = {
           measurement_hip_cm: number | null
           measurement_waist_cm: number | null
           measurement_weight_kg: number | null
+          name: string | null
           plan_unlock_date: string | null
           profile_completed_at: string | null
           training_days_per_week: number | null
@@ -170,6 +171,7 @@ export type Database = {
           measurement_hip_cm?: number | null
           measurement_waist_cm?: number | null
           measurement_weight_kg?: number | null
+          name?: string | null
           plan_unlock_date?: string | null
           profile_completed_at?: string | null
           training_days_per_week?: number | null
@@ -192,6 +194,7 @@ export type Database = {
           measurement_hip_cm?: number | null
           measurement_waist_cm?: number | null
           measurement_weight_kg?: number | null
+          name?: string | null
           plan_unlock_date?: string | null
           profile_completed_at?: string | null
           training_days_per_week?: number | null
