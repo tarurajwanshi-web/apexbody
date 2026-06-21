@@ -7,6 +7,7 @@ import type { TodayMeal } from "@/lib/shield.functions";
  *  carb-heavy / low-protein flagging logic from prior passes (kept local so
  *  this stays a presentational sheet, no server calls). */
 export function MealDetailModal({ meal, onClose }: { meal: TodayMeal | null; onClose: () => void }) {
+  const [showItems, setShowItems] = useState(false);
   if (!meal) return null;
   const cal = meal.estimated_calories ?? null;
   const p = meal.estimated_protein_g ?? null;
