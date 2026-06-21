@@ -87,56 +87,7 @@ function Nutrition() {
 
   const pct = (a: number, b: number) => (b > 0 ? Math.min(100, Math.round((a / b) * 100)) : 0);
 
-  const onPhoto = async (file: File) => {
-    setError(null);
-    setAnalysis(null);
-    setAnalyzing(true);
-    try {
-      const reader = new FileReader();
-      const dataUrl: string = await new Promise((res, rej) => {
-        reader.onload = () => res(reader.result as string);
-        reader.onerror = () => rej(reader.error);
-        reader.readAsDataURL(file);
-      });
-      setPreview(dataUrl);
 
-      // 1) Upload to storage so score-nutrition can re-fetch via signed URL.
-      const { data: u } = await supabase.auth.getUser();
-      const uid = u.user?.id;
-      let photoUrl: string | null = null;
-      if (uid) {
-        const ext = (file.type.split("/")[1] || "jpg").replace("jpeg", "jpg");
-        const path = `${uid}/${Date.now()}.${ext}`;
-        const up = await supabase.storage.from("shield-uploads").upload(path, file, { contentType: file.type });
-        if (!up.error) {
-          const { data: signed } = await supabase.storage.from("shield-uploads").createSignedUrl(path, 60 * 60 * 24 * 30);
-          photoUrl = signed?.signedUrl ?? null;
-        }
-      }
-
-      // 2) Persist meal row → triggers score-nutrition (which fills estimated_* and macros card).
-      try { await logMealFn({ data: { meal_description: null, meal_photo_url: photoUrl } }); } catch {}
-
-      // 3) Quick visual analysis for instant feedback.
-      const r = await fn({
-        data: {
-          base64Image: dataUrl,
-          mediaType: file.type || "image/jpeg",
-          prompt:
-            "Identify the food in this image. Estimate portion size and macros (calories, protein, carbs, fat). Format: short food name, then 'Est: XXX kcal · Pg / Cg / Fg', then a 1-sentence note. Be concise.",
-        },
-      });
-      setAnalysis(r.content);
-
-      // Reload after scoring has had a moment.
-      reload();
-      setTimeout(reload, 4000);
-    } catch (e: any) {
-      setError(e?.message ?? "Could not analyze photo.");
-    } finally {
-      setAnalyzing(false);
-    }
-  };
 
   const tCal = macros?.target_calories ?? null;
   const cCal = macros?.consumed_calories ?? 0;
