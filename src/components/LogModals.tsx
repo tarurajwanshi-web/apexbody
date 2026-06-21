@@ -6,9 +6,11 @@ import {
   getInputPathPreference,
   upsertManualRecovery,
   upsertDeviceRecovery,
+  upsertMood,
   logMeal,
   updateMeal,
   upsertTraining,
+  logHydration,
 } from "@/lib/shield.functions";
 import { analyzePhoto } from "@/lib/coach.functions";
 
