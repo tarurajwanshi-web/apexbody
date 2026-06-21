@@ -41,16 +41,23 @@ export const upsertManualRecovery = createServerFn({ method: "POST" })
       recovery_self_rating: z.number().int().min(1).max(5),
       sleep_hours: z.number().min(0).max(24),
       mood_emoji: z.string().min(1).max(8).nullable().optional(),
+      // Per-day source marker. 'device_parse_failed_fallback' = the user is
+      // normally on the device path but today's screenshot couldn't be
+      // parsed, so they entered manually as a one-day fallback. We do NOT
+      // change profiles.input_path_preference in that case — they remain a
+      // device-path user. Default 'manual' for ordinary manual-path entries.
+      recovery_source: z.enum(["manual", "device_parse_failed_fallback"]).optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const payload = {
+    const payload: Record<string, unknown> = {
       user_id: context.userId,
       entry_date: today(),
       recovery_self_rating: data.recovery_self_rating,
       sleep_hours: data.sleep_hours,
-      ...(data.mood_emoji != null ? { mood_emoji: data.mood_emoji } : {}),
+      recovery_source: data.recovery_source ?? "manual",
     };
+    if (data.mood_emoji != null) payload.mood_emoji = data.mood_emoji;
     const { error } = await context.supabase
       .from("shield_manual_inputs")
       .upsert(payload, { onConflict: "user_id,entry_date" });
