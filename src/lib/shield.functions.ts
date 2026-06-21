@@ -250,6 +250,10 @@ export type TodayMeal = {
   meal_photo_url: string | null;
   claude_score_status: string;
   claude_quality_score: number | null;
+  estimated_calories: number | null;
+  estimated_protein_g: number | null;
+  estimated_carbs_g: number | null;
+  estimated_fat_g: number | null;
   created_at: string;
 };
 
@@ -258,7 +262,7 @@ export const getTodayMeals = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<TodayMeal[]> => {
     const { data, error } = await context.supabase
       .from("shield_nutrition_logs")
-      .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, created_at, deleted, entry_date")
+      .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, created_at, deleted, entry_date")
       .eq("user_id", context.userId)
       .eq("entry_date", today())
       .eq("deleted", false)
@@ -270,9 +274,14 @@ export const getTodayMeals = createServerFn({ method: "GET" })
       meal_photo_url: r.meal_photo_url,
       claude_score_status: r.claude_score_status,
       claude_quality_score: r.claude_quality_score,
+      estimated_calories: r.estimated_calories,
+      estimated_protein_g: r.estimated_protein_g,
+      estimated_carbs_g: r.estimated_carbs_g,
+      estimated_fat_g: r.estimated_fat_g,
       created_at: r.created_at,
     }));
   });
+
 
 export const updateMeal = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
