@@ -37,6 +37,7 @@ function WorkoutsPage() {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [preCheckOpen, setPreCheckOpen] = useState(false);
   const [sessionStarted, setSessionStarted] = useState(false);
+  const [freeformOpen, setFreeformOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [ptrDelta, setPtrDelta] = useState(0);
