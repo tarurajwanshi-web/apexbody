@@ -334,7 +334,7 @@ Deno.serve(async (req) => {
     // reasonable prior for single-day users).
     const baselineFrom = dateOffset(today, 14);
     const [manualRes, deviceRes, mealsRes, trainingRes, baselineRes] = await Promise.all([
-      supabase.from("shield_manual_inputs").select("entry_date, recovery_self_rating, sleep_hours, mood_emoji, hydration_ml")
+      supabase.from("shield_manual_inputs").select("entry_date, recovery_self_rating, sleep_hours, mood_emoji, hydration_ml, recovery_source")
         .eq("user_id", user_id).in("entry_date", dateList),
       supabase.from("shield_device_uploads").select("entry_date, parsed_hrv, parsed_rhr, parsed_sleep_hours, parse_status")
         .eq("user_id", user_id).in("entry_date", dateList).eq("parse_status", "parsed"),
