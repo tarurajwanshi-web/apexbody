@@ -118,11 +118,15 @@ Deno.serve(async (req) => {
     const systemPrompt =
       `You are extracting recovery metrics from a screenshot of a ${row.device_source} wearable app. ` +
       `Respond with ONLY a single JSON object, no prose, no markdown fences: ` +
-      `{ "hrv_ms": <number|null>, "rhr_bpm": <number|null>, "sleep_hours": <number|null> }. ` +
+      `{ "hrv_ms": <number|null>, "rhr_bpm": <number|null>, "sleep_hours": <number|null>, "data_date": <"YYYY-MM-DD"|null> }. ` +
       `hrv_ms: heart rate variability in milliseconds (RMSSD-style; typical 20-150). ` +
       `rhr_bpm: resting heart rate in beats per minute (typical 40-90). ` +
       `sleep_hours: total sleep time in hours (decimal, e.g. 7.5). ` +
-      `If a metric is not clearly visible in the screenshot, return null for that field. ` +
+      `data_date: the calendar date the screenshot is reporting recovery for, ` +
+      `read from the image (header, date selector, "Mar 14", etc.). ` +
+      `Return ISO YYYY-MM-DD. If only a relative label like "Today"/"Yesterday" is visible ` +
+      `with no real date, return null — do not guess. ` +
+      `If any other metric is not clearly visible, return null for that field. ` +
       `Do not guess. Convert units if needed (e.g. "7h 30m" → 7.5).`;
 
     const aRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -140,7 +144,7 @@ Deno.serve(async (req) => {
           role: "user",
           content: [
             { type: "image", source: { type: "base64", media_type, data: b64 } },
-            { type: "text", text: `Extract HRV, RHR, and sleep hours from this ${row.device_source} screenshot.` },
+            { type: "text", text: `Extract HRV, RHR, sleep hours, and the data date from this ${row.device_source} screenshot.` },
           ],
         }],
       }),
