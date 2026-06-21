@@ -1,4 +1,5 @@
-import { X, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { X, Sparkles, ChevronDown, ChevronUp } from "lucide-react";
 import type { TodayMeal } from "@/lib/shield.functions";
 
 /** Lightweight expand of a logged meal — confirmed description, estimated
