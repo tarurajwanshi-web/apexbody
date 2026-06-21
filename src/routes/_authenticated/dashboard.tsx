@@ -512,39 +512,23 @@ function Dashboard() {
             </div>
           </div>
 
-          {expanded && (
+          {/* Score explainability — ALWAYS visible (collapsed view).
+              Surfaces pillar contributions plainly so a LOW-confidence score
+              never reads as "all clear". Pillars that haven't been logged
+              today show "not logged yet" rather than silently disappearing,
+              with one-line framing that the score is incomplete, not okay. */}
+          <PillarExplainer readiness={readiness} expanded={expanded} />
+
+          {expanded && readiness?.nudge_message && (
             <div
-              className="mt-5 overflow-hidden"
-              style={{ animation: "fade-up 0.3s ease both" }}
+              className="mt-4 rounded-xl p-3 flex items-start gap-2"
+              style={{
+                background: "linear-gradient(135deg, rgba(124,58,237,0.08), rgba(59,130,246,0.08))",
+                border: "1px solid rgba(124,58,237,0.25)",
+              }}
             >
-              {PILLAR_META.map((p, i) => {
-                const raw = readiness?.pillar_breakdown?.[p.key];
-                const value = raw == null || raw === "" ? "—" : String(raw);
-                return (
-                  <MetricRow
-                    key={p.key}
-                    color={p.color}
-                    name={p.label}
-                    value={value}
-                    trend="stable"
-                    note=""
-                    hideNote
-                    last={i === PILLAR_META.length - 1}
-                  />
-                );
-              })}
-              {readiness?.nudge_message && (
-                <div
-                  className="mt-4 rounded-xl p-3 flex items-start gap-2"
-                  style={{
-                    background: "linear-gradient(135deg, rgba(124,58,237,0.08), rgba(59,130,246,0.08))",
-                    border: "1px solid rgba(124,58,237,0.25)",
-                  }}
-                >
-                  <Sparkles size={14} className="text-ai shrink-0 mt-0.5" />
-                  <p className="text-[12px] text-text-primary leading-snug">{readiness.nudge_message}</p>
-                </div>
-              )}
+              <Sparkles size={14} className="text-ai shrink-0 mt-0.5" />
+              <p className="text-[12px] text-text-primary leading-snug">{readiness.nudge_message}</p>
             </div>
           )}
         </button>
@@ -572,14 +556,14 @@ function Dashboard() {
           <span className="text-text-tertiary">›</span>
         </button>
 
-        {/* Today's meals — edit / delete */}
-        <MealHistoryList
-          onMutationStart={captureScore}
-          onMutationDone={() => { pollScoreChange(); reloadMacros(); }}
-        />
+        {/* Two parallel status cards: training + macros (glanceable only —
+            details live on their respective tabs). */}
+        <WorkoutStatusCard session={todaySession} onNav={() => navigate({ to: "/workouts" })} />
 
-        {/* Macros (estimated from photos) */}
-        <MacrosCard macros={macros} />
+        {/* Macros (estimated from photos) — Home shows aggregate only.
+            The per-meal list lives exclusively on the Nutrition tab. */}
+        <MacrosCard macros={macros} hydration={hydration} onHydrationTap={() => navigate({ to: "/nutrition" })} />
+
 
         {/* Resource library — read-only browse */}
         <button
