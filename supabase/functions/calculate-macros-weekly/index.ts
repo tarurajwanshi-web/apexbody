@@ -110,9 +110,16 @@ function recomputeMacros(targetCalories: number, weightKg: number, goal: string 
 
 async function processUser(supa: SupabaseClient, p: Profile, force: boolean): Promise<WeeklyResult> {
   const tz = p.timezone || "Asia/Dubai";
-  const week_start_date = userLocalMonday(tz);
-  const week_end_date = addDays(week_start_date, 6);
-  const window_end_exclusive = addDays(week_start_date, 7);
+  // Audit #1 fix: the cron runs Monday 13:00 UTC, which is AFTER local-Monday
+  // 00:00 in every supported timezone. userLocalMonday() therefore returns
+  // the Monday that just BEGAN. We want to review the week that just ENDED.
+  //   review window:  [prior Monday, prior Sunday]   (7 days, the week we evaluate)
+  //   new target activates today (current local Monday)
+  const current_week_start_date = userLocalMonday(tz);
+  const week_start_date = addDays(current_week_start_date, -7);   // prior Monday (review window start, inclusive)
+  const week_end_date = addDays(current_week_start_date, -1);     // prior Sunday (review window end, inclusive)
+  const window_end_exclusive = current_week_start_date;            // exclusive upper bound for all data queries
+  const new_effective_start_date = current_week_start_date;        // new target activates today
 
   // Step 1: idempotency
   if (!force) {
