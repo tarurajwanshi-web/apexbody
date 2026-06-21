@@ -608,7 +608,13 @@ async function maybeWriteTrainingSummary(
 
   const totalRequired = dayPlan.exercises.reduce((s, ex) => s + ex.sets, 0);
   const totalCompleted = list.filter((l) => l.completed).length;
-  if (totalCompleted < totalRequired) return;
+  // Partial-workout fallback: write a strain summary once ≥50% of planned
+  // sets are complete, not only at 100%. Without this, users who close the
+  // app mid-workout (e.g. 8/10 sets) never get a shield_training_logs row,
+  // so the Training pillar stays absent and hydration target stays at the
+  // rest-day baseline despite having actually trained. The upsert keeps the
+  // row monotonically up-to-date as more sets land.
+  if (totalRequired === 0 || totalCompleted / totalRequired < 0.5) return;
 
   let volume = 0;
   for (const l of list) {
@@ -618,6 +624,7 @@ async function maybeWriteTrainingSummary(
     volume += w * reps;
   }
   const strain = Math.min(21, Math.round((totalCompleted * 0.6 + volume / 1200) * 10) / 10);
+  const partial = totalCompleted < totalRequired;
 
   await supabase
     .from("shield_training_logs")
@@ -625,7 +632,9 @@ async function maybeWriteTrainingSummary(
       user_id: uid,
       entry_date: date,
       strain_value: strain,
-      session_notes: dayPlan.session_name ?? "Session",
+      session_notes: partial
+        ? `${dayPlan.session_name ?? "Session"} (partial ${totalCompleted}/${totalRequired})`
+        : (dayPlan.session_name ?? "Session"),
     }, { onConflict: "user_id,entry_date" });
 }
 
