@@ -70,6 +70,13 @@ Deno.serve(async (req) => {
     if (!user_id) return new Response(JSON.stringify({ error: "user_id required" }), {
       status: 400, headers: { ...cors, "Content-Type": "application/json" },
     });
+    // Audit #3: caller's JWT user.id must match body.user_id (or internal-secret).
+    const authz = await authorizeCaller(req, supa, user_id);
+    if (!authz.ok) {
+      return new Response(JSON.stringify({ error: authz.error }), {
+        status: authz.status, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
     if (!anth) return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY missing" }), {
       status: 500, headers: { ...cors, "Content-Type": "application/json" },
     });
