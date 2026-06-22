@@ -851,10 +851,12 @@ function WeeklyGraphSheet({
 function WeeklyGraphContent({ data }: { data: WeeklyNutritionInsight }) {
   const { days, avg_target_calories, logged_days, calorie_on_target_days, protein_hit_days, avg_calories, confidence_label, decision_insight } = data;
 
-  // Y-scale: max of (highest day total, avg target * 1.2, 800).
-  const maxStack = Math.max(...days.map((d) => d.macro_total_calories), 0);
+  // Y-scale uses consumed_calories (same source as summary + target line),
+  // not the macro Atwater sum, so bars, "Average calories", and the target
+  // dashed line all share one scale.
+  const maxConsumed = Math.max(...days.map((d) => d.consumed_calories), 0);
   const tgt = avg_target_calories ?? 0;
-  const yMax = Math.max(maxStack * 1.05, tgt * 1.15, 800);
+  const yMax = Math.max(maxConsumed * 1.05, tgt * 1.15, 800);
 
   return (
     <div className="space-y-5">
