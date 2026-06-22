@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, Loader2, RefreshCw, Droplet } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, RefreshCw, Droplet, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { AICard } from "@/components/AIOrb";
@@ -46,6 +46,7 @@ function Nutrition() {
   const [hydration, setHydration] = useState<HydrationSummary | null>(null);
   const [hydrationEvents, setHydrationEvents] = useState<HydrationEvent[]>([]);
   const [hydrationOpen, setHydrationOpen] = useState(false);
+  const [weeklySheetOpen, setWeeklySheetOpen] = useState(false);
   const [openMeal, setOpenMeal] = useState<TodayMeal | null>(null);
   const [weekly, setWeekly] = useState<WeeklyNutritionInsight | null>(null);
   const [refreshing, setRefreshing] = useState(false);
