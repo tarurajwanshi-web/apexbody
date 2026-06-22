@@ -112,19 +112,33 @@ function Nutrition() {
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this meal? This removes it from daily macros and weekly adherence.")) return;
     const snapshot = meals;
+    const beforeCount = snapshot?.length ?? 0;
+    const beforeKcal = macros?.consumed_calories ?? 0;
+    if (import.meta.env.DEV) {
+      console.log("[meal-delete] start", { id, beforeCount, beforeKcal, selectedDate });
+    }
     setMeals((prev) => (prev ? prev.filter((m) => m.id !== id) : prev));
     try {
       const res = await softDelete({ data: { id } });
+      if (import.meta.env.DEV) console.log("[meal-delete] server response", res);
       if (!res || res.deleted !== true) throw new Error("Delete not confirmed");
     } catch (e) {
-      console.error("[meal] delete failed", e);
+      console.error("[meal-delete] failed", e);
       setMeals(snapshot); // roll back optimistic removal
       alert("Couldn't delete that meal. Please try again.");
       return;
     }
     // Server confirmed the row is `deleted=true`; refresh every downstream
     // surface now so calories/macros/weekly subtract immediately.
-    reloadNutritionSnapshot();
+    await reloadNutritionSnapshot();
+    if (import.meta.env.DEV) {
+      const stillThere = (meals ?? []).some((m) => m.id === id);
+      console.log("[meal-delete] post-reload", {
+        id,
+        stillPresentInList: stillThere,
+        kcalAfter: macros?.consumed_calories ?? 0,
+      });
+    }
     setPendingUndo({ id });
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     undoTimerRef.current = window.setTimeout(() => setPendingUndo(null), 5000);
