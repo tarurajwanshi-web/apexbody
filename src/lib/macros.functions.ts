@@ -384,8 +384,12 @@ export const getWeeklyNutritionInsight = createServerFn({ method: "GET" })
     const weekStartISO = toISO(weekStart);
     const weekEndISO = toISO(weekEnd);
 
-    // Cap evaluation at min(anchor, today, weekEnd).
-    const cap = [anchorISO, todayISO, weekEndISO].sort()[0];
+    // Cap evaluation at min(today, weekEnd) — never include future days, but
+    // do include the full week when the user is viewing a past week.
+    // NOTE: anchorISO is intentionally NOT in this min — for a past-week
+    // anchor (Mon 15 Jun), including it would collapse the cap to a single
+    // day and starve the weekly query.
+    const cap = todayISO < weekEndISO ? todayISO : weekEndISO;
     const capDate = parseISO(cap);
     const days_elapsed = Math.max(
       1,

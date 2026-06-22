@@ -858,8 +858,27 @@ function WeeklyGraphContent({ data }: { data: WeeklyNutritionInsight }) {
   const tgt = avg_target_calories ?? 0;
   const yMax = Math.max(maxConsumed * 1.05, tgt * 1.15, 800);
 
+  // Detect target variance across logged days.
+  const uniqTargets = new Set(
+    days
+      .filter((d) => d.target_calories != null)
+      .map((d) => d.target_calories as number),
+  );
+  const targetsVary = uniqTargets.size > 1;
+  const targetLabel = targetsVary ? "Avg target" : "Target";
+
+  const hasAnyLoggedMeals = days.some((d) => d.has_logged_meals && d.consumed_calories > 0);
+
   return (
     <div className="space-y-5">
+      {/* Chart header */}
+      <div>
+        <p className="text-[13px] font-semibold text-white">Macro calories by day</p>
+        <p className="mt-0.5 text-[11px] text-text-tertiary leading-snug">
+          Protein, carbs, and fat stacked against your calorie target.
+        </p>
+      </div>
+
       {/* Legend */}
       <div className="flex items-center justify-center gap-4 text-[11px] text-text-secondary">
         <LegendDot color="#F59E0B" label="Protein" />
@@ -868,7 +887,13 @@ function WeeklyGraphContent({ data }: { data: WeeklyNutritionInsight }) {
       </div>
 
       {/* Chart */}
-      <StackedBarChart days={days} yMax={yMax} target={avg_target_calories} />
+      <StackedBarChart
+        days={days}
+        yMax={yMax}
+        target={avg_target_calories}
+        targetLabel={targetLabel}
+        empty={!hasAnyLoggedMeals}
+      />
 
       {/* Summary metrics */}
       <div className="grid grid-cols-2 gap-2">
@@ -878,19 +903,19 @@ function WeeklyGraphContent({ data }: { data: WeeklyNutritionInsight }) {
           sub={avg_target_calories != null ? `of ${avg_target_calories.toLocaleString()} target` : "no target set"}
         />
         <MetricCard
-          label="On-target days"
+          label="Target days"
           value={logged_days > 0 ? `${calorie_on_target_days} of ${logged_days}` : "—"}
-          sub="calories within range"
+          sub="days within range"
         />
         <MetricCard
-          label="Protein hit"
+          label="Protein"
           value={logged_days > 0 ? `${protein_hit_days} of ${logged_days}` : "—"}
-          sub="days at protein target"
+          sub="days hit"
         />
         <MetricCard
           label="Confidence"
           value={confidence_label === "low" ? "Low" : "OK"}
-          sub={confidence_label === "low" ? "Log 3+ days" : `${logged_days} days logged`}
+          sub={confidence_label === "low" ? "until 3 logged days" : `${logged_days} days logged`}
         />
       </div>
 
@@ -916,10 +941,14 @@ function StackedBarChart({
   days,
   yMax,
   target,
+  targetLabel = "Target",
+  empty = false,
 }: {
   days: WeeklyDay[];
   yMax: number;
   target: number | null;
+  targetLabel?: string;
+  empty?: boolean;
 }) {
   const W = 320;
   const H = 180;
@@ -936,7 +965,7 @@ function StackedBarChart({
   const targetY = target != null && target > 0 ? y(target) : null;
 
   return (
-    <div className="rounded-2xl bg-bg-2 border border-white/5 p-3">
+    <div className="relative rounded-2xl bg-bg-2 border border-white/5 p-3">
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto">
         {/* baseline */}
         <line x1={padL} x2={W - padR} y1={padT + innerH} y2={padT + innerH} stroke="rgba(255,255,255,0.08)" />
@@ -952,7 +981,7 @@ function StackedBarChart({
               strokeDasharray="3 3"
             />
             <text x={W - padR} y={targetY - 4} textAnchor="end" className="fill-text-tertiary" style={{ fontSize: 9 }}>
-              Target {target?.toLocaleString()}
+              {targetLabel} {target?.toLocaleString()}
             </text>
           </>
         )}
@@ -1023,6 +1052,12 @@ function StackedBarChart({
           );
         })}
       </svg>
+      {empty && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 pointer-events-none">
+          <p className="text-[13px] font-semibold text-white">No meals logged this week yet.</p>
+          <p className="mt-1 text-[12px] text-text-tertiary">Log meals to see your weekly pattern.</p>
+        </div>
+      )}
     </div>
   );
 }
