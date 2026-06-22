@@ -36,6 +36,7 @@ const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"]; // visual labels in loc
 
 function Coach() {
   const { profile } = useProfile();
+  const userTz = useUserTimezone();
   const askFn = useServerFn(askCoach);
   const fetchActivity = useServerFn(getActivityWeek);
 
