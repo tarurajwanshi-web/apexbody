@@ -394,13 +394,14 @@ export const logMeal = createServerFn({ method: "POST" })
       vision_detected_items: z.array(VisionItemSchema).optional(),
       vision_provider: z.string().nullable().optional(),
       vision_confidence: z.number().nullable().optional(),
+      client_timezone: z.string().max(64).optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
     const confirmed = data.confirmed_items;
     const row: Record<string, unknown> = {
       user_id: context.userId,
-      entry_date: await userToday(context.supabase, context.userId),
+      entry_date: await userTodayWithHint(context.supabase, context.userId, data.client_timezone),
       meal_description: data.meal_description ?? null,
       meal_photo_url: data.meal_photo_url ?? null,
       claude_score_status: "pending",
