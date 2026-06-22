@@ -143,50 +143,58 @@ Deno.serve(async (req) => {
     });
 
     try {
-      const aRes = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": anthropicKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 400,
-          system: systemPrompt,
-          messages: [{ role: "user", content: userContent }],
-        }),
-      });
+      let updated: any = row;
 
-      if (!aRes.ok) {
-        throw new Error(`Anthropic ${aRes.status}: ${await aRes.text()}`);
+      if (!skipQuality) {
+        const aRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": anthropicKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 400,
+            system: systemPrompt,
+            messages: [{ role: "user", content: userContent }],
+          }),
+        });
+
+        if (!aRes.ok) {
+          throw new Error(`Anthropic ${aRes.status}: ${await aRes.text()}`);
+        }
+
+        const aJson = await aRes.json();
+        const text = aJson?.content?.[0]?.text ?? "";
+        const parsed = JSON.parse(stripFences(text));
+
+        const protein_tier = clamp(parsed.protein_tier);
+        const carb_quality_score = clamp(parsed.carb_quality_score);
+        const timing_score = clamp(parsed.timing_score);
+        // claude_quality_score is a generated column in the DB — don't write it directly.
+        const claude_quality_score = Math.round(
+          0.4 * protein_tier + 0.35 * carb_quality_score + 0.25 * timing_score,
+        );
+
+        const { data: upRow, error: upErr } = await supabase
+          .from("shield_nutrition_logs")
+          .update({
+            protein_tier,
+            carb_quality_score,
+            timing_score,
+            claude_score_status: "scored",
+          })
+          .eq("id", nutrition_log_id)
+          .select()
+          .single();
+
+        if (upErr) throw upErr;
+        updated = upRow;
+        (updated as any)._lastReasoning = parsed.reasoning;
+        (updated as any)._lastScores = { protein_tier, carb_quality_score, timing_score, claude_quality_score };
       }
 
-      const aJson = await aRes.json();
-      const text = aJson?.content?.[0]?.text ?? "";
-      const parsed = JSON.parse(stripFences(text));
-
-      const protein_tier = clamp(parsed.protein_tier);
-      const carb_quality_score = clamp(parsed.carb_quality_score);
-      const timing_score = clamp(parsed.timing_score);
-      // claude_quality_score is a generated column in the DB — don't write it directly.
-      const claude_quality_score = Math.round(
-        0.4 * protein_tier + 0.35 * carb_quality_score + 0.25 * timing_score,
-      );
-
-      const { data: updated, error: upErr } = await supabase
-        .from("shield_nutrition_logs")
-        .update({
-          protein_tier,
-          carb_quality_score,
-          timing_score,
-          claude_score_status: "scored",
-        })
-        .eq("id", nutrition_log_id)
-        .select()
-        .single();
-
-      if (upErr) throw upErr;
 
       // SEPARATE, parallel call: calorie/macro estimation.
       // Runs whenever we have a photo OR a description (text-only meals
