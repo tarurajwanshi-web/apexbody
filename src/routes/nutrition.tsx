@@ -82,6 +82,8 @@ function Nutrition() {
   const fetchWeekly = useServerFn(getWeeklyNutritionInsight);
   const fetchMacroReview = useServerFn(getMacroAdjustmentReview);
   const softDelete = useServerFn(softDeleteMeal);
+  const debugReadMeal = useServerFn(debugReadMealById);
+
   const restore = useServerFn(restoreMeal);
 
   const todayISO = getLocalDateISO(userTz);
