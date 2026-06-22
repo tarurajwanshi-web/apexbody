@@ -203,7 +203,7 @@ function Nutrition() {
         <RefreshStamp refreshing={refreshing} lastUpdatedAt={lastUpdatedAt} />
       </div>
 
-      <NutritionDateHeader selectedDate={selectedDate} onChange={setSelectedDate} />
+      <NutritionDateHeader selectedDate={selectedDate} onChange={setSelectedDate} timezone={userTz} />
 
       {/* Goal-based framing line */}
       <p className="mx-5 mt-5 text-[12px] text-text-secondary leading-snug">
