@@ -219,15 +219,17 @@ function Nutrition() {
       </section>
 
       {/* Hydration card — ACSM-aligned target, with quick-add launcher.
-       *  For manual users this also feeds 30% of their Nutrition pillar score.
-       *  Device users still see the same UI but it doesn't move their score
-       *  (avoids double-counting with HRV/RHR-driven Recovery). */}
-      <HydrationCard
-        hydration={hydration}
-        onLog={() => setHydrationOpen(true)}
-      />
+       *  Scoped to today only: target/quick-add and the score it feeds are
+       *  current-day concepts. On past dates, the timeline below still shows
+       *  hydration events that were logged on that date. */}
+      {isToday && (
+        <HydrationCard
+          hydration={hydration}
+          onLog={() => setHydrationOpen(true)}
+        />
+      )}
 
-      {hasTarget && hasMeals && proteinShort >= 20 && (
+      {isToday && hasTarget && hasMeals && proteinShort >= 20 && (
         <div className="mx-5 mt-4">
           <AICard>
             You're <span className="text-text-primary font-semibold">{proteinShort}g short on protein</span>. Add a high-protein snack before 8pm to hit your{goalText ? ` ${goalText}` : ""} target.
@@ -235,12 +237,20 @@ function Nutrition() {
         </div>
       )}
 
-      <HydrationInsight hydration={hydration} />
+      {isToday && <HydrationInsight hydration={hydration} />}
 
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
-          <p className="text-xs uppercase tracking-wider text-text-tertiary">Today</p>
-          <p className="text-[11px] text-text-accent">Tap + below to log a meal</p>
+          <p className="text-xs uppercase tracking-wider text-text-tertiary">
+            {selectedDate === todayLocalISO()
+              ? "Today's meals"
+              : dateLabel === "Yesterday"
+                ? "Yesterday's meals"
+                : `Meals on ${formatShortDate(selectedDate)}`}
+          </p>
+          <p className="text-[11px] text-text-accent">
+            {isToday ? "Tap + below to log a meal" : "Meal logging is for today only"}
+          </p>
         </div>
         <UnifiedTimeline meals={meals} hydration={hydrationEvents} onOpenMeal={setOpenMeal} />
       </section>
