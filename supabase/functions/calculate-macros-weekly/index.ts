@@ -302,7 +302,7 @@ async function processUser(supa: SupabaseClient, p: Profile, force: boolean): Pr
     .select("entry_date, estimated_calories, calorie_estimate_status")
     .eq("user_id", p.user_id)
     .eq("deleted", false)
-    .eq("calorie_estimate_status", "estimated")
+    .in("calorie_estimate_status", ["estimated", "manual_edited"])
     .gte("entry_date", week_start_date)
     .lt("entry_date", window_end_exclusive);
   // Sum kcal per local day, then average over days_logged

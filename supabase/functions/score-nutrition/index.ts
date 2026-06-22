@@ -312,7 +312,9 @@ Deno.serve(async (req) => {
       );
     } catch (err) {
       console.error("Scoring failed:", err);
-      const updated = await markFailed(nutrition_log_id);
+      // Only mark quality as failed if we actually attempted it. Otherwise the
+      // existing 'scored' state must be preserved.
+      const updated = skipQuality ? row : await markFailed(nutrition_log_id);
       return new Response(
         JSON.stringify({ error: String(err instanceof Error ? err.message : err), row: updated }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
