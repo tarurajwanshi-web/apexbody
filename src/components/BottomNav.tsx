@@ -3,13 +3,14 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { Home, Dumbbell, Apple, Plus } from "lucide-react";
 import { FloatingCoach } from "@/components/FloatingCoach";
 import { QuickActionSheet, type QuickAction } from "@/components/QuickActionSheet";
-import { RecoveryLogModal, MealLogModal, BodyMeasurementModal } from "@/components/LogModals";
+import { RecoveryLogModal, MealLogModal, BodyMeasurementModal, WeightOnlyModal } from "@/components/LogModals";
+import { supabase } from "@/integrations/supabase/client";
 
 /**
  * Bottom nav — four flat tabs full-width: Home / Train / Fuel / Log.
- * Tapping "Log" opens the three-way quick-action sheet (Recovery / Meal /
- * Body). There is no separate floating "+" launcher and no brand-mark
- * segment in the nav — the floating Coach button (FloatingCoach) is the
+ * Tapping "Log" opens the four-way quick-action sheet (Recovery / Meal /
+ * Quick weigh-in / Body). There is no separate floating "+" launcher and
+ * no brand-mark segment in the nav — the floating Coach button is the
  * single floating control and the single A-mark on screen.
  */
 type Props = {
@@ -22,6 +23,18 @@ const TABS = [
   { to: "/nutrition", icon: Apple,    label: "Fuel" },
 ] as const;
 
+/** Fire-and-forget macro recalc after a weight change. Failures are non-fatal —
+ *  the next scheduled calculate-macros will pick up the new weight. */
+async function recalcMacrosForCurrentUser() {
+  try {
+    const { data: u } = await supabase.auth.getUser();
+    if (!u.user) return;
+    await supabase.functions.invoke("calculate-macros", { body: { user_id: u.user.id } });
+  } catch (e) {
+    console.error("[BottomNav] calculate-macros invoke failed", e);
+  }
+}
+
 export function BottomNav({ onLogged }: Props = {}) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -29,6 +42,7 @@ export function BottomNav({ onLogged }: Props = {}) {
   const [mealOpen, setMealOpen] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [bodyOpen, setBodyOpen] = useState(false);
+  const [weightOpen, setWeightOpen] = useState(false);
   const isActive = (to: string) => pathname === to || pathname.startsWith(to + "/");
   const logActive = sheetOpen;
 
@@ -36,6 +50,7 @@ export function BottomNav({ onLogged }: Props = {}) {
     if (a === "meal") setMealOpen(true);
     else if (a === "recovery") setRecoveryOpen(true);
     else if (a === "body") setBodyOpen(true);
+    else if (a === "weight") setWeightOpen(true);
   };
 
   return (
@@ -99,7 +114,17 @@ export function BottomNav({ onLogged }: Props = {}) {
       <BodyMeasurementModal
         open={bodyOpen}
         onClose={() => setBodyOpen(false)}
-        onSaved={() => { onLogged?.(); }}
+        onSaved={() => {
+          // Weight may have changed → recompute macro targets.
+          recalcMacrosForCurrentUser().finally(() => onLogged?.());
+        }}
+      />
+      <WeightOnlyModal
+        open={weightOpen}
+        onClose={() => setWeightOpen(false)}
+        onSaved={() => {
+          recalcMacrosForCurrentUser().finally(() => onLogged?.());
+        }}
       />
     </>
   );
