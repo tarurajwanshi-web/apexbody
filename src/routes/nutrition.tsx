@@ -488,6 +488,18 @@ function UnifiedTimeline({
                   {fmtTime(r.ts)}
                   {r.meal.estimated_calories != null ? ` · ${Math.round(r.meal.estimated_calories)} kcal` : ""}
                 </p>
+                {(() => {
+                  const tag = mealImpactTag(r.meal);
+                  if (!tag) return null;
+                  return (
+                    <span
+                      className="inline-block mt-1 rounded-full px-1.5 py-px text-[10px] font-medium"
+                      style={{ background: tag.bg, color: tag.color, border: `1px solid ${tag.border}` }}
+                    >
+                      {tag.label}
+                    </span>
+                  );
+                })()}
               </div>
               <p className="font-mono text-sm tabular-nums text-text-secondary shrink-0">
                 {r.meal.claude_score_status === "scored" && r.meal.claude_quality_score != null
