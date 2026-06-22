@@ -475,9 +475,8 @@ export const getWeeklyNutritionInsight = createServerFn({ method: "GET" })
         sumQ += q; qDays++;
       }
 
-      // Day score: average of quality + adherence when both exist, else either.
-      const dayAdh = adhDays > 0 ? sumAdh / adhDays : null; // not per-day; recompute below
     }
+
 
     // Recompute per-day day_score average more cleanly:
     sumDayScore = 0; dayScoreDays = 0;
