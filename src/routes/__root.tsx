@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { UpdateAvailableBanner } from "../components/UpdateAvailableBanner";
 
 declare const __APP_BUILD_TIMESTAMP__: string;
 const APP_BUILD_TIMESTAMP =
@@ -85,6 +86,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     links: [
       { rel: "stylesheet", href: appCss },
       { rel: "manifest", href: "/manifest.webmanifest" },
+      { rel: "serviceworker", href: "/sw.js" },
       { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
       { rel: "icon", type: "image/png", sizes: "192x192", href: "/icon-192.png" },
       { rel: "icon", type: "image/png", sizes: "512x512", href: "/icon-512.png" },
@@ -119,8 +121,18 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch((err) => {
+        console.log('SW registration failed:', err);
+      });
+    }
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
+      <UpdateAvailableBanner />
       <div className="bg-bg-0 min-h-screen">
         <div className="phone-frame">
           <Outlet />
