@@ -172,12 +172,12 @@ function Nutrition() {
                 hasMeals ? (
                   <>
                     <span
-                      className={`text-5xl font-extrabold leading-none tabular-nums ${cCal > tCal! ? "" : "gradient-text"}`}
+                      className={`text-4xl font-extrabold leading-none tabular-nums ${cCal > tCal! ? "" : "gradient-text"}`}
                       style={cCal > tCal! ? { color: "#F59E0B" } : undefined}
                     >
                       {cCal.toLocaleString()}
                     </span>
-                    <span className="text-base text-text-tertiary mb-1">/ {tCal!.toLocaleString()} kcal</span>
+                    <span className="text-sm text-text-tertiary mb-0.5">/ {tCal!.toLocaleString()} kcal</span>
                   </>
                 ) : (
                   <div>
