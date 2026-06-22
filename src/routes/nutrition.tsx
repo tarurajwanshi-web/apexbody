@@ -76,6 +76,10 @@ function Nutrition() {
   const [ptrDelta, setPtrDelta] = useState(0);
   // Undo snackbar state — populated when a meal is soft-deleted.
   const [pendingUndo, setPendingUndo] = useState<{ id: string } | null>(null);
+  // Inline delete-confirm state — replaces window.confirm() which is blocked
+  // in iOS PWAs and inconsistent across browsers. Tapping the trash icon
+  // shows inline Delete / Cancel buttons in the timeline row.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const undoTimerRef = useRef<number | null>(null);
   const ptrRef = useRef<HTMLDivElement>(null);
   const ptrStart = useRef<number | null>(null);
@@ -96,17 +100,19 @@ function Nutrition() {
 
 
   // Shared snapshot reload: refetches every nutrition surface for the
-  // currently selected date. Called after meal save / edit / delete / undo
-  // so Daily Fuel, Weekly Preview, Macro Review, the timeline and the
-  // pending/failed counters all stay in lockstep with the server.
+  // currently selected date. Captures `selectedDate` at call time so a
+  // stale closure from an earlier render can't reload the wrong day.
   const reloadNutritionSnapshot = async () => {
+    const date = selectedDate;
+    const todayLocal = getLocalDateISO(userTz);
+    const isTodayLocal = date === todayLocal;
     setRefreshing(true);
-    const dateArg = { data: { entryDate: selectedDate } } as any;
-    const weeklyArg = { data: { anchorDate: selectedDate } } as any;
+    const dateArg = { data: { entryDate: date } } as any;
+    const weeklyArg = { data: { anchorDate: date } } as any;
     await Promise.allSettled([
       fetchMacros(dateArg).then(setMacros),
       fetchMeals(dateArg).then(setMeals).catch(() => setMeals([])),
-      isToday
+      isTodayLocal
         ? fetchHydration().then(setHydration).catch(() => {})
         : Promise.resolve(setHydration(null)),
       fetchHydrationEvents(dateArg).then(setHydrationEvents).catch(() => setHydrationEvents([])),
@@ -120,14 +126,12 @@ function Nutrition() {
 
   // Delete a meal: optimistic UI update + verified soft-delete + immediate
   // snapshot reload so Daily Fuel / Weekly Preview / Macro Review subtract
-  // the meal right away. Undo snackbar is independent of the reload.
+  // the meal right away. Confirmation is now handled inline (no window.confirm).
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this meal? This removes it from daily macros and weekly adherence.")) return;
+    setConfirmDeleteId(null);
     const snapshot = meals;
-    const beforeCount = snapshot?.length ?? 0;
-    const beforeKcal = macros?.consumed_calories ?? 0;
     if (import.meta.env.DEV) {
-      console.log("[meal-delete] start", { id, beforeCount, beforeKcal, selectedDate });
+      console.log("[meal-delete] start", { id, beforeCount: snapshot?.length ?? 0, selectedDate });
     }
     setMeals((prev) => (prev ? prev.filter((m) => m.id !== id) : prev));
     try {
@@ -140,19 +144,11 @@ function Nutrition() {
       alert("Couldn't delete that meal. Please try again.");
       return;
     }
-    // Server confirmed the row is `deleted=true`; refresh every downstream
-    // surface now so calories/macros/weekly subtract immediately.
     await reloadNutritionSnapshot();
-    if (import.meta.env.DEV || (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("diag") === "1")) {
-      const stillThere = (meals ?? []).some((m) => m.id === id);
+    if (import.meta.env.DEV) {
       try {
         const dbTruth = await debugReadMeal({ data: { id } } as any);
-        console.log("[meal-delete] post-reload", {
-          id,
-          stillPresentInList: stillThere,
-          kcalAfter: macros?.consumed_calories ?? 0,
-          dbTruth,
-        });
+        console.log("[meal-delete] post-reload", { id, dbTruth });
       } catch (e) {
         console.log("[meal-delete] post-reload (debug read failed)", e);
       }
