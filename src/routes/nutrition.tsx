@@ -16,7 +16,7 @@ import {
   formatShortDate,
 } from "@/components/NutritionDateHeader";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
-import { getTodayMacroSummary, getWeeklyNutritionInsight, type MacroSummary, type WeeklyNutritionInsight } from "@/lib/macros.functions";
+import { getTodayMacroSummary, getWeeklyNutritionInsight, type MacroSummary, type WeeklyNutritionInsight, type WeeklyDay } from "@/lib/macros.functions";
 import {
   getTodayMeals,
   getTodayHydration,
