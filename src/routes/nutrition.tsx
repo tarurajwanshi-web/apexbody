@@ -285,6 +285,21 @@ function Nutrition() {
         <UnifiedTimeline meals={meals} hydration={hydrationEvents} selectedDate={selectedDate} onOpenMeal={setOpenMeal} />
       </section>
 
+      {/* Compact hydration prompt — only when weight is missing so there's no
+       *  target. Lives BELOW meals so it doesn't dominate above the meal list. */}
+      {isToday && !hasHydrationTarget && (
+        <div className="mx-5 mt-4 rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 flex items-center gap-3">
+          <Droplet size={16} className="text-sleep shrink-0" />
+          <p className="text-[12px] text-text-secondary flex-1 min-w-0">
+            Add your weight in Settings to enable a hydration target.
+          </p>
+          <Link to="/settings" className="text-[12px] font-semibold text-text-accent shrink-0">
+            Open →
+          </Link>
+        </div>
+      )}
+
+
 
       <BottomNav onLogged={reload} />
       <HydrationLogModal open={hydrationOpen} onClose={() => setHydrationOpen(false)} onSaved={reload} />
