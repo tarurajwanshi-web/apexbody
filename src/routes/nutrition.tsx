@@ -221,7 +221,7 @@ function Nutrition() {
           const barColor = over ? "#F59E0B" : undefined;
           const widthPct = Math.min(100, Math.round(ratio * 100));
           return (
-            <div className="mt-4 h-1.5 rounded-full bg-white/5 overflow-hidden">
+            <div className="mt-3 h-1 rounded-full bg-white/5 overflow-hidden">
               <div
                 className={over ? "h-full" : "h-full gradient-brand"}
                 style={{ width: `${widthPct}%`, background: barColor }}
