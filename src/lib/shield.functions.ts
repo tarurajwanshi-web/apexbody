@@ -219,15 +219,19 @@ export const setBodyweightKg = createServerFn({ method: "POST" })
 export type HydrationEvent = { id: string; amount_ml: number; created_at: string };
 export const getTodayHydrationEvents = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<HydrationEvent[]> => {
-    const { data, error } = await context.supabase
+  .inputValidator((d: unknown) =>
+    z.object({ entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional().parse(d),
+  )
+  .handler(async ({ data, context }): Promise<HydrationEvent[]> => {
+    const entryDate = data?.entryDate ?? today();
+    const { data: rows, error } = await context.supabase
       .from("hydration_events")
       .select("id, amount_ml, created_at")
       .eq("user_id", context.userId)
-      .eq("entry_date", today())
+      .eq("entry_date", entryDate)
       .order("created_at", { ascending: true });
     if (error) throw new Error(error.message);
-    return (data ?? []) as HydrationEvent[];
+    return (rows ?? []) as HydrationEvent[];
   });
 
 
@@ -392,16 +396,20 @@ export type TodayMeal = {
 
 export const getTodayMeals = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<TodayMeal[]> => {
-    const { data, error } = await context.supabase
+  .inputValidator((d: unknown) =>
+    z.object({ entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional().parse(d),
+  )
+  .handler(async ({ data, context }): Promise<TodayMeal[]> => {
+    const entryDate = data?.entryDate ?? today();
+    const { data: rows, error } = await context.supabase
       .from("shield_nutrition_logs")
       .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, estimated_items, calorie_estimate_status, user_corrected, created_at, deleted, entry_date")
       .eq("user_id", context.userId)
-      .eq("entry_date", today())
+      .eq("entry_date", entryDate)
       .eq("deleted", false)
       .order("created_at", { ascending: true });
     if (error) throw new Error(error.message);
-    return (data ?? []).map((r: any) => ({
+    return (rows ?? []).map((r: any) => ({
       id: r.id,
       meal_description: r.meal_description,
       meal_photo_url: r.meal_photo_url,

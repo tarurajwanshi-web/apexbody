@@ -2,7 +2,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChevronLeft, Loader2, RefreshCw, Droplet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { toast } from "sonner";
 import { AICard } from "@/components/AIOrb";
 import { RingChart } from "@/components/RingChart";
 import { scoreColor } from "@/lib/score-color";
@@ -10,6 +9,12 @@ import { BottomNav } from "@/components/BottomNav";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { HydrationLogModal } from "@/components/LogModals";
 import { MealDetailModal } from "@/components/MealDetailModal";
+import {
+  NutritionDateHeader,
+  todayLocalISO,
+  formatNutritionDateLabel,
+  formatShortDate,
+} from "@/components/NutritionDateHeader";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
 import {
@@ -35,6 +40,7 @@ const GOAL_LABEL: Record<string, string> = {
 };
 
 function Nutrition() {
+  const [selectedDate, setSelectedDate] = useState<string>(() => todayLocalISO());
   const [macros, setMacros] = useState<MacroSummary | null>(null);
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
   const [hydration, setHydration] = useState<HydrationSummary | null>(null);
@@ -51,19 +57,28 @@ function Nutrition() {
   const fetchHydration = useServerFn(getTodayHydration);
   const fetchHydrationEvents = useServerFn(getTodayHydrationEvents);
 
+  const isToday = selectedDate === todayLocalISO();
+  const dateLabel = formatNutritionDateLabel(selectedDate);
+
   const reload = async () => {
     setRefreshing(true);
+    const dateArg = { data: { entryDate: selectedDate } } as any;
     await Promise.allSettled([
-      fetchMacros().then(setMacros),
-      fetchMeals().then(setMeals).catch(() => setMeals([])),
-      fetchHydration().then(setHydration).catch(() => {}),
-      fetchHydrationEvents().then(setHydrationEvents).catch(() => setHydrationEvents([])),
+      fetchMacros(dateArg).then(setMacros),
+      fetchMeals(dateArg).then(setMeals).catch(() => setMeals([])),
+      // Hydration card stays scoped to today (target / quick-add are today-only);
+      // skip the fetch on past dates so we don't show today's bottle as if it
+      // belonged to the selected past day.
+      isToday
+        ? fetchHydration().then(setHydration).catch(() => {})
+        : Promise.resolve(setHydration(null)),
+      fetchHydrationEvents(dateArg).then(setHydrationEvents).catch(() => setHydrationEvents([])),
     ]);
     setLastUpdatedAt(Date.now());
     setRefreshing(false);
   };
 
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [selectedDate]);
   useAutoRefreshOnVisible(reload, lastUpdatedAt);
 
   // Pull-to-refresh.
@@ -135,6 +150,8 @@ function Nutrition() {
         <RefreshStamp refreshing={refreshing} lastUpdatedAt={lastUpdatedAt} />
       </div>
 
+      <NutritionDateHeader selectedDate={selectedDate} onChange={setSelectedDate} />
+
       {/* Goal-based framing line */}
       <p className="mx-5 mt-5 text-[12px] text-text-secondary leading-snug">
         {goalText
@@ -145,7 +162,7 @@ function Nutrition() {
       <section className="mx-5 mt-3 rounded-3xl bg-bg-2 border border-white/5 p-5">
         <div className="flex items-end justify-between">
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Today</p>
+            <p className="text-[10px] uppercase tracking-wider text-text-tertiary">{dateLabel}</p>
             <div className="mt-1 flex items-end gap-1">
               {hasTarget ? (
                 hasMeals ? (
@@ -202,15 +219,17 @@ function Nutrition() {
       </section>
 
       {/* Hydration card — ACSM-aligned target, with quick-add launcher.
-       *  For manual users this also feeds 30% of their Nutrition pillar score.
-       *  Device users still see the same UI but it doesn't move their score
-       *  (avoids double-counting with HRV/RHR-driven Recovery). */}
-      <HydrationCard
-        hydration={hydration}
-        onLog={() => setHydrationOpen(true)}
-      />
+       *  Scoped to today only: target/quick-add and the score it feeds are
+       *  current-day concepts. On past dates, the timeline below still shows
+       *  hydration events that were logged on that date. */}
+      {isToday && (
+        <HydrationCard
+          hydration={hydration}
+          onLog={() => setHydrationOpen(true)}
+        />
+      )}
 
-      {hasTarget && hasMeals && proteinShort >= 20 && (
+      {isToday && hasTarget && hasMeals && proteinShort >= 20 && (
         <div className="mx-5 mt-4">
           <AICard>
             You're <span className="text-text-primary font-semibold">{proteinShort}g short on protein</span>. Add a high-protein snack before 8pm to hit your{goalText ? ` ${goalText}` : ""} target.
@@ -218,12 +237,20 @@ function Nutrition() {
         </div>
       )}
 
-      <HydrationInsight hydration={hydration} />
+      {isToday && <HydrationInsight hydration={hydration} />}
 
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
-          <p className="text-xs uppercase tracking-wider text-text-tertiary">Today</p>
-          <p className="text-[11px] text-text-accent">Tap + below to log a meal</p>
+          <p className="text-xs uppercase tracking-wider text-text-tertiary">
+            {selectedDate === todayLocalISO()
+              ? "Today's meals"
+              : dateLabel === "Yesterday"
+                ? "Yesterday's meals"
+                : `Meals on ${formatShortDate(selectedDate)}`}
+          </p>
+          <p className="text-[11px] text-text-accent">
+            {isToday ? "Tap + below to log a meal" : "Meal logging is for today only"}
+          </p>
         </div>
         <UnifiedTimeline meals={meals} hydration={hydrationEvents} onOpenMeal={setOpenMeal} />
       </section>

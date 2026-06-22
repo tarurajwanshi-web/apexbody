@@ -1,9 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+const dateInput = z
+  .object({ entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() })
+  .optional();
 
 export type MacroSummary = {
   consumed_calories: number;
@@ -20,12 +25,14 @@ export type MacroSummary = {
 
 export const getTodayMacroSummary = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<MacroSummary> => {
+  .inputValidator((d: unknown) => dateInput.parse(d))
+  .handler(async ({ data, context }): Promise<MacroSummary> => {
+    const entryDate = data?.entryDate ?? today();
     const { data: meals } = await context.supabase
       .from("shield_nutrition_logs")
       .select("estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, calorie_estimate_status, deleted, entry_date")
       .eq("user_id", context.userId)
-      .eq("entry_date", today())
+      .eq("entry_date", entryDate)
       .eq("deleted", false)
       .in("calorie_estimate_status", ["estimated", "manual_edited"]);
 
@@ -37,7 +44,9 @@ export const getTodayMacroSummary = createServerFn({ method: "GET" })
     // The prior `order by calculated_at` approach surfaced future-dated rows
     // (e.g. a Monday weekly-review insert that activates next Monday but is
     // calculated today) immediately, instead of waiting for them to take effect.
-    const todayStr = today();
+    // Resolve target as of the selected date, not always today, so historical
+    // days show the target that was active on that date.
+    const todayStr = entryDate;
     const { data: target } = await context.supabase
       .from("daily_macro_targets")
       .select("target_calories, target_protein_g, target_carbs_g, target_fat_g, effective_start_date, effective_end_date")

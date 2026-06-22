@@ -14,11 +14,13 @@ import { supabase } from "@/integrations/supabase/client";
 type Props = {
   onMutationStart?: () => void;
   onMutationDone?: () => void;
+  /** Optional YYYY-MM-DD; defaults to today on the server. */
+  entryDate?: string;
 };
 
 const STALE_PENDING_MS = 60_000;
 
-export function MealHistoryList({ onMutationStart, onMutationDone }: Props) {
+export function MealHistoryList({ onMutationStart, onMutationDone, entryDate }: Props) {
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
   const [editing, setEditing] = useState<TodayMeal | null>(null);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
@@ -31,10 +33,12 @@ export function MealHistoryList({ onMutationStart, onMutationDone }: Props) {
   const saveItems = useServerFn(updateMealItems);
 
   const reload = () => {
-    fetchMeals().then(setMeals).catch(() => setMeals([]));
+    fetchMeals(entryDate ? { data: { entryDate } } : undefined as any)
+      .then(setMeals)
+      .catch(() => setMeals([]));
   };
 
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [entryDate]);
 
   useEffect(() => {
     if (!meals) return;
