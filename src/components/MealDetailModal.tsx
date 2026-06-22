@@ -51,7 +51,61 @@ export function MealDetailModal({ meal, onClose }: { meal: TodayMeal | null; onC
           <Stat label="fat"     value={f != null ? `${Math.round(f)}g` : "—"} color="#3B82F6" />
         </div>
 
-        {Array.isArray(meal.estimated_items) && meal.estimated_items.length > 0 && (
+        {/* Prefer the user-reviewed `confirmed_items` (with confidence/source) when present. */}
+        {Array.isArray(meal.confirmed_items) && meal.confirmed_items.length > 0 ? (
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => setShowItems((v) => !v)}
+              className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-left active:scale-[0.99] transition"
+              style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.06)" }}
+              aria-expanded={showItems}
+            >
+              <span className="text-[12px] text-text-secondary">
+                {showItems ? "Hide" : "Show"} reviewed items
+                <span className="text-text-tertiary"> · {meal.confirmed_items.length}</span>
+              </span>
+              {showItems ? <ChevronUp size={16} className="text-text-tertiary" /> : <ChevronDown size={16} className="text-text-tertiary" />}
+            </button>
+            {showItems && (
+              <ul className="mt-2 space-y-1.5">
+                {meal.confirmed_items.map((it, i) => (
+                  <li key={i} className="rounded-lg p-2.5" style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.05)" }}>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-[12px] text-white leading-snug flex-1 min-w-0">
+                        {i + 1}. {it.name}
+                        {it.quantity_description ? <span className="text-text-tertiary"> · {it.quantity_description}</span> : null}
+                        <span className="text-text-tertiary"> · ~{Math.round(it.estimated_grams)}g</span>
+                      </p>
+                      {it.confidence && (
+                        <span
+                          className="shrink-0 rounded-full px-1.5 py-px text-[10px] font-medium"
+                          style={{
+                            color: it.confidence === "high" ? "#10B981" : it.confidence === "low" ? "#EF4444" : "#F59E0B",
+                            background: "rgba(255,255,255,0.04)",
+                            border: "1px solid rgba(255,255,255,0.10)",
+                          }}
+                        >
+                          {it.confidence}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-text-tertiary tabular-nums mt-0.5">
+                      {Math.round(it.calories)} kcal · {Math.round(it.protein_g)}g protein · {Math.round(it.carbs_g)}g carbs · {Math.round(it.fat_g)}g fat
+                    </p>
+                    {(it.source || it.uncertainty_note) && (
+                      <p className="text-[10px] text-text-tertiary mt-0.5">
+                        {it.source ? `Source: ${it.source}` : ""}
+                        {it.source && it.uncertainty_note ? " · " : ""}
+                        {it.uncertainty_note ?? ""}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : Array.isArray(meal.estimated_items) && meal.estimated_items.length > 0 ? (
           <div className="mt-4">
             <button
               type="button"
@@ -81,7 +135,7 @@ export function MealDetailModal({ meal, onClose }: { meal: TodayMeal | null; onC
               </ul>
             )}
           </div>
-        )}
+        ) : null}
 
         <div className="mt-4 flex items-center gap-2">
           <span className="text-[10px] uppercase tracking-wider text-text-tertiary">Meal score</span>

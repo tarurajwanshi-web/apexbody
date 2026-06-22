@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Upload, Loader2, Sparkles, Check } from "lucide-react";
+import { X, Upload, Loader2, Sparkles, Check, Plus, Trash2 } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -9,6 +9,7 @@ import {
   upsertMood,
   logMeal,
   updateMeal,
+  detectMealItems,
   upsertTraining,
   logHydration,
   getTodayDeviceUploadStatus,
@@ -16,8 +17,9 @@ import {
   reassignDeviceUploadDate,
   logBodyMeasurement,
   type DeviceUploadStatus,
+  type ConfirmedMealItem,
 } from "@/lib/shield.functions";
-import { analyzePhoto } from "@/lib/coach.functions";
+
 
 type Props = { open: boolean; onClose: () => void; onSaved?: () => void };
 
@@ -47,10 +49,11 @@ function Sheet({ open, onClose, title, children }: { open: boolean; onClose: () 
   );
 }
 
-function SubmitBtn({ busy, label, disabled }: { busy: boolean; label: string; disabled?: boolean }) {
+function SubmitBtn({ busy, label, disabled, onClick }: { busy: boolean; label: string; disabled?: boolean; onClick?: () => void }) {
   return (
     <button
-      type="submit"
+      type={onClick ? "button" : "submit"}
+      onClick={onClick}
       disabled={busy || disabled}
       className="w-full rounded-2xl gradient-brand py-3 text-center text-[14px] font-semibold text-white active:scale-[0.98] transition disabled:opacity-50 flex items-center justify-center gap-2"
     >
@@ -799,42 +802,74 @@ type _VisionGuess = { description: string };
 void ({} as _VisionGuess);
 
 /**
- * Meal log modal — two-step:
- *  1) Upload photo (and/or type description). If a photo is present, run a quick
- *     vision pass to draft a description for the user to edit.
- *  2) User confirms / edits the description, then we persist + kick off scoring.
- *  After success, the parent reloads and the per-meal nutrient callout appears
- *  in MealHistoryList once estimated_* values arrive.
+ * Meal log modal — 3 steps for new meals:
+ *   1) capture: photo (recommended) + optional note ("Anything not visible?")
+ *   2) review: editable AI-detected items with running macro totals
+ *   3) save: persists confirmed_items + computed macros; score-nutrition still
+ *      runs for quality scoring (manual_edited keeps macros locked).
+ * Editing an existing meal keeps the single-step description editor.
  */
+type ReviewItem = ConfirmedMealItem & { _per_g?: { cal: number; p: number; c: number; f: number } };
+
+function buildPerGram(it: ConfirmedMealItem): { cal: number; p: number; c: number; f: number } {
+  const g = it.estimated_grams > 0 ? it.estimated_grams : 1;
+  return {
+    cal: it.calories / g,
+    p: it.protein_g / g,
+    c: it.carbs_g / g,
+    f: it.fat_g / g,
+  };
+}
+
 export function MealLogModal({ open, onClose, onSaved, editing = null }: MealProps) {
-  const [step, setStep] = useState<"capture" | "confirm">("capture");
-  const [desc, setDesc] = useState("");
+  const [step, setStep] = useState<"capture" | "review" | "editDesc">("capture");
+  const [note, setNote] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [visionBusy, setVisionBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [items, setItems] = useState<ReviewItem[]>([]);
+  const [vision, setVision] = useState<{ raw: ConfirmedMealItem[]; provider: string; confidence: number | null } | null>(null);
+  const [editDesc, setEditDesc] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const create = useServerFn(logMeal);
   const update = useServerFn(updateMeal);
+  const detect = useServerFn(detectMealItems);
 
   useEffect(() => {
-    if (!open) { setStep("capture"); setDesc(""); setFile(null); setPhotoUrl(null); setErr(null); return; }
-    setStep(editing ? "confirm" : "capture");
-    setDesc(editing?.meal_description ?? "");
-    setPhotoUrl(editing?.meal_photo_url ?? null);
-    setFile(null);
-    setErr(null);
+    if (!open) {
+      setStep("capture"); setNote(""); setFile(null); setPhotoUrl(null);
+      setErr(null); setItems([]); setVision(null); setEditDesc("");
+      return;
+    }
+    if (editing) {
+      setStep("editDesc");
+      setEditDesc(editing.meal_description ?? "");
+      setPhotoUrl(editing.meal_photo_url ?? null);
+    } else {
+      setStep("capture");
+    }
   }, [open, editing]);
 
-  /** Upload photo, generate vision draft, advance to confirm step. */
-  const handleNext = async () => {
-    if (!file && !desc.trim()) return;
+  /** Upload photo (if any), call detection, advance to review. */
+  const handleDetect = async () => {
+    if (!file && !note.trim()) return;
     setErr(null);
     setBusy(true);
     try {
       let url: string | null = photoUrl;
+      let base64: string | undefined;
+      let mediaType: string | undefined;
       if (file) {
+        // Read base64 for the AI pass.
+        base64 = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as string);
+          r.onerror = () => reject(r.error);
+          r.readAsDataURL(file);
+        });
+        mediaType = file.type || "image/jpeg";
+        // Upload for storage/score-nutrition.
         const { data: u } = await supabase.auth.getUser();
         const uid = u.user?.id;
         if (!uid) throw new Error("Not signed in.");
@@ -842,55 +877,107 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
         const path = `${uid}/meals/${Date.now()}.${ext}`;
         const up = await supabase.storage.from("shield-uploads").upload(path, file, { contentType: file.type });
         if (up.error) throw new Error(up.error.message);
-        // Use a long-lived signed URL so score-nutrition can fetch the photo
-        // server-side. (Previously we stored the raw storage path here, which
-        // caused score-nutrition to fail silently → meal stuck on "scoring…".)
         const { data: signed } = await supabase.storage.from("shield-uploads").createSignedUrl(path, 60 * 60 * 24 * 30);
         url = signed?.signedUrl ?? null;
         setPhotoUrl(url);
-
-        // Quick vision pass to seed the description (optional, fail-soft).
-        if (url) {
-          setVisionBusy(true);
-          try {
-            const guess = await runVisionDraft(file);
-            if (!desc.trim() && guess) setDesc(guess);
-          } catch {/* ignore — user can type their own */}
-          finally { setVisionBusy(false); }
-        }
       }
-      setStep("confirm");
+      const det = await detect({ data: { base64Image: base64, mediaType, note: note.trim() || undefined } });
+      const raw = det.items ?? [];
+      setVision({ raw, provider: det.provider, confidence: det.confidence });
+      // If the AI returned nothing, seed a single blank item the user can fill in.
+      const seeded: ReviewItem[] = raw.length > 0
+        ? raw.map((it) => ({ ...it, _per_g: buildPerGram(it) }))
+        : [{
+            name: note.trim() || "Item",
+            quantity_description: null,
+            estimated_grams: 100,
+            gram_range_min: null,
+            gram_range_max: null,
+            calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0,
+            confidence: "low",
+            source: file && note.trim() ? "photo + note" : file ? "photo" : "your note",
+            uncertainty_note: "Estimate — please edit grams and macros.",
+          }];
+      setItems(seeded);
+      setStep("review");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not prepare meal.");
+      setErr(e instanceof Error ? e.message : "Could not detect items.");
     } finally {
       setBusy(false);
     }
   };
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!desc.trim() && !photoUrl) return;
+  /** Update grams: scale calories/protein/carbs/fat proportionally from the original per-gram density. */
+  const updateGrams = (idx: number, grams: number) => {
+    setItems((prev) => prev.map((it, i) => {
+      if (i !== idx) return it;
+      const pg = it._per_g ?? buildPerGram(it);
+      const g = Math.max(0, grams);
+      return {
+        ...it,
+        estimated_grams: g,
+        calories: Math.round(pg.cal * g),
+        protein_g: Math.round(pg.p * g * 10) / 10,
+        carbs_g: Math.round(pg.c * g * 10) / 10,
+        fat_g: Math.round(pg.f * g * 10) / 10,
+        _per_g: pg,
+      };
+    }));
+  };
+
+  const updateField = (idx: number, key: "name" | "quantity_description", value: string) => {
+    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, [key]: value } : it)));
+  };
+
+  const removeItem = (idx: number) => setItems((prev) => prev.filter((_, i) => i !== idx));
+
+  const addItem = () => {
+    setItems((prev) => [...prev, {
+      name: "New item",
+      quantity_description: null,
+      estimated_grams: 100,
+      gram_range_min: null, gram_range_max: null,
+      calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0,
+      confidence: "low",
+      source: "your note",
+      uncertainty_note: null,
+      _per_g: { cal: 0, p: 0, c: 0, f: 0 },
+    }]);
+  };
+
+  const totals = items.reduce(
+    (a, it) => ({
+      cal: a.cal + (it.calories || 0),
+      p: a.p + (it.protein_g || 0),
+      c: a.c + (it.carbs_g || 0),
+      f: a.f + (it.fat_g || 0),
+    }),
+    { cal: 0, p: 0, c: 0, f: 0 },
+  );
+
+  /** Final save — persists confirmed_items + macros via logMeal, then runs scoring for quality. */
+  const saveMeal = async () => {
+    if (items.length === 0) { setErr("Add at least one item."); return; }
     setBusy(true); setErr(null);
     try {
-      let id: string;
-      if (editing) {
-        const r = await update({ data: { id: editing.id, meal_description: desc.trim(), meal_photo_url: photoUrl } });
-        id = r.id;
-      } else {
-        const r = await create({ data: { meal_description: desc.trim(), meal_photo_url: photoUrl } });
-        id = r.id;
-      }
-      // Kick off scoring + macro estimation. We AWAIT this so the request is not
-      // aborted when the modal unmounts (root cause of past "stuck on scoring…"
-      // bugs). MealHistoryList polls + auto-retries any row that still ends up
-      // pending past ~60s, so a transient failure here is still recoverable.
+      const cleanItems: ConfirmedMealItem[] = items.map(({ _per_g, ...rest }) => rest);
+      const summary = cleanItems.map((it) => `${it.name}${it.quantity_description ? ` (${it.quantity_description})` : ""}`).join(", ");
+      const r = await create({
+        data: {
+          meal_description: note.trim() ? `${summary} · ${note.trim()}` : summary,
+          meal_photo_url: photoUrl,
+          confirmed_items: cleanItems,
+          vision_detected_items: vision?.raw,
+          vision_provider: vision?.provider,
+          vision_confidence: vision?.confidence ?? null,
+        },
+      });
+      // Quality scoring (protein_tier/carb_quality/timing). score-nutrition
+      // respects calorie_estimate_status='manual_edited' and won't overwrite macros.
       try {
-        await supabase.functions.invoke("score-nutrition", { body: { nutrition_log_id: id } });
+        await supabase.functions.invoke("score-nutrition", { body: { nutrition_log_id: r.id } });
       } catch (invokeErr) {
         console.error("[meal] score-nutrition invoke failed", invokeErr);
-        // Mark the row as failed so the UI can surface "tap to retry" instead
-        // of an indefinite spinner. Best-effort; RLS scopes to current user.
-        try { await supabase.from("shield_nutrition_logs").update({ claude_score_status: "failed" }).eq("id", id); } catch {}
       }
       onSaved?.();
       onClose();
@@ -899,29 +986,67 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
     } finally { setBusy(false); }
   };
 
+  /** Editing-existing-meal flow keeps the simple description editor. */
+  const submitEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editDesc.trim() && !photoUrl) return;
+    setBusy(true); setErr(null);
+    try {
+      if (!editing) return;
+      await update({ data: { id: editing.id, meal_description: editDesc.trim(), meal_photo_url: photoUrl } });
+      try { await supabase.functions.invoke("score-nutrition", { body: { nutrition_log_id: editing.id } }); }
+      catch (invokeErr) { console.error("[meal] score-nutrition invoke failed", invokeErr); }
+      onSaved?.();
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save meal.");
+    } finally { setBusy(false); }
+  };
+
+  const title =
+    editing ? "Edit meal" :
+    step === "capture" ? "Log a meal" :
+    step === "review" ? "Review meal" :
+    "Edit meal";
+
   return (
-    <Sheet open={open} onClose={onClose} title={editing ? "Edit meal" : step === "capture" ? "Log a meal" : "Confirm what's in this meal"}>
-      {step === "capture" ? (
+    <Sheet open={open} onClose={onClose} title={title}>
+      {step === "editDesc" ? (
+        <form onSubmit={submitEdit} className="space-y-5">
+          {photoUrl && (<img src={photoUrl} alt="Meal" className="w-full max-h-44 object-cover rounded-xl" />)}
+          <div>
+            <label className="text-[12px] uppercase text-text-tertiary tracking-wider">Description</label>
+            <textarea
+              value={editDesc}
+              onChange={(e) => setEditDesc(e.target.value)}
+              rows={3}
+              className="mt-3 w-full rounded-2xl p-4 text-white placeholder:text-text-tertiary resize-none focus:outline-none"
+              style={{ background: "#0A0E1A", border: "1px solid rgba(124,58,237,0.4)", fontSize: 16 }}
+              autoFocus
+            />
+          </div>
+          {err && <p className="text-[12px] text-red-400">{err}</p>}
+          <SubmitBtn busy={busy} label="Save changes" disabled={!editDesc.trim() && !photoUrl} />
+        </form>
+      ) : step === "capture" ? (
         <div className="space-y-5">
           <div>
-            <label className="text-[12px] uppercase text-text-tertiary tracking-wider">
-              Photo (recommended)
-            </label>
+            <label className="text-[12px] uppercase text-text-tertiary tracking-wider">Photo recommended</label>
             <button type="button" onClick={() => inputRef.current?.click()}
               className="mt-3 w-full rounded-2xl py-7 flex flex-col items-center gap-2 text-white active:scale-[0.99] transition"
               style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.18), rgba(59,130,246,0.12))", border: "1px solid rgba(16,185,129,0.5)" }}>
               <Upload size={22} />
               <span className="text-[14px] font-semibold">{file ? "Photo ready" : "Tap to add a photo"}</span>
-              <span className="text-[11px] text-text-tertiary">We'll identify the food, then you confirm</span>
+              <span className="text-[11px] text-text-tertiary">You review the items before saving</span>
             </button>
             <input ref={inputRef} type="file" accept="image/*" capture="environment" className="hidden"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           </div>
           <div>
-            <label className="text-[12px] uppercase text-text-tertiary tracking-wider">Or type it</label>
+            <label className="text-[12px] uppercase text-text-tertiary tracking-wider">Anything not visible?</label>
             <textarea
-              value={desc} onChange={(e) => setDesc(e.target.value)}
-              placeholder="e.g. Grilled chicken, rice, broccoli"
+              value={note} onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. oil, sauce, drink, extra rice"
               rows={2}
               className="mt-3 w-full rounded-2xl p-4 text-white placeholder:text-text-tertiary resize-none focus:outline-none"
               style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)", fontSize: 16 }}
@@ -930,86 +1055,112 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
           {err && <p className="text-[12px] text-red-400">{err}</p>}
           <button
             type="button"
-            disabled={busy || (!file && !desc.trim())}
-            onClick={handleNext}
+            disabled={busy || (!file && !note.trim())}
+            onClick={handleDetect}
             className="w-full rounded-2xl gradient-brand py-3 text-[14px] font-semibold text-white active:scale-[0.98] transition disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {busy ? <><Loader2 size={16} className="animate-spin" /> Reading photo…</> : "Next: confirm"}
+            {busy ? <><Loader2 size={16} className="animate-spin" /> Detecting…</> : <><Sparkles size={14} /> Detect food</>}
           </button>
         </div>
       ) : (
-        <form onSubmit={submit} className="space-y-5">
-          {photoUrl && (
-            <img src={photoUrl} alt="Meal" className="w-full max-h-44 object-cover rounded-xl" />
-          )}
-          <div>
-            <label className="text-[12px] uppercase text-text-tertiary tracking-wider flex items-center gap-2">
-              {visionBusy ? <><Sparkles size={12} className="text-ai animate-pulse" /> AI is reading…</> : <><Check size={12} className="text-success" /> Edit if needed</>}
-            </label>
-            <textarea
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-              placeholder="e.g. 2 puri, sambar, coconut chutney"
-              rows={3}
-              className="mt-3 w-full rounded-2xl p-4 text-white placeholder:text-text-tertiary resize-none focus:outline-none"
-              style={{ background: "#0A0E1A", border: "1px solid rgba(124,58,237,0.4)", fontSize: 16 }}
-              autoFocus
-            />
-            <p className="mt-2 text-[11px] text-text-tertiary">
-              If quantity looks off, correct it here (e.g. "1 puri" instead of "2"). Macros are calculated from this description.
-            </p>
+        <div className="space-y-4">
+          <p className="text-[12px] text-text-tertiary">Adjust servings before saving.</p>
+          {photoUrl && (<img src={photoUrl} alt="Meal" className="w-full max-h-36 object-cover rounded-xl" />)}
+
+          {/* Top macro summary — live total */}
+          <div className="rounded-2xl p-3 grid grid-cols-4 gap-2"
+            style={{ background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.25)" }}>
+            <SummaryStat label="kcal" value={Math.round(totals.cal).toString()} />
+            <SummaryStat label="protein" value={`${Math.round(totals.p)}g`} color="#F59E0B" />
+            <SummaryStat label="carbs" value={`${Math.round(totals.c)}g`} color="#10B981" />
+            <SummaryStat label="fat" value={`${Math.round(totals.f)}g`} color="#3B82F6" />
           </div>
-          {/* Parsed-interpretation recap — re-presents what the system will log
-              (text or photo, doesn't matter) so the user actively confirms the
-              specific input rather than handing off a silent guess. Macros are
-              estimated server-side after save and surface in the meal card. */}
-          {desc.trim() && (
-            <div className="rounded-2xl p-3" style={{ background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.25)" }}>
-              <p className="text-[10px] uppercase tracking-wider text-success font-semibold flex items-center gap-1">
-                <Check size={11} /> Here's what we'll log
-              </p>
-              <p className="mt-1.5 text-[13px] text-white leading-snug">"{desc.trim()}"</p>
-              <p className="mt-1.5 text-[10px] text-text-tertiary">
-                Macros (kcal / protein / carbs / fat) are calculated from this exact text right after you confirm.
-              </p>
-            </div>
-          )}
+
+          {/* Items */}
+          <ul className="space-y-2">
+            {items.map((it, i) => (
+              <li key={i} className="rounded-2xl p-3 space-y-2" style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div className="flex items-start gap-2">
+                  <input
+                    value={it.name}
+                    onChange={(e) => updateField(i, "name", e.target.value)}
+                    className="flex-1 min-w-0 bg-transparent text-[14px] font-semibold text-white focus:outline-none"
+                    placeholder="Item name"
+                  />
+                  {it.confidence && (
+                    <span className="shrink-0 rounded-full px-1.5 py-px text-[10px] font-medium"
+                      style={{
+                        color: it.confidence === "high" ? "#10B981" : it.confidence === "low" ? "#EF4444" : "#F59E0B",
+                        background: "rgba(255,255,255,0.04)",
+                        border: "1px solid rgba(255,255,255,0.10)",
+                      }}>
+                      {it.confidence}
+                    </span>
+                  )}
+                  <button type="button" onClick={() => removeItem(i)} aria-label="Remove" className="shrink-0 text-text-tertiary p-1 active:scale-95">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-[11px] text-text-tertiary">
+                    Serving
+                    <input
+                      value={it.quantity_description ?? ""}
+                      onChange={(e) => updateField(i, "quantity_description", e.target.value)}
+                      placeholder="e.g. 1 cup"
+                      className="mt-1 w-full rounded-lg px-2 py-1.5 text-[13px] text-white bg-bg-1 border border-white/10 focus:outline-none"
+                    />
+                  </label>
+                  <label className="text-[11px] text-text-tertiary">
+                    Grams
+                    <input
+                      inputMode="decimal"
+                      value={it.estimated_grams}
+                      onChange={(e) => updateGrams(i, Number(e.target.value) || 0)}
+                      className="mt-1 w-full rounded-lg px-2 py-1.5 text-[13px] text-white tabular-nums bg-bg-1 border border-white/10 focus:outline-none"
+                    />
+                  </label>
+                </div>
+                <p className="text-[11px] text-text-tertiary tabular-nums">
+                  {Math.round(it.calories)} kcal · {Math.round(it.protein_g)}g P · {Math.round(it.carbs_g)}g C · {Math.round(it.fat_g)}g F
+                </p>
+                {(it.source || it.uncertainty_note) && (
+                  <p className="text-[10px] text-text-tertiary leading-snug">
+                    {it.source ? `Source: ${it.source}` : ""}
+                    {it.source && it.uncertainty_note ? " · " : ""}
+                    {it.uncertainty_note ?? ""}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          <button type="button" onClick={addItem}
+            className="w-full rounded-2xl px-4 py-2.5 text-[13px] text-text-secondary border border-dashed border-white/15 active:scale-[0.99] transition flex items-center justify-center gap-1.5">
+            <Plus size={14} /> Add item
+          </button>
+
           {err && <p className="text-[12px] text-red-400">{err}</p>}
           <div className="flex gap-2">
-            {!editing && (
-              <button type="button" onClick={() => setStep("capture")} className="rounded-2xl px-4 py-3 text-[14px] text-text-secondary border border-white/10">
-                Back
-              </button>
-            )}
-            <SubmitBtn busy={busy} label={editing ? "Save changes" : "Confirm & log"} disabled={!desc.trim() && !photoUrl} />
+            <button type="button" onClick={() => setStep("capture")}
+              className="rounded-2xl px-4 py-3 text-[14px] text-text-secondary border border-white/10">
+              Back
+            </button>
+            <SubmitBtn busy={busy} label="Save meal" disabled={items.length === 0} onClick={saveMeal} />
           </div>
-        </form>
+        </div>
       )}
     </Sheet>
   );
 }
 
-/** Fast Claude Sonnet vision pass to seed the description; user edits before logging. */
-async function runVisionDraft(file: File): Promise<string> {
-  const reader = new FileReader();
-  const dataUrl: string = await new Promise((resolve, reject) => {
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-  try {
-    const r = await analyzePhoto({
-      data: {
-        base64Image: dataUrl,
-        mediaType: file.type || "image/jpeg",
-        prompt:
-          "Identify the food in this image in one short phrase suitable as a meal-log description. Include visible quantity (e.g. '2 puri') when obvious. Reply with just the description text, no preamble.",
-      },
-    });
-    return (r.content || "").trim();
-  } catch {
-    return "";
-  }
+function SummaryStat({ label, value, color = "#FFFFFF" }: { label: string; value: string; color?: string }) {
+  return (
+    <div className="text-center">
+      <p className="text-[10px] uppercase tracking-wider text-text-tertiary">{label}</p>
+      <p className="mt-0.5 text-[14px] font-semibold tabular-nums" style={{ color }}>{value}</p>
+    </div>
+  );
 }
 
 export function WorkoutLogModal({ open, onClose, onSaved }: Props) {

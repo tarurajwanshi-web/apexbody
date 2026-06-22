@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, Loader2, RefreshCw, Droplet, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, RefreshCw, Droplet, X, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { AICard } from "@/components/AIOrb";
@@ -16,11 +16,21 @@ import {
   formatShortDate,
 } from "@/components/NutritionDateHeader";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
-import { getTodayMacroSummary, getWeeklyNutritionInsight, type MacroSummary, type WeeklyNutritionInsight, type WeeklyDay } from "@/lib/macros.functions";
+import {
+  getTodayMacroSummary,
+  getWeeklyNutritionInsight,
+  getMacroAdjustmentReview,
+  type MacroSummary,
+  type WeeklyNutritionInsight,
+  type WeeklyDay,
+  type MacroAdjustmentReview,
+} from "@/lib/macros.functions";
 import {
   getTodayMeals,
   getTodayHydration,
   getTodayHydrationEvents,
+  softDeleteMeal,
+  restoreMeal,
   type TodayMeal,
   type HydrationSummary,
   type HydrationEvent,
@@ -49,9 +59,13 @@ function Nutrition() {
   const [weeklySheetOpen, setWeeklySheetOpen] = useState(false);
   const [openMeal, setOpenMeal] = useState<TodayMeal | null>(null);
   const [weekly, setWeekly] = useState<WeeklyNutritionInsight | null>(null);
+  const [macroReview, setMacroReview] = useState<MacroAdjustmentReview | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [ptrDelta, setPtrDelta] = useState(0);
+  // Undo snackbar state — populated when a meal is soft-deleted.
+  const [pendingUndo, setPendingUndo] = useState<{ id: string } | null>(null);
+  const undoTimerRef = useRef<number | null>(null);
   const ptrRef = useRef<HTMLDivElement>(null);
   const ptrStart = useRef<number | null>(null);
   const fetchMacros = useServerFn(getTodayMacroSummary);
@@ -59,6 +73,9 @@ function Nutrition() {
   const fetchHydration = useServerFn(getTodayHydration);
   const fetchHydrationEvents = useServerFn(getTodayHydrationEvents);
   const fetchWeekly = useServerFn(getWeeklyNutritionInsight);
+  const fetchMacroReview = useServerFn(getMacroAdjustmentReview);
+  const softDelete = useServerFn(softDeleteMeal);
+  const restore = useServerFn(restoreMeal);
 
   const isToday = selectedDate === todayLocalISO();
   const dateLabel = formatNutritionDateLabel(selectedDate);
@@ -75,10 +92,40 @@ function Nutrition() {
         : Promise.resolve(setHydration(null)),
       fetchHydrationEvents(dateArg).then(setHydrationEvents).catch(() => setHydrationEvents([])),
       fetchWeekly(weeklyArg).then(setWeekly).catch(() => setWeekly(null)),
+      fetchMacroReview().then(setMacroReview).catch(() => setMacroReview(null)),
     ]);
     setLastUpdatedAt(Date.now());
     setRefreshing(false);
   };
+
+  // Delete a meal: optimistic UI update + show undo snackbar.
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this meal? This removes it from daily macros and weekly adherence.")) return;
+    setMeals((prev) => (prev ? prev.filter((m) => m.id !== id) : prev));
+    try {
+      await softDelete({ data: { id } });
+    } catch (e) {
+      console.error("[meal] delete failed", e);
+      reload();
+      return;
+    }
+    setPendingUndo({ id });
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = window.setTimeout(() => {
+      setPendingUndo(null);
+      reload(); // recompute downstream macros/weekly after the undo window
+    }, 5000);
+  };
+
+  const handleUndoDelete = async () => {
+    if (!pendingUndo) return;
+    const id = pendingUndo.id;
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+    setPendingUndo(null);
+    try { await restore({ data: { id } }); } catch (e) { console.error("[meal] restore failed", e); }
+    reload();
+  };
+
 
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [selectedDate]);
   useAutoRefreshOnVisible(reload, lastUpdatedAt);
@@ -273,6 +320,8 @@ function Nutrition() {
 
       <WeeklyPreviewCard weekly={weekly} onOpen={() => setWeeklySheetOpen(true)} />
 
+      <MacroReviewCard review={macroReview} />
+
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs uppercase tracking-wider text-text-tertiary">
@@ -286,7 +335,13 @@ function Nutrition() {
             {isToday ? "Tap + below to log a meal" : "Viewing this day. New meals log to today only."}
           </p>
         </div>
-        <UnifiedTimeline meals={meals} hydration={hydrationEvents} selectedDate={selectedDate} onOpenMeal={setOpenMeal} />
+        <UnifiedTimeline
+          meals={meals}
+          hydration={hydrationEvents}
+          selectedDate={selectedDate}
+          onOpenMeal={setOpenMeal}
+          onDeleteMeal={handleDelete}
+        />
       </section>
 
       {/* Compact hydration prompt — only when weight is missing so there's no
@@ -303,6 +358,21 @@ function Nutrition() {
         </div>
       )}
 
+      {/* Undo snackbar — sits above bottom nav, 5s timeout. */}
+      {pendingUndo && (
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-28 z-[90] flex items-center gap-3 rounded-full px-4 py-2.5 text-[13px] text-white shadow-lg"
+          style={{ background: "rgba(15,21,36,0.95)", border: "1px solid rgba(255,255,255,0.10)" }}>
+          <span>Meal deleted</span>
+          <button
+            type="button"
+            onClick={handleUndoDelete}
+            className="text-[13px] font-semibold text-text-accent active:scale-95"
+          >
+            Undo
+          </button>
+        </div>
+      )}
+
       <BottomNav onLogged={reload} />
       <HydrationLogModal open={hydrationOpen} onClose={() => setHydrationOpen(false)} onSaved={reload} />
       <MealDetailModal meal={openMeal} onClose={() => setOpenMeal(null)} />
@@ -310,7 +380,9 @@ function Nutrition() {
         open={weeklySheetOpen}
         onClose={() => setWeeklySheetOpen(false)}
         initialAnchor={selectedDate}
+        macroReview={macroReview}
       />
+
     </div>
   );
 }
@@ -477,12 +549,13 @@ function mealImpactTag(m: TodayMeal): { label: string; color: string; bg: string
 }
 
 function UnifiedTimeline({
-  meals, hydration, selectedDate, onOpenMeal,
+  meals, hydration, selectedDate, onOpenMeal, onDeleteMeal,
 }: {
   meals: TodayMeal[] | null;
   hydration: HydrationEvent[];
   selectedDate: string;
   onOpenMeal: (m: TodayMeal) => void;
+  onDeleteMeal?: (id: string) => void;
 }) {
   if (meals == null) {
     return (
@@ -517,10 +590,15 @@ function UnifiedTimeline({
     <div className="space-y-2">
       {rows.map((r) =>
         r.kind === "meal" ? (
-          <button
+          // div + role=button so we can render a real inner <button> for delete
+          // without nesting interactive controls.
+          <div
             key={`m-${r.meal.id}`}
+            role="button"
+            tabIndex={0}
             onClick={() => onOpenMeal(r.meal)}
-            className="w-full text-left rounded-2xl bg-bg-2 border border-white/5 p-4 active:scale-[0.99] transition"
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenMeal(r.meal); } }}
+            className="w-full text-left rounded-2xl bg-bg-2 border border-white/5 p-4 active:scale-[0.99] transition cursor-pointer"
           >
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -542,13 +620,25 @@ function UnifiedTimeline({
                   );
                 })()}
               </div>
-              <p className="font-mono text-sm tabular-nums text-text-secondary shrink-0">
-                {r.meal.claude_score_status === "scored" && r.meal.claude_quality_score != null
-                  ? `${r.meal.claude_quality_score}/100`
-                  : "scoring…"}
-              </p>
+              <div className="flex items-center gap-2 shrink-0">
+                <p className="font-mono text-sm tabular-nums text-text-secondary">
+                  {r.meal.claude_score_status === "scored" && r.meal.claude_quality_score != null
+                    ? `${r.meal.claude_quality_score}/100`
+                    : "scoring…"}
+                </p>
+                {onDeleteMeal && (
+                  <button
+                    type="button"
+                    aria-label="Delete meal"
+                    onClick={(e) => { e.stopPropagation(); onDeleteMeal(r.meal.id); }}
+                    className="h-7 w-7 rounded-full flex items-center justify-center text-text-tertiary active:scale-95 transition hover:bg-white/5"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
             </div>
-          </button>
+          </div>
         ) : (
           <div
             key={`w-${r.ev.id}`}
@@ -734,10 +824,12 @@ function WeeklyGraphSheet({
   open,
   onClose,
   initialAnchor,
+  macroReview,
 }: {
   open: boolean;
   onClose: () => void;
   initialAnchor: string;
+  macroReview: MacroAdjustmentReview | null;
 }) {
   const [anchor, setAnchor] = useState(initialAnchor);
   const [data, setData] = useState<WeeklyNutritionInsight | null>(null);
@@ -831,18 +923,32 @@ function WeeklyGraphSheet({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 pt-4">
+          {/* 🧊 Early-signal banner when fewer than 3 days are logged this week. */}
+          {data && data.logged_days < 3 && data.logged_days > 0 && (
+            <div className="mb-4 rounded-2xl px-4 py-3 text-[12px] text-text-secondary"
+              style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.20)" }}>
+              <span className="text-[13px]">🧊 Early signal</span>
+              <span className="ml-2">Log {Math.max(1, 3 - data.logged_days)} more day{3 - data.logged_days === 1 ? "" : "s"} to unlock a reliable weekly pattern.</span>
+            </div>
+          )}
           {loading && !data ? (
             <div className="py-12 flex justify-center">
               <Loader2 size={18} className="animate-spin text-text-tertiary" />
             </div>
           ) : data ? (
-            <WeeklyGraphContent data={data} />
+            <>
+              <WeeklyGraphContent data={data} />
+              <div className="mt-5">
+                <MacroReviewCard review={macroReview} compact />
+              </div>
+            </>
           ) : (
             <p className="py-8 text-center text-[12px] text-text-tertiary">
               Couldn't load this week.
             </p>
           )}
         </div>
+
       </div>
     </div>
   );
@@ -1072,3 +1178,100 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub?:
   );
 }
 
+
+// ---------------------------------------------------------------------------
+// Next target review — locked/unlocked card (review-only; no Apply in this patch)
+// ---------------------------------------------------------------------------
+
+function MacroReviewCard({ review, compact = false }: { review: MacroAdjustmentReview | null; compact?: boolean }) {
+  if (!review) return null;
+  const locked = review.decision === "Insufficient data";
+  const reqDays = review.required_logged_days;
+  const reqWeigh = review.required_weigh_ins;
+  const haveDays = Math.min(review.logged_days, reqDays);
+  const haveWeigh = Math.min(review.weigh_in_count, reqWeigh);
+
+  return (
+    <section className={`${compact ? "" : "mx-5 mt-4"} rounded-3xl bg-bg-2 border border-white/5 p-4`}>
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Next target review</p>
+        <span className="text-[11px] text-text-tertiary">
+          {formatRangeLabel(review.review_week_start, review.review_week_end)}
+        </span>
+      </div>
+
+      {locked ? (
+        <>
+          <p className="mt-2 text-[15px] font-semibold text-white">🔒 Target review locked</p>
+          <p className="mt-1 text-[12px] text-text-secondary leading-snug">
+            Log {reqDays} nutrition days and {reqWeigh} weigh-ins in last week's review window to unlock a reliable adjustment.
+          </p>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <ProgressRow label="Nutrition logs" current={review.logged_days} required={reqDays} />
+            <ProgressRow label="Weigh-ins" current={review.weigh_in_count} required={reqWeigh} />
+          </div>
+
+          {/* 7-day streak — 🔥 = logged that day. */}
+          <div className="mt-4">
+            <p className="text-[10px] uppercase tracking-wider text-text-tertiary mb-2">Last 7 days</p>
+            <div className="flex items-center justify-between">
+              {review.last7_logged_days.map((on, i) => {
+                const isToday = i === review.last7_logged_days.length - 1;
+                return (
+                  <div key={i} className="flex flex-col items-center gap-1 flex-1">
+                    <span className="text-[16px] leading-none">{on ? "🔥" : "○"}</span>
+                    <span className={`text-[10px] ${isToday ? "text-white font-semibold" : "text-text-tertiary"}`}>
+                      {isToday ? "Today" : ""}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <p className="mt-3 text-[11px] text-text-tertiary leading-snug">
+            {haveDays}/{reqDays} logged · {haveWeigh}/{reqWeigh} weigh-ins
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="mt-2 text-[15px] font-semibold text-white">
+            🔥 {review.decision === "Ready to adjust" ? "Review unlocked" : "Target review ready"}
+          </p>
+          <p className="mt-2 text-[13px] text-white">
+            {review.decision === "Ready to adjust"
+              ? `Recommended: ${review.calorie_delta > 0 ? "+" : ""}${review.calorie_delta} kcal`
+              : review.decision}
+          </p>
+          <p className="mt-1 text-[12px] text-text-secondary leading-snug">{review.reason}</p>
+          {review.recommended_target_calories != null && review.calorie_delta !== 0 && (
+            <p className="mt-2 text-[11px] text-text-tertiary tabular-nums">
+              {review.current_target_calories?.toLocaleString() ?? "—"} kcal → {review.recommended_target_calories.toLocaleString()} kcal
+            </p>
+          )}
+          <p className="mt-3 text-[10px] text-text-tertiary">
+            Review only · apply targets manually in Settings for now.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function ProgressRow({ label, current, required }: { label: string; current: number; required: number }) {
+  const done = current >= required;
+  const pct = Math.min(100, Math.round((current / required) * 100));
+  return (
+    <div className="rounded-2xl bg-white/[0.03] border border-white/5 px-3 py-2">
+      <p className="text-[11px] text-text-tertiary">{label}</p>
+      <p className="mt-0.5 text-[14px] font-semibold tabular-nums text-white">
+        {current} <span className="text-text-tertiary text-[12px]">/ {required}</span>
+        {done && <span className="ml-1 text-success">✓</span>}
+      </p>
+      <div className="mt-1.5 h-1 rounded-full bg-white/5 overflow-hidden">
+        <div className="h-full" style={{ width: `${pct}%`, background: done ? "#10B981" : "#3B82F6" }} />
+      </div>
+    </div>
+  );
+}
