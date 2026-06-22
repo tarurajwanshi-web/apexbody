@@ -40,6 +40,7 @@ const GOAL_LABEL: Record<string, string> = {
 };
 
 function Nutrition() {
+  const [selectedDate, setSelectedDate] = useState<string>(() => todayLocalISO());
   const [macros, setMacros] = useState<MacroSummary | null>(null);
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
   const [hydration, setHydration] = useState<HydrationSummary | null>(null);
@@ -56,19 +57,28 @@ function Nutrition() {
   const fetchHydration = useServerFn(getTodayHydration);
   const fetchHydrationEvents = useServerFn(getTodayHydrationEvents);
 
+  const isToday = selectedDate === todayLocalISO();
+  const dateLabel = formatNutritionDateLabel(selectedDate);
+
   const reload = async () => {
     setRefreshing(true);
+    const dateArg = { data: { entryDate: selectedDate } } as any;
     await Promise.allSettled([
-      fetchMacros().then(setMacros),
-      fetchMeals().then(setMeals).catch(() => setMeals([])),
-      fetchHydration().then(setHydration).catch(() => {}),
-      fetchHydrationEvents().then(setHydrationEvents).catch(() => setHydrationEvents([])),
+      fetchMacros(dateArg).then(setMacros),
+      fetchMeals(dateArg).then(setMeals).catch(() => setMeals([])),
+      // Hydration card stays scoped to today (target / quick-add are today-only);
+      // skip the fetch on past dates so we don't show today's bottle as if it
+      // belonged to the selected past day.
+      isToday
+        ? fetchHydration().then(setHydration).catch(() => {})
+        : Promise.resolve(setHydration(null)),
+      fetchHydrationEvents(dateArg).then(setHydrationEvents).catch(() => setHydrationEvents([])),
     ]);
     setLastUpdatedAt(Date.now());
     setRefreshing(false);
   };
 
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [selectedDate]);
   useAutoRefreshOnVisible(reload, lastUpdatedAt);
 
   // Pull-to-refresh.
