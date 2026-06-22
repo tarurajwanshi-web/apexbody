@@ -39,7 +39,11 @@ import { debugReadMealById, debugListMealsForDate } from "@/lib/shield.functions
 import { supabase } from "@/integrations/supabase/client";
 import { getBrowserTimezone } from "@/lib/dates";
 
-const DIAG_BUILD_STAMP = new Date().toISOString();
+declare const __APP_BUILD_TIMESTAMP__: string;
+const DIAG_BUILD_STAMP =
+  typeof __APP_BUILD_TIMESTAMP__ !== "undefined" ? __APP_BUILD_TIMESTAMP__ : "unknown";
+const DIAG_MODULE_LOADED_AT = new Date().toISOString();
+
 
 
 export const Route = createFileRoute("/nutrition")({
@@ -216,6 +220,10 @@ function Nutrition() {
         : isIOS || isAndroid ? "Mobile browser" : "Desktop browser";
       setDiag({
         build: DIAG_BUILD_STAMP,
+        moduleLoadedAt: DIAG_MODULE_LOADED_AT,
+        mode: (import.meta as any).env?.MODE ?? null,
+        dev: !!(import.meta as any).env?.DEV,
+
         runtime,
         userAgent: ua,
         supabaseUrl: (import.meta as any).env?.VITE_SUPABASE_URL ?? null,
