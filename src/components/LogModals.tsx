@@ -823,6 +823,14 @@ function buildPerGram(it: ConfirmedMealItem): { cal: number; p: number; c: numbe
   };
 }
 
+function inferMealSlot(): "breakfast" | "lunch" | "dinner" | "snack" {
+  const hour = new Date().getHours();
+  if (hour < 11) return "breakfast";
+  if (hour < 15) return "lunch";
+  if (hour < 20) return "dinner";
+  return "snack";
+}
+
 export function MealLogModal({ open, onClose, onSaved, editing = null }: MealProps) {
   const [step, setStep] = useState<"capture" | "review" | "editDesc">("capture");
   const [note, setNote] = useState("");
@@ -833,6 +841,7 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [vision, setVision] = useState<{ raw: ConfirmedMealItem[]; provider: string; confidence: number | null } | null>(null);
   const [editDesc, setEditDesc] = useState("");
+  const [mealSlot, setMealSlot] = useState<"breakfast" | "lunch" | "dinner" | "snack">(inferMealSlot);
   const inputRef = useRef<HTMLInputElement>(null);
   const create = useServerFn(logMeal);
   const update = useServerFn(updateMeal);
@@ -842,6 +851,7 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
     if (!open) {
       setStep("capture"); setNote(""); setFile(null); setPhotoUrl(null);
       setErr(null); setItems([]); setVision(null); setEditDesc("");
+      setMealSlot(inferMealSlot());
       return;
     }
     if (editing) {
@@ -850,6 +860,7 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
       setPhotoUrl(editing.meal_photo_url ?? null);
     } else {
       setStep("capture");
+      setMealSlot(inferMealSlot());
     }
   }, [open, editing]);
 
