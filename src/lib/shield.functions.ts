@@ -219,15 +219,19 @@ export const setBodyweightKg = createServerFn({ method: "POST" })
 export type HydrationEvent = { id: string; amount_ml: number; created_at: string };
 export const getTodayHydrationEvents = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<HydrationEvent[]> => {
-    const { data, error } = await context.supabase
+  .inputValidator((d: unknown) =>
+    z.object({ entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional().parse(d),
+  )
+  .handler(async ({ data, context }): Promise<HydrationEvent[]> => {
+    const entryDate = data?.entryDate ?? today();
+    const { data: rows, error } = await context.supabase
       .from("hydration_events")
       .select("id, amount_ml, created_at")
       .eq("user_id", context.userId)
-      .eq("entry_date", today())
+      .eq("entry_date", entryDate)
       .order("created_at", { ascending: true });
     if (error) throw new Error(error.message);
-    return (data ?? []) as HydrationEvent[];
+    return (rows ?? []) as HydrationEvent[];
   });
 
 
