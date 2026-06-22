@@ -972,6 +972,7 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
           vision_detected_items: vision?.raw,
           vision_provider: vision?.provider,
           vision_confidence: vision?.confidence ?? null,
+          client_timezone: getBrowserTimezone(),
         },
       });
       // Quality scoring (protein_tier/carb_quality/timing). score-nutrition
