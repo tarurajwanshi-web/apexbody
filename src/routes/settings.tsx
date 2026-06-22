@@ -71,12 +71,12 @@ function Settings() {
   const handleResetOnboarding = async () => {
     try {
       const { data: u } = await supabase.auth.getUser();
-      if (u.user) {
-        await supabase.from("profiles").update({ profile_completed_at: null }).eq("user_id", u.user.id);
-      }
+      if (!u.user) return;
+      await supabase.from("profiles")
+        .update({ soft_reset_at: new Date().toISOString() })
+        .eq("user_id", u.user.id);
       reset();
-      try { localStorage.removeItem("apex_journey_start"); } catch {}
-      navigate({ to: "/onboarding" });
+      navigate({ to: "/onboarding", search: { reset: "true" } });
     } catch (e: any) {
       toast.error(e?.message ?? "Could not reset");
     }
@@ -156,19 +156,20 @@ function Settings() {
           onClick={() => setConfirmReset(true)}
           className="mx-5 mt-3 w-[calc(100%-2.5rem)] flex items-center justify-center gap-2 rounded-2xl bg-bg-2 border border-danger/30 text-danger py-3.5 text-sm font-semibold"
         >
-          <RotateCcw size={16} /> Reset onboarding
+          <RotateCcw size={16} /> Reset training & nutrition
         </button>
       ) : (
         <div className="mx-5 mt-3 rounded-2xl border border-danger/40 bg-danger/5 p-4 space-y-3">
+          <p className="text-[13px] font-semibold text-text-primary">Reset training & nutrition</p>
           <p className="text-[13px] text-text-primary">
-            Reset onboarding will return you to step 1 of the setup flow. Your account and logged data are not deleted.
+            This recalculates your macro targets and training plan. Your meal logs, body measurements, and history are kept.
           </p>
           <div className="flex gap-2">
             <button
               onClick={handleResetOnboarding}
               className="flex-1 rounded-xl bg-danger text-white py-2.5 text-sm font-semibold"
             >
-              Yes, reset
+              Yes, reset plan
             </button>
             <button
               onClick={() => setConfirmReset(false)}
@@ -180,14 +181,11 @@ function Settings() {
         </div>
       )}
 
-      <footer className="mx-5 mt-10 text-center space-y-2 select-none">
-        <p className="text-[10px] text-text-tertiary tracking-wide">Powered by Anthropic Claude</p>
-        <p className="text-[11px] text-text-secondary font-semibold tracking-wide">APEX v1.1 MVP</p>
+      <footer className="mx-5 mt-10 text-center select-none">
         <p className="text-[10px] text-text-tertiary leading-relaxed">
-          © 2026 APEX. All rights reserved.<br />
-          APEX, the APEX shield, and the APEX logo are proprietary<br />
-          marks. Unauthorized use, reproduction, or distribution of<br />
-          the APEX name, mark, or shield design is prohibited.
+          APEX Shield and APEX Intelligence are proprietary algorithms.<br />
+          Unauthorized use, reproduction, or distribution is prohibited.<br />
+          © 2026 APEX. All rights reserved.
         </p>
       </footer>
 
