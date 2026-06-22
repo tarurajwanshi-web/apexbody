@@ -220,6 +220,10 @@ function Nutrition() {
         : isIOS || isAndroid ? "Mobile browser" : "Desktop browser";
       setDiag({
         build: DIAG_BUILD_STAMP,
+        moduleLoadedAt: DIAG_MODULE_LOADED_AT,
+        mode: (import.meta as any).env?.MODE ?? null,
+        dev: !!(import.meta as any).env?.DEV,
+
         runtime,
         userAgent: ua,
         supabaseUrl: (import.meta as any).env?.VITE_SUPABASE_URL ?? null,
