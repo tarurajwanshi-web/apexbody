@@ -237,14 +237,30 @@ function Coach() {
 }
 
 function LockedHero({
-  name, daysUntilUnlock, activity,
-}: { name: string; daysUntilUnlock: number | null; activity: ActivityWeek | null }) {
+  name, daysUntilUnlock, activity, userTz,
+}: { name: string; daysUntilUnlock: number | null; activity: ActivityWeek | null; userTz: string }) {
   const last7 = activity?.last7 ?? Array.from({ length: 7 }, () => false);
+  const last7Dates = activity?.last7_dates ?? Array.from({ length: 7 }, (_, i) =>
+    addDaysISO(getLocalDateISO(userTz), -(6 - i)),
+  );
   const streak = activity?.streak ?? 0;
   const totalDays = 7;
   const dayOfJourney = daysUntilUnlock != null ? Math.max(1, totalDays - daysUntilUnlock) : 1;
   const progressPct = Math.min(100, Math.round((dayOfJourney / totalDays) * 100));
-  const today = new Date();
+  const todayLogged = last7[6] === true;
+
+  // Build shared streak strip data.
+  const days: ApexStreakDay[] = last7Dates.map((iso, i) => {
+    const [y, m, d] = iso.split("-").map(Number);
+    const dt = new Date(y, (m ?? 1) - 1, d ?? 1);
+    const dow = (dt.getDay() + 6) % 7;
+    return {
+      date: iso,
+      label: DAY_LETTERS[dow],
+      is_today: i === 6,
+      is_logged: last7[i] === true,
+    };
+  });
 
   return (
     <>
@@ -302,32 +318,13 @@ function LockedHero({
               <span className="tabular-nums">{streak}</span> day streak
             </span>
           </div>
-          <div className="grid grid-cols-7 gap-2">
-            {last7.map((logged, i) => {
-              const d = new Date(today);
-              d.setDate(d.getDate() - (6 - i));
-              const dow = (d.getDay() + 6) % 7;
-              const letter = DAY_LETTERS[dow];
-              const isTodayCell = i === 6;
-              return (
-                <div key={i} className="flex flex-col items-center gap-1">
-                  <div
-                    className="h-9 w-9 rounded-xl flex items-center justify-center text-[11px] font-bold transition"
-                    style={
-                      logged
-                        ? { background: "linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%)", color: "white", boxShadow: "0 0 10px rgba(124,58,237,0.4)" }
-                        : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#6B7280" }
-                    }
-                  >
-                    {letter}
-                  </div>
-                  {isTodayCell && (
-                    <span className="text-[9px] text-text-accent uppercase tracking-wider font-semibold">Today</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <ApexStreakStrip days={days} variant="coach" />
+          <p className="mt-3 text-[11px] text-text-secondary">
+            {todayLogged ? "Today counted 🔥" : "Log today to keep your unlock streak alive."}
+          </p>
+          <p className="mt-1 text-[10px] text-text-tertiary leading-relaxed">
+            Today counts when you log a meal, recovery, workout, measurement, or device data.
+          </p>
         </div>
       </section>
     </>
