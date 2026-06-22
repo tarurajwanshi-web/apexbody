@@ -1,128 +1,99 @@
-## Verification Report (read-only) — and a critical follow-up
+## Three verification gaps — read-only analysis + one seeded live test
 
-All requested source/SQL is shown below verbatim. One **new bug** was found while gathering it (the disabled cron command). Live tests #3 and #4 are deferred to build mode because they would mutate data and need to run after the bug is fixed.
+### Gap 1 — `sandbox_exec` role explanation + revoke
 
----
+**What it is.** `sandbox_exec` is the Postgres role that the Lovable sandbox tooling uses to run `psql` from `code--exec`. It is a development-time identity owned by the platform, NOT a runtime application role. The browser/edge-function path uses `anon` (unauthenticated requests) and `authenticated` (signed-in users), with `service_role` for server-side privileged calls.
 
-### 1. Shared auth helper — `supabase/functions/_shared/authorize.ts`
+**Why it currently has EXECUTE.** Postgres' default behavior: when a function is created without an explicit `REVOKE`, `EXECUTE` is granted to `PUBLIC`, which `sandbox_exec` inherits. The grant on `get_dispatch_secret()` was needed once — for the `psql` call in the previous turn's `#3` positive test, which dispatched the weekly function via `public.get_dispatch_secret()` from this sandbox.
 
-```ts
-let _cachedInternalSecret: string | null = null;
+**Is it required going forward?** No. Production runtime needs only `postgres` (owner) and `service_role` (SECURITY DEFINER functions and DB dispatch triggers run under their owner anyway — the EXECUTE grant on the wrapper is only checked at call time). Future verification dispatches from this sandbox can be done via the existing `shield_dispatch_calculate_score` / `shield_dispatch_parse_device_upload` SECURITY DEFINER wrappers, or via `supabase--read_query` using a thin throwaway wrapper if ever needed.
 
-export function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
-async function loadInternalSecret(supa: SupabaseClient): Promise<string | null> {
-  if (_cachedInternalSecret) return _cachedInternalSecret;
-  const { data, error } = await supa.rpc("get_dispatch_secret");
-  if (error || typeof data !== "string" || !data) return null;
-  _cachedInternalSecret = data;
-  return _cachedInternalSecret;
-}
-
-export async function authorizeCaller(req, supa, body_user_id?) {
-  const internalSecret = req.headers.get("x-internal-secret");
-  if (internalSecret) {
-    const expected = await loadInternalSecret(supa);
-    if (expected && constantTimeEqual(internalSecret, expected)) return { ok: true, userId: null };
-    return { ok: false, status: 401, error: "invalid internal secret" };
-  }
-  const authHeader = req.headers.get("authorization") || req.headers.get("Authorization");
-  if (!authHeader || !authHeader.toLowerCase().startsWith("bearer ")) {
-    return { ok: false, status: 401, error: "unauthorized: missing bearer token or internal secret" };
-  }
-  const token = authHeader.slice(7).trim();
-  const { data: userData, error } = await supa.auth.getUser(token);
-  if (error || !userData?.user) return { ok: false, status: 401, error: "unauthorized: invalid token" };
-  if (body_user_id && body_user_id !== userData.user.id) {
-    return { ok: false, status: 403, error: "forbidden: user_id does not match authenticated caller" };
-  }
-  return { ok: true, userId: userData.user.id };
-}
-
-export async function requireInternalSecret(req, supa) {
-  const internalSecret = req.headers.get("x-internal-secret");
-  if (!internalSecret) return { ok: false, status: 401, error: "unauthorized: x-internal-secret header required" };
-  const expected = await loadInternalSecret(supa);
-  if (expected && constantTimeEqual(internalSecret, expected)) return { ok: true, userId: null };
-  return { ok: false, status: 401, error: "invalid internal secret" };
-}
-```
+**Action:** Revoke EXECUTE from `sandbox_exec` and from `PUBLIC` (belt-and-braces). Final grants: `{postgres, service_role}` only. Re-query `pg_proc.proacl` after and report.
 
 ---
 
-### 2. SQL — dispatch functions, get_dispatch_secret, cron
+### Gap 2 — Auth-before-side-effects evidence (no execution; quote source lines)
 
-**`get_dispatch_secret()`** — SECURITY DEFINER, `search_path = vault, public`:
+For each of the three functions, I'll reproduce the line range that proves `authorizeCaller(...)` runs and returns non-OK BEFORE any Claude call, image fetch, or DB write. The evidence already pulled in this turn:
+
+- **`generate-plan/index.ts`** — line 74 `authorizeCaller(req, supa, user_id)`; non-OK returns at line 76. The first `callClaude(...)` is at line 125. First DB write (`weekly_plans` upsert) at line 139+. **Anthropic key is even read from env at line 65 but only USED after auth (line 80 check is just a presence check that runs after auth).**
+- **`score-nutrition/index.ts`** — body fetch at line 47, row fetch at line 55 (needed to know the row's owner), then `authorizeCaller(req, supabase, row.user_id)` at line 71 with non-OK return at line 73–75. First mutation (`markFailed`) at line 87 only on `!anthropicKey`. First `fetch(row.meal_photo_url)` at line 112; first Claude call later. All AFTER auth.
+- **`parse-device-upload/index.ts`** — row fetch at lines 47–60 (id-based or user+date), `authorizeCaller(req, supabase, row.user_id)` at line 72 with non-OK return at 73–75. First mutation (`markFailed`) at line 80, image fetch at line 104, Claude call later. All AFTER auth.
+
+I will paste the exact line slices in the final report. No code change in this gap.
+
+---
+
+### Gap 3 — Seeded previous-week weekly review
+
+**Test subject:** existing user `15f6216f-a5c9-4956-86a3-f7cf4c7089d3` (already has an active `daily_macro_targets` row with `target_calories=2214`, `effective_start_date=2026-06-21`).
+
+**Pre-flight checks (read-only):**
+1. Confirm the user has a `profiles` row with `biological_sex`, `age`, `goal`, `timezone` populated (eligibility requires all three). If any missing → seed minimal values via migration (`UPDATE profiles ...`).
+2. Confirm no existing `nutrition_weekly_reviews` row for `(user_id, week_start_date=2026-06-15)` — if one exists, delete it so the run isn't skipped by idempotency.
+
+**Seed (via migration — schema-free, but it's data mutation; this project routes inserts through migrations per platform rules):**
+
 ```sql
-CREATE OR REPLACE FUNCTION public.get_dispatch_secret()
- RETURNS text LANGUAGE sql STABLE SECURITY DEFINER
- SET search_path TO 'vault', 'public'
-AS $$ SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name='dispatch_secret' LIMIT 1; $$;
+-- 4 weigh-ins over the Mon–Sun window (need ≥4 for eligibility)
+INSERT INTO body_measurement_events (user_id, entry_date, weight_kg) VALUES
+  ('15f6216f-…','2026-06-15', 80.0),
+  ('15f6216f-…','2026-06-17', 79.8),
+  ('15f6216f-…','2026-06-19', 79.6),
+  ('15f6216f-…','2026-06-21', 79.4);
+
+-- 6 distinct days of nutrition logs with estimated calories (≥5 needed; adherence 6/7 ≈ 85.7%)
+-- Each row at calorie_estimate_status='estimated' so the calorie-validity gap (#9) is sidestepped per
+-- the prior runbook's explicit instruction.
+INSERT INTO shield_nutrition_logs (user_id, entry_date, meal_description, calorie_estimate_status, estimated_calories) VALUES
+  ('15f6216f-…','2026-06-15','seed','estimated', 2100),
+  ('15f6216f-…','2026-06-16','seed','estimated', 2150),
+  ('15f6216f-…','2026-06-17','seed','estimated', 2200),
+  ('15f6216f-…','2026-06-18','seed','estimated', 2100),
+  ('15f6216f-…','2026-06-19','seed','estimated', 2050),
+  ('15f6216f-…','2026-06-20','seed','estimated', 2200);
+-- 6 days logged, 4 weigh-ins, adherence 85.7% → "medium" tier
+-- Trend: 80.0 → 79.4 = -0.6 kg over window
+-- observed_tdee ≈ avg_intake (≈2133) + (0.6×7700)/7 ≈ 2133 + 660 ≈ 2793 kcal
+-- blended_tdee (medium) = 0.70×old_tdee + 0.30×2793
 ```
-Grants (`pg_proc.proacl`): `{postgres=X/postgres, service_role=X/postgres, sandbox_exec=X/postgres}` — **no PUBLIC, no anon, no authenticated**. ✅
 
-**`shield_dispatch_calculate_score`** and **`shield_dispatch_parse_device_upload`** — both SECURITY DEFINER, `search_path = public, extensions, vault`, both read from `vault.decrypted_secrets` and POST with `x-internal-secret` header (full bodies retrieved verbatim from `pg_get_functiondef`). Grants on both: `{postgres, service_role, sandbox_exec}` only — `PUBLIC/anon/authenticated` revoked. ✅
-
-**Cron job (`adaptive-macros-weekly`, `0 13 * * 1`, `active=false`):**
+**Invoke:** same Vault-derived internal-secret path used by the patched cron (and by the prior turn's #3 test):
 ```sql
 SELECT net.http_post(
-  url := 'https://toixlzfmxtmtypmupcuc.supabase.co/functions/v1/calculate-macros-weekly',
-  headers := jsonb_build_object(
-    'Content-Type', 'application/json',
-    'x-internal-secret', (SELECT value FROM public.internal_secrets WHERE name = 'dispatch_secret')
-  ),
+  url := '…/calculate-macros-weekly',
+  headers := jsonb_build_object('Content-Type','application/json','x-internal-secret', public.get_dispatch_secret()),
   body := '{}'::jsonb
 );
 ```
+(Note: if Gap 1's revoke has already landed, switch to the `shield_dispatch_calculate_score` precedent — wrap the call in a one-shot SECURITY DEFINER helper, or use the cron-job approach by inserting a one-time job set to fire in the next minute and immediately disable it. Cleanest: run Gap 3 BEFORE Gap 1's revoke, then revoke. Confirming this ordering in the plan.)
 
-### 🚨 Critical finding — cron command is broken
+**Then read & report:**
+```sql
+SELECT id, user_id, week_start_date, week_end_date, weigh_in_count, days_logged,
+       adherence_pct, eligible, confidence_tier, old_target_calories, new_observed_tdee,
+       blended_tdee, raw_target_calories, new_target_calories, adjustment_kcal,
+       decision, flag_reason, applied_target_id, applied_at, timezone_used
+FROM nutrition_weekly_reviews
+WHERE user_id='15f6216f-…' AND week_start_date='2026-06-15';
 
-The cron command still queries `public.internal_secrets`, which the latest migration **dropped**. If enabled today, `net.http_post` would be called with `x-internal-secret` = `NULL` (since the subselect errors), and `requireInternalSecret` would correctly reject every call with 401. The cron would silently do nothing.
+SELECT id, effective_start_date, effective_end_date, target_calories, source, review_id
+FROM daily_macro_targets
+WHERE user_id='15f6216f-…'
+ORDER BY effective_start_date DESC LIMIT 3;
+```
 
-This must be fixed **before** any live positive-path test of #3 is meaningful.
+Paste actual values. Cron stays `active=false`.
 
 ---
 
-### 3. & 4. Live tests — deferred
+### Execution order in build mode
 
-- **#3** (positive internal dispatch): cannot run truthfully until the cron command above is rewritten to use `vault.decrypted_secrets` (matching the dispatch trigger functions).
-- **#4** (cross-user 403): requires invoking each function with (a) no auth, (b) the preview user's JWT against their own row, (c) the preview user's JWT against another user's row. Each call may write to `daily_macro_targets` / `weekly_plans` / scoring tables, so it needs build mode.
+1. Pre-flight read (profile completeness, no prior review row).
+2. Seed migration (weigh-ins + logs; possibly profile field fill).
+3. Invoke weekly function via Vault path; capture `net._http_response` body.
+4. Read & paste the review row + the affected `daily_macro_targets` rows.
+5. Cleanup migration: delete seeded weigh-ins, logs, the review row (and revert the new target if one was inserted, by closing it and reopening the prior row to its prior state — recorded in step 4 so we can reverse precisely).
+6. Revoke `EXECUTE ON FUNCTION public.get_dispatch_secret() FROM PUBLIC, sandbox_exec;` and re-query `proacl`.
 
----
-
-### Proposed build-mode work
-
-1. **Fix the cron command** via migration:
-   ```sql
-   SELECT cron.alter_job(
-     job_id := (SELECT jobid FROM cron.job WHERE jobname='adaptive-macros-weekly'),
-     command := $cmd$
-       SELECT net.http_post(
-         url := 'https://toixlzfmxtmtypmupcuc.supabase.co/functions/v1/calculate-macros-weekly',
-         headers := jsonb_build_object(
-           'Content-Type','application/json',
-           'x-internal-secret', (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name='dispatch_secret')
-         ),
-         body := '{}'::jsonb
-       );
-     $cmd$
-   );
-   ```
-   Leave `active=false`.
-
-2. **Run #3 positive test:** invoke `calculate-macros-weekly` once via `net.http_post` from a SQL call (same path the cron uses), then read `nutrition_weekly_reviews` / edge logs to confirm it reached the handler and returned 200. Cron stays disabled.
-
-3. **Run #4 ownership tests** for each of the 5 functions via `supabase--curl_edge_functions`:
-   - no auth → expect 401
-   - preview user's JWT, own user_id / own row → expect 200
-   - preview user's JWT, other user_id / other row → expect 403
-   Use a throwaway second user_id (random UUID) for the cross-user case so we don't need a second real session — `authorizeCaller` rejects on the JWT/body mismatch before any DB write.
-
-4. Paste exact status codes + response bodies and stop.
-
-No other audit items will be touched.
+No code in the three edge functions changes. No cron enable. No #9 work.
