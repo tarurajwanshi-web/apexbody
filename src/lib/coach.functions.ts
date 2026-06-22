@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { resolveUserTimezone, getLocalDateISO } from "@/lib/dates";
 
 // All coach AI calls go DIRECTLY to api.anthropic.com using ANTHROPIC_API_KEY.
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -117,7 +118,8 @@ export const getOrCreateDailyInsight = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => CachedInsightInput.parse(d))
   .handler(async ({ data, context }) => {
-    const today = new Date().toISOString().slice(0, 10);
+    const tz = await resolveUserTimezone(context.supabase, context.userId);
+    const today = getLocalDateISO(tz);
     const { data: existing } = await context.supabase
       .from("daily_ai_insights")
       .select("content")

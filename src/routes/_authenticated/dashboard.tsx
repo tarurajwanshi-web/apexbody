@@ -12,6 +12,7 @@ import { RefreshStamp } from "@/components/RefreshStamp";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { supabase } from "@/integrations/supabase/client";
 import { scoreColor, isExtreme, scoreColorRgba } from "@/lib/score-color";
+import { useUserTimezone, getLocalDateISO } from "@/lib/dates";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — APEX" }] }),
@@ -43,6 +44,7 @@ const PILLAR_META: { key: "recovery" | "sleep" | "nutrition" | "training" | "moo
 function Dashboard() {
   const { profile, update } = useProfile();
   const navigate = useNavigate();
+  const userTz = useUserTimezone();
   const [day, setDay] = useState(1);
   const [greet, setGreet] = useState("Hello");
   const [insight, setInsight] = useState("Your recovery is strong. Ready to push intensity today.");
@@ -54,7 +56,7 @@ function Dashboard() {
     if (typeof window === "undefined") return false;
     try {
       const stored = localStorage.getItem("apex_insight_dismissed_at");
-      return stored === new Date().toISOString().slice(0, 10);
+      return stored === getLocalDateISO(typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC");
     } catch { return false; }
   });
   const [expanded, setExpanded] = useState(false);
@@ -84,7 +86,7 @@ function Dashboard() {
     try {
       const { data: u } = await supabase.auth.getUser();
       if (!u.user) return;
-      const todayIso = new Date().toISOString().slice(0, 10);
+      const todayIso = getLocalDateISO(userTz);
       const jsDay = new Date().getDay();
       const todayIdx = (jsDay + 6) % 7;
       const [planRes, logsRes] = await Promise.all([
@@ -220,7 +222,7 @@ function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [day]);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getLocalDateISO(userTz);
   const hasToday = !!readiness && readiness.score_date === today;
   const inLearning = day <= LEARNING_DAYS;
   const week = Math.max(1, Math.ceil((day - LEARNING_DAYS) / 7));
@@ -346,7 +348,7 @@ function Dashboard() {
             <button
               onClick={() => {
                 setInsightDismissed(true);
-                try { localStorage.setItem("apex_insight_dismissed_at", new Date().toISOString().slice(0,10)); } catch {}
+                try { localStorage.setItem("apex_insight_dismissed_at", getLocalDateISO(userTz)); } catch {}
               }}
               className="rounded-full px-3 py-1.5 text-[12px] font-medium text-text-secondary active:scale-[0.98] transition"
               style={{ border: "1px solid rgba(255,255,255,0.12)" }}

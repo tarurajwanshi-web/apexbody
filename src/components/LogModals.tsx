@@ -207,7 +207,8 @@ function ManualRecoveryForm({ onSaved }: { onSaved: () => void }) {
   );
 }
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+import { getBrowserTimezone, getLocalDateISO } from "@/lib/dates";
+function todayISO() { return getLocalDateISO(getBrowserTimezone()); }
 
 function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
   const [source, setSource] = useState<"whoop" | "oura" | "garmin">("whoop");
