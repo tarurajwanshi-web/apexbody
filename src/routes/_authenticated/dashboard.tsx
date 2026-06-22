@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Sparkles, Flame, Heart, BookOpen, RefreshCw, Dumbbell, Droplet } from "lucide-react";
 import { useProfile } from "@/lib/store";
@@ -21,17 +21,6 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 
 const LEARNING_DAYS = 7;
 
-function getDayOfJourney(): number {
-  if (typeof window === "undefined") return 1;
-  const key = "apex_journey_start";
-  let start = localStorage.getItem(key);
-  if (!start) {
-    start = String(Date.now());
-    localStorage.setItem(key, start);
-  }
-  const days = Math.floor((Date.now() - Number(start)) / 86400000) + 1;
-  return Math.max(1, days);
-}
 
 const PILLAR_META: { key: "recovery" | "sleep" | "nutrition" | "training" | "mood"; label: string; color: string }[] = [
   { key: "recovery", label: "Recovery", color: "#10B981" },
@@ -45,7 +34,15 @@ function Dashboard() {
   const { profile, update } = useProfile();
   const navigate = useNavigate();
   const userTz = useUserTimezone();
-  const [day, setDay] = useState(1);
+  const [serverProfile, setServerProfile] = useState<{ profile_completed_at: string | null } | null>(null);
+  const day = useMemo(() => {
+    const completed = serverProfile?.profile_completed_at;
+    if (!completed) return 1;
+    const diff = Math.floor(
+      (Date.now() - new Date(completed).getTime()) / 86400000
+    );
+    return Math.max(1, diff + 1);
+  }, [serverProfile?.profile_completed_at]);
   const [greet, setGreet] = useState("Hello");
   const [insight, setInsight] = useState("Your recovery is strong. Ready to push intensity today.");
   const [insightTime] = useState("Just now");

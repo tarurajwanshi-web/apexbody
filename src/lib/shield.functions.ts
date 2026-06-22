@@ -251,6 +251,19 @@ export const getTodayHydrationEvents = createServerFn({ method: "GET" })
     return (rows ?? []) as HydrationEvent[];
   });
 
+export const deleteHydrationEvent = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("hydration_events")
+      .delete()
+      .eq("id", data.id)
+      .eq("user_id", context.userId);
+    if (error) throw new Error(error.message);
+    return { id: data.id, deleted: true };
+  });
+
 
 export const upsertDeviceRecovery = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
