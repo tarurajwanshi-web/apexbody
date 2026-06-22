@@ -35,6 +35,12 @@ import {
   type HydrationSummary,
   type HydrationEvent,
 } from "@/lib/shield.functions";
+import { debugReadMealById, debugListMealsForDate } from "@/lib/shield.functions";
+import { supabase } from "@/integrations/supabase/client";
+import { getBrowserTimezone } from "@/lib/dates";
+
+const DIAG_BUILD_STAMP = new Date().toISOString();
+
 
 export const Route = createFileRoute("/nutrition")({
   head: () => ({ meta: [{ title: "Nutrition — APEX" }] }),
@@ -76,6 +82,8 @@ function Nutrition() {
   const fetchWeekly = useServerFn(getWeeklyNutritionInsight);
   const fetchMacroReview = useServerFn(getMacroAdjustmentReview);
   const softDelete = useServerFn(softDeleteMeal);
+  const debugReadMeal = useServerFn(debugReadMealById);
+
   const restore = useServerFn(restoreMeal);
 
   const todayISO = getLocalDateISO(userTz);
@@ -131,14 +139,21 @@ function Nutrition() {
     // Server confirmed the row is `deleted=true`; refresh every downstream
     // surface now so calories/macros/weekly subtract immediately.
     await reloadNutritionSnapshot();
-    if (import.meta.env.DEV) {
+    if (import.meta.env.DEV || (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("diag") === "1")) {
       const stillThere = (meals ?? []).some((m) => m.id === id);
-      console.log("[meal-delete] post-reload", {
-        id,
-        stillPresentInList: stillThere,
-        kcalAfter: macros?.consumed_calories ?? 0,
-      });
+      try {
+        const dbTruth = await debugReadMeal({ data: { id } } as any);
+        console.log("[meal-delete] post-reload", {
+          id,
+          stillPresentInList: stillThere,
+          kcalAfter: macros?.consumed_calories ?? 0,
+          dbTruth,
+        });
+      } catch (e) {
+        console.log("[meal-delete] post-reload (debug read failed)", e);
+      }
     }
+
     setPendingUndo({ id });
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     undoTimerRef.current = window.setTimeout(() => setPendingUndo(null), 5000);
@@ -162,6 +177,54 @@ function Nutrition() {
 
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [selectedDate]);
   useAutoRefreshOnVisible(reload, lastUpdatedAt);
+
+  // ---- Diagnostics panel (gated by ?diag=1 or DEV) ----
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diag, setDiag] = useState<any>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const enabled = import.meta.env.DEV || new URLSearchParams(window.location.search).get("diag") === "1";
+    setDiagOpen(enabled);
+  }, []);
+  const fetchDebugList = useServerFn(debugListMealsForDate);
+  const refreshDiag = async () => {
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const uid = u.user?.id ?? null;
+      const provider = (u.user?.app_metadata as any)?.provider ?? (u.user?.identities?.[0]?.provider ?? null);
+      let profileRow: any = null;
+      if (uid) {
+        const { data } = await supabase
+          .from("profiles")
+          .select("id, user_id, timezone")
+          .eq("user_id", uid)
+          .maybeSingle();
+        profileRow = data ?? null;
+      }
+      const dbRows = await fetchDebugList({ data: { entryDate: selectedDate } } as any).catch((e: any) => ({ error: String(e?.message ?? e) }));
+      setDiag({
+        build: DIAG_BUILD_STAMP,
+        supabaseUrl: (import.meta as any).env?.VITE_SUPABASE_URL ?? null,
+        supabaseProjectId: (import.meta as any).env?.VITE_SUPABASE_PROJECT_ID ?? null,
+        authUid: uid,
+        provider,
+        profile: profileRow,
+        browserTz: getBrowserTimezone(),
+        userTz,
+        selectedDate,
+        todayISO,
+        visibleMealIds: (meals ?? []).map((m) => ({ id: m.id, kcal: m.estimated_calories })),
+        dbRowsForSelectedDate: dbRows,
+      });
+    } catch (e: any) {
+      setDiag({ error: String(e?.message ?? e) });
+    }
+  };
+  useEffect(() => {
+    if (diagOpen) refreshDiag();
+    // eslint-disable-next-line
+  }, [diagOpen, selectedDate, meals]);
+
 
   // Pull-to-refresh.
   useEffect(() => {
@@ -232,6 +295,19 @@ function Nutrition() {
       <div className="px-5 mt-2">
         <RefreshStamp refreshing={refreshing} lastUpdatedAt={lastUpdatedAt} />
       </div>
+
+      {diagOpen && (
+        <div className="mx-5 mt-2 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3 text-[10px] leading-tight text-text-secondary">
+          <div className="flex items-center justify-between mb-1">
+            <span className="font-semibold text-amber-300">DIAG · Fuel</span>
+            <button onClick={refreshDiag} className="text-amber-300 underline">refresh</button>
+          </div>
+          <pre className="whitespace-pre-wrap break-all text-[10px]">
+{JSON.stringify(diag, null, 2)}
+          </pre>
+        </div>
+      )}
+
 
       <NutritionDateHeader selectedDate={selectedDate} onChange={setSelectedDate} timezone={userTz} />
 

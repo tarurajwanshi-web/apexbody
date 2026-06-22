@@ -1,37 +1,72 @@
-## QA Report — Timezone & Streak Sync Patch
+# P0 Apple PWA Delete Debug Plan
 
-### Pass / Fail by area
+## What I already found (DB facts, not theory)
 
-| Area | Result | Notes |
-| --- | --- | --- |
-| 1. First-session TZ race | ⚠️ FAIL (race window exists) | `useUserTimezone` writes browser TZ to `profiles` async. Server log fns only read `profiles.timezone` → if user logs a meal in the ~100–500 ms before the write commits, `resolveUserTimezone` returns UTC. Real bug for users in non-UTC zones on first login. |
-| 2. Server TZ resolution | ✅ PASS for getters | `getTodayMeals`, `getDayNutritionSummary`, `getWeeklyNutritionInsight`, `getMacroAdjustmentReview`, `getNutritionCoachContext`, `getActivityWeek` all call `resolveUserTimezone` → `getLocalDateISO`. ⚠️ Writers (`logMeal`, `upsertManualRecovery`, `upsertMood`, `logBodyMeasurement`) use the same path but have no client-TZ fallback (issue #1). `logHydration` uses the RPC `increment_hydration`, which hard-codes `(now() AT TIME ZONE 'UTC')::date` — out of scope (hydration), reported only. |
-| 3. Weekly date math | ✅ PASS | `getLocalWeekRange` derives weekday from the ISO string via a UTC anchor; weekday-of-a-calendar-date is TZ-independent, so Mon–Sun is correct in Asia/Dubai, America/New_York, Pacific/Auckland. No UTC shift of `entry_date` strings anywhere in the read path. |
-| 4. Coach day sync | ✅ PASS | `coach.tsx LockedHero` computes `Day X` from `unlockDate` + `getLocalDateISO(tz)`. Same `tz` on desktop/mobile (profile-driven) ⇒ same Day X. Rolls at local midnight. |
-| 5. Streak semantics separation | ✅ PASS | Coach `getActivityWeek` unions meals (non-deleted) + training + manual + workout sets + body measurements + parsed device uploads. Nutrition weekly insight & last-7 strip count non-deleted meals only. Macro review gate uses prior-completed-local-week meals (non-deleted) + weigh-ins. Distinct sources. |
-| 6. Deleted-log exclusion | ✅ PASS | `.eq("deleted", false)` (or `deleted` filter post-query) applied in: `getTodayMeals`, `getDayNutritionSummary`, `getWeeklyNutritionInsight` (logged-days set), `getMacroAdjustmentReview` (review-week + last-7), `getNutritionCoachContext` (recent + week + logged_days_last_7), `getActivityWeek`. |
-| 7. ApexStreakStrip reuse for Macro Review | INFO only | `MacroReviewCard` in `src/routes/nutrition.tsx` (lines 1218–1234) still renders a bespoke `🔥 / ○` row from `review.last7_logged_days: boolean[]`. Safe to swap to `<ApexStreakStrip variant="macro_review" days={…} />` — `ApexStreakDay` shape (`{ date, logged, isToday }`) is trivially constructable from `last7_logged_days` + `addDaysISO(getLocalDateISO(tz), -6+i)`. Not implementing in this pass per scope. |
+Two users exist:
 
-### Fixes (minimal, in-scope: TZ race only)
+| auth_user_id (masked) | provider | email | timezone | active logs | latest_entry |
+|---|---|---|---|---|---|
+| `15f6216f…7089d3` | **apple** | `452wy9zrhg@privaterelay.appleid.com` | **NULL** | 9 | 2026-06-22 |
+| `340c0116…3b925c` | google | `taru…@gmail.com` | NULL | 0 | — |
 
-Close the first-session race by letting the client pass its resolved IANA timezone as a hint; server prefers stored profile TZ, falls back to the hint, then UTC. No new features.
+The Apple user owns the 1,638 kcal meal:
 
-1. **`src/lib/dates.ts`** — add `resolveUserTimezoneWithHint(supabase, userId, hint)` that returns `profile.timezone || sanitizedHint || UTC`. `sanitizedHint` validates against `Intl.supportedValuesOf?.('timeZone')` when available, else a strict `Area/Location` regex; rejects anything else.
-2. **`src/lib/shield.functions.ts`** — extend `inputValidator` of `logMeal`, `upsertManualRecovery`, `upsertMood`, `logBodyMeasurement` with optional `client_timezone: z.string().max(64).optional()`. Replace `userToday(...)` call sites in those four handlers with a local helper that uses `resolveUserTimezoneWithHint`.
-3. **`src/components/LogModals.tsx`** — call `const tz = useUserTimezone()` once at the top of each modal that submits, and include `client_timezone: tz` in the `logMeal` / `upsertManualRecovery` / `upsertMood` / `logBodyMeasurement` payloads.
-4. **`src/routes/_authenticated/onboarding.tsx`** — pass `client_timezone: getBrowserTimezone()` to the `logBodyMeasurement` call (profile row may not exist yet).
+- **id**: `9f46cba5-4fbe-4ebd-b43e-b544e0d3dd78`
+- **entry_date**: `2026-06-22`
+- **deleted**: `false`
+- **kcal/P/C/F**: 1638 / 78 / 145 / 80
+- **calorie_estimate_status**: `estimated`, **claude_score_status**: `scored`
+- created_at: `2026-06-22 08:52:32 UTC`
 
-No DB migration. No changes to: hydration RPC, weekly math, Coach gating, streak semantics, ApexStreakStrip, MacroReviewCard, nutrition feature surface, training, calendar, onboarding flow, macro auto-apply.
+The previous "no 1,638 kcal meal" verdict checked the wrong session (the dev/Google account, not the Apple PWA). The row is live and undeleted.
 
-### Out-of-scope items observed (reported, not fixed)
+Key smell: `profiles.timezone` is **NULL** for the Apple user. The Fuel page derives `selectedDate` from browser/profile timezone; with NULL profile tz, if there's any code path that falls back to UTC or to a different "today", the visible row id and the `getTodayMeals(selectedDate)` query can drift, and delete can target a date that doesn't match.
 
-- `increment_hydration` RPC computes `entry_date` from `now() AT TIME ZONE 'UTC'`. Will mis-bucket hydration around local midnight for non-UTC users. Excluded by scope.
-- `MacroReviewCard` could share `ApexStreakStrip`. Excluded by scope; safe future swap.
+## Plan (debug only, no new features)
 
-### Files to be changed
-- `src/lib/dates.ts`
-- `src/lib/shield.functions.ts`
-- `src/components/LogModals.tsx`
-- `src/routes/_authenticated/onboarding.tsx`
+### Step 1 — Add a dev-only diagnostics panel on `/nutrition`
+A small, visually-unobtrusive collapsible block, rendered only when `import.meta.env.DEV` **or** `?diag=1` is in the URL (so we can flip it on in the published Apple PWA without shipping it to all users). Shows:
 
-Confirmation: no new features; only a defensive fallback that closes the first-session TZ race for log writes.
+- build timestamp + short git SHA (from a Vite `define`)
+- `VITE_SUPABASE_PROJECT_ID`
+- `auth.uid()` and provider (from `supabase.auth.getUser()`)
+- `profile.id`, `profile.timezone`
+- `Intl.DateTimeFormat().resolvedOptions().timeZone`
+- `selectedDate` (the prop driving the page)
+- "user local today" computed the same way the rest of the app computes it
+- visible meal ids + calories rendered in `UnifiedTimeline`
+- ids returned by `getTodayMeals(selectedDate)`
+- a one-shot diagnostic server fn that does `select id, entry_date, deleted, estimated_calories from shield_nutrition_logs where user_id = auth.uid() and entry_date = $selectedDate and deleted is not true` and returns the raw rows so we can compare DB ↔ UI
+
+No styling work, no design, no business logic changes.
+
+### Step 2 — Instrument the delete path (already partially in place)
+Confirm/extend the existing `[meal-delete] …` console group to also log: `auth.uid`, `selectedDate`, the meal's `entry_date`, and the full `softDeleteMeal` response (already done) **plus** a post-delete admin re-read of the row via a new dev-only server fn `debugReadMealById(id)` that returns `{id, deleted, user_id, entry_date}` so we can see the DB truth without relying on the RLS-filtered client read.
+
+### Step 3 — Apple PWA repro
+Have the user open the saved-to-home-screen app at `/nutrition?diag=1`, screenshot the panel, attempt delete on the 1,638 kcal row, then screenshot again after reload. Read the screenshots + console output.
+
+### Step 4 — Root-cause branch (fix only what the diagnostics prove)
+
+| Symptom from Step 3 | Fix |
+|---|---|
+| Visible meal id ≠ any id in `getTodayMeals` result | UI source-of-truth bug — fix the prop wiring in `UnifiedTimeline` |
+| `selectedDate` ≠ row's `entry_date` (e.g. PWA selectedDate is `2026-06-21` while row is `2026-06-22`) | Timezone/date fix in `src/lib/dates.ts` + persist browser tz to `profiles.timezone` on app load if NULL |
+| `auth.uid()` ≠ `15f6216f…` | Auth/session linkage — Apple PWA is signed in as a different account |
+| `VITE_SUPABASE_PROJECT_ID` ≠ `toixlzfmxtmtypmupcuc` | Wrong environment build shipped to PWA |
+| `softDeleteMeal` returns `deleted:true` but reload still shows row | PWA service-worker / cache — bust the cache; verify `reloadNutritionSnapshot` actually refetches in PWA |
+| `softDeleteMeal` throws / non-200 | RLS / server update bug — inspect response in logs |
+
+### Step 5 — Verify
+After fix, repeat the Apple PWA flow: delete must remove the row, Daily Fuel must drop by 1,638 kcal, hard refresh / app reopen must keep it hidden, and the post-delete admin re-read must show `deleted:true`.
+
+### Out of scope (explicitly not touched)
+Serving selector, add-item editor, scoring, typography, keyboard, Coach, training, graphs, redesigns.
+
+## Files that will change
+- `src/routes/nutrition.tsx` — add `?diag=1` diagnostics panel (dev-only) and wire post-delete admin re-read log
+- `src/lib/shield.functions.ts` — add `debugReadMealById` (admin client, dev-only, gated by `requireSupabaseAuth` + same-user check) and `debugListTodayMeals`
+- `vite.config.ts` — `define` for build SHA/timestamp
+- Possibly `src/lib/dates.ts` and one onboarding/profile write site if Step 4 proves the timezone branch
+
+No new product features, no UI redesign, no schema changes.
