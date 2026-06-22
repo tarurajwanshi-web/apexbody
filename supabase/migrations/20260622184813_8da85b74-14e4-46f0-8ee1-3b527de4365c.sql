@@ -1,0 +1,1 @@
+ALTER TABLE public.shield_nutrition_logs ADD COLUMN IF NOT EXISTS meal_slot text CHECK (meal_slot IN ('breakfast','lunch','dinner','snack'));

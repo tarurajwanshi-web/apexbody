@@ -568,6 +568,7 @@ export type Database = {
           id: string
           meal_description: string | null
           meal_photo_url: string | null
+          meal_slot: string | null
           original_estimated_calories: number | null
           original_estimated_carbs_g: number | null
           original_estimated_fat_g: number | null
@@ -601,6 +602,7 @@ export type Database = {
           id?: string
           meal_description?: string | null
           meal_photo_url?: string | null
+          meal_slot?: string | null
           original_estimated_calories?: number | null
           original_estimated_carbs_g?: number | null
           original_estimated_fat_g?: number | null
@@ -634,6 +636,7 @@ export type Database = {
           id?: string
           meal_description?: string | null
           meal_photo_url?: string | null
+          meal_slot?: string | null
           original_estimated_calories?: number | null
           original_estimated_carbs_g?: number | null
           original_estimated_fat_g?: number | null
