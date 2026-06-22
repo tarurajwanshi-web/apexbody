@@ -164,7 +164,7 @@ function Nutrition() {
         {macros?.verdict && (
           <VerdictBadge verdict={macros.verdict} />
         )}
-        <div className="flex items-end justify-between mt-2">
+        <div className="flex items-end justify-between mt-1.5">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-text-tertiary">{dateLabel}</p>
             <div className="mt-1 flex items-end gap-1">
