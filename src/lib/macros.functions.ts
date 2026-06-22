@@ -799,246 +799,175 @@ function priorMondayRange(tz: string): { start: string; end: string } {
   return getPreviousCompletedLocalWeek(tz);
 }
 
-export const getMacroAdjustmentReview = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<MacroAdjustmentReview> => {
-    const tz = await resolveUserTimezone(context.supabase, context.userId);
-    const { start: weekStart, end: weekEnd } = priorMondayRange(tz);
-    const REQ_DAYS = 3;
-    const REQ_WEIGH = 3;
+/** Shared helper — computes the full review payload for a user.
+ *  Extracted so getNutritionCoachContext can reuse it without duplicating
+ *  the rules engine. */
+async function computeMacroAdjustmentReview(
+  supabase: { from: (t: string) => any },
+  userId: string,
+): Promise<MacroAdjustmentReview> {
+  const tz = await resolveUserTimezone(supabase, userId);
+  const { start: weekStart, end: weekEnd } = priorMondayRange(tz);
+  const REQ_DAYS = 3;
+  const REQ_WEIGH = 3;
 
-    // Build last-7-day streak (ending today, user-local).
-    const today = localTodayISO(tz);
-    const last7Dates: string[] = [];
-    for (let i = 6; i >= 0; i--) last7Dates.push(addDaysISO(today, -i));
-    const streakStart = last7Dates[0];
+  // Build last-7-day streak (ending today, user-local).
+  const today = localTodayISO(tz);
+  const last7Dates: string[] = [];
+  for (let i = 6; i >= 0; i--) last7Dates.push(addDaysISO(today, -i));
+  const streakStart = last7Dates[0];
 
-    const [mealsRes, weighRes, targetRes, profileRes] = await Promise.all([
-      context.supabase
-        .from("shield_nutrition_logs")
-        .select(
-          "entry_date, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, calorie_estimate_status, deleted",
-        )
-        .eq("user_id", context.userId)
-        .gte("entry_date", streakStart)
-        .lte("entry_date", weekEnd)
-        .eq("deleted", false),
-      context.supabase
-        .from("body_measurement_events")
-        .select("entry_date, weight_kg")
-        .eq("user_id", context.userId)
-        .gte("entry_date", weekStart)
-        .lte("entry_date", weekEnd)
-        .not("weight_kg", "is", null)
-        .order("entry_date", { ascending: true }),
-      context.supabase
-        .from("daily_macro_targets")
-        .select(
-          "target_calories, target_protein_g, target_carbs_g, target_fat_g, bmr, effective_start_date, effective_end_date",
-        )
-        .eq("user_id", context.userId)
-        .lte("effective_start_date", weekEnd)
-        .or(`effective_end_date.is.null,effective_end_date.gt.${weekStart}`)
-        .order("effective_start_date", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      context.supabase
-        .from("profiles")
-        .select("goal, measurement_weight_kg, dexa_lean_mass_kg, dexa_body_fat_pct")
-        .eq("user_id", context.userId)
-        .maybeSingle(),
-    ]);
+  // BUG FIX (N-2): previously a single gte(streakStart) + lte(weekEnd) query
+  // tried to cover both ranges. When streakStart > weekEnd (common — review
+  // week is the *prior* completed week) PostgREST returned zero rows and
+  // logged_days was always 0 → "Insufficient data" forever. Use two queries.
+  const [streakMealsRes, weekMealsRes, weighRes, targetRes, profileRes] = await Promise.all([
+    supabase
+      .from("shield_nutrition_logs")
+      .select("entry_date, calorie_estimate_status, deleted")
+      .eq("user_id", userId)
+      .gte("entry_date", streakStart)
+      .lte("entry_date", today)
+      .eq("deleted", false),
+    supabase
+      .from("shield_nutrition_logs")
+      .select(
+        "entry_date, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, calorie_estimate_status, deleted",
+      )
+      .eq("user_id", userId)
+      .gte("entry_date", weekStart)
+      .lte("entry_date", weekEnd)
+      .eq("deleted", false),
+    supabase
+      .from("body_measurement_events")
+      .select("entry_date, weight_kg")
+      .eq("user_id", userId)
+      .gte("entry_date", weekStart)
+      .lte("entry_date", weekEnd)
+      .not("weight_kg", "is", null)
+      .order("entry_date", { ascending: true }),
+    supabase
+      .from("daily_macro_targets")
+      .select(
+        "target_calories, target_protein_g, target_carbs_g, target_fat_g, bmr, effective_start_date, effective_end_date",
+      )
+      .eq("user_id", userId)
+      .lte("effective_start_date", weekEnd)
+      .or(`effective_end_date.is.null,effective_end_date.gt.${weekStart}`)
+      .order("effective_start_date", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("profiles")
+      .select("goal, measurement_weight_kg, dexa_lean_mass_kg, dexa_body_fat_pct")
+      .eq("user_id", userId)
+      .maybeSingle(),
+  ]);
 
-    const allMeals = (mealsRes.data ?? []) as Array<any>;
-    const weekMeals = allMeals.filter((m) => m.entry_date >= weekStart && m.entry_date <= weekEnd);
-    const target = targetRes.data ?? null;
-    const profile = (profileRes.data ?? {}) as any;
+  const streakMeals = (streakMealsRes.data ?? []) as Array<any>;
+  const weekMeals = (weekMealsRes.data ?? []) as Array<any>;
+  const target = targetRes.data ?? null;
+  const profile = (profileRes.data ?? {}) as any;
 
-    // Last-7 streak (logged = at least one estimated/manual_edited meal that day).
-    const loggedDateSet = new Set<string>();
-    for (const m of allMeals) {
-      if (["estimated", "manual_edited"].includes(m.calorie_estimate_status)) {
-        loggedDateSet.add(m.entry_date);
-      }
+  // Last-7 streak (logged = at least one estimated/manual_edited meal that day).
+  const loggedDateSet = new Set<string>();
+  for (const m of streakMeals) {
+    if (["estimated", "manual_edited"].includes(m.calorie_estimate_status)) {
+      loggedDateSet.add(m.entry_date);
     }
-    const last7_logged_days = last7Dates.map((d) => loggedDateSet.has(d));
+  }
+  const last7_logged_days = last7Dates.map((d) => loggedDateSet.has(d));
 
-    // Logged days in the review week.
-    const loggedInWeek = new Set<string>();
-    let hasPendingOrFailed = false;
-    for (const m of weekMeals) {
-      if (["estimated", "manual_edited"].includes(m.calorie_estimate_status)) {
-        loggedInWeek.add(m.entry_date);
-      }
-      if (m.calorie_estimate_status === "pending" || m.calorie_estimate_status === "failed") {
-        hasPendingOrFailed = true;
-      }
+  // Logged days in the review week.
+  const loggedInWeek = new Set<string>();
+  let hasPendingOrFailed = false;
+  for (const m of weekMeals) {
+    if (["estimated", "manual_edited"].includes(m.calorie_estimate_status)) {
+      loggedInWeek.add(m.entry_date);
     }
-    const logged_days = loggedInWeek.size;
-
-    const weighRows = (weighRes.data ?? []) as Array<{ entry_date: string; weight_kg: number }>;
-    const weigh_in_count = weighRows.length;
-
-    // Weekly intake averages.
-    const counted = weekMeals.filter((m) =>
-      ["estimated", "manual_edited"].includes(m.calorie_estimate_status),
-    );
-    const sumCal = counted.reduce((s, m) => s + Number(m.estimated_calories ?? 0), 0);
-    const sumP = counted.reduce((s, m) => s + Number(m.estimated_protein_g ?? 0), 0);
-    const sumC = counted.reduce((s, m) => s + Number(m.estimated_carbs_g ?? 0), 0);
-    const sumF = counted.reduce((s, m) => s + Number(m.estimated_fat_g ?? 0), 0);
-    const avg_calories = logged_days > 0 ? Math.round(sumCal / logged_days) : 0;
-    const avg_protein_g = logged_days > 0 ? Math.round(sumP / logged_days) : 0;
-    const avg_carbs_g = logged_days > 0 ? Math.round(sumC / logged_days) : 0;
-    const avg_fat_g = logged_days > 0 ? Math.round(sumF / logged_days) : 0;
-
-    const tCal = target?.target_calories != null ? Number(target.target_calories) : null;
-    const tP = target?.target_protein_g != null ? Number(target.target_protein_g) : null;
-    const tC = target?.target_carbs_g != null ? Number(target.target_carbs_g) : null;
-    const tF = target?.target_fat_g != null ? Number(target.target_fat_g) : null;
-    const bmr = target?.bmr != null ? Number(target.bmr) : null;
-
-    // Weight trend (kg over the week) — linear slope * 7 days.
-    let weight_trend_kg: number | null = null;
-    if (weighRows.length >= 2) {
-      const xs = weighRows.map((r) => {
-        const [y, m, d] = r.entry_date.split("-").map(Number);
-        return new Date(y, m - 1, d).getTime() / 86400000; // day index
-      });
-      const ys = weighRows.map((r) => Number(r.weight_kg));
-      const n = xs.length;
-      const meanX = xs.reduce((a, b) => a + b, 0) / n;
-      const meanY = ys.reduce((a, b) => a + b, 0) / n;
-      let num = 0, den = 0;
-      for (let i = 0; i < n; i++) {
-        num += (xs[i] - meanX) * (ys[i] - meanY);
-        den += (xs[i] - meanX) ** 2;
-      }
-      const slopePerDay = den > 0 ? num / den : 0;
-      weight_trend_kg = Math.round(slopePerDay * 7 * 100) / 100;
+    if (m.calorie_estimate_status === "pending" || m.calorie_estimate_status === "failed") {
+      hasPendingOrFailed = true;
     }
+  }
+  const logged_days = loggedInWeek.size;
 
-    // Observed TDEE (very rough): avg intake + (-trend kg/week * 7700 kcal/kg / 7 days)
-    let observed_tdee: number | null = null;
-    if (logged_days >= 3 && weight_trend_kg != null) {
-      observed_tdee = Math.round(avg_calories - (weight_trend_kg * 7700) / 7);
+  const weighRows = (weighRes.data ?? []) as Array<{ entry_date: string; weight_kg: number }>;
+  const weigh_in_count = weighRows.length;
+
+  // Weekly intake averages.
+  const counted = weekMeals.filter((m) =>
+    ["estimated", "manual_edited"].includes(m.calorie_estimate_status),
+  );
+  const sumCal = counted.reduce((s, m) => s + Number(m.estimated_calories ?? 0), 0);
+  const sumP = counted.reduce((s, m) => s + Number(m.estimated_protein_g ?? 0), 0);
+  const sumC = counted.reduce((s, m) => s + Number(m.estimated_carbs_g ?? 0), 0);
+  const sumF = counted.reduce((s, m) => s + Number(m.estimated_fat_g ?? 0), 0);
+  const avg_calories = logged_days > 0 ? Math.round(sumCal / logged_days) : 0;
+  const avg_protein_g = logged_days > 0 ? Math.round(sumP / logged_days) : 0;
+  const avg_carbs_g = logged_days > 0 ? Math.round(sumC / logged_days) : 0;
+  const avg_fat_g = logged_days > 0 ? Math.round(sumF / logged_days) : 0;
+
+  const tCal = target?.target_calories != null ? Number(target.target_calories) : null;
+  const tP = target?.target_protein_g != null ? Number(target.target_protein_g) : null;
+  const tC = target?.target_carbs_g != null ? Number(target.target_carbs_g) : null;
+  const tF = target?.target_fat_g != null ? Number(target.target_fat_g) : null;
+  const bmr = target?.bmr != null ? Number(target.bmr) : null;
+
+  // Weight trend (kg over the week) — linear slope * 7 days.
+  let weight_trend_kg: number | null = null;
+  if (weighRows.length >= 2) {
+    const xs = weighRows.map((r) => {
+      const [y, m, d] = r.entry_date.split("-").map(Number);
+      return new Date(y, m - 1, d).getTime() / 86400000;
+    });
+    const ys = weighRows.map((r) => Number(r.weight_kg));
+    const n = xs.length;
+    const meanX = xs.reduce((a, b) => a + b, 0) / n;
+    const meanY = ys.reduce((a, b) => a + b, 0) / n;
+    let num = 0, den = 0;
+    for (let i = 0; i < n; i++) {
+      num += (xs[i] - meanX) * (ys[i] - meanY);
+      den += (xs[i] - meanX) ** 2;
     }
+    const slopePerDay = den > 0 ? num / den : 0;
+    weight_trend_kg = Math.round(slopePerDay * 7 * 100) / 100;
+  }
 
-    // Adherence ratio: |intake - target| / target.
-    let adherence_score: number | null = null;
-    if (tCal && tCal > 0 && logged_days > 0) {
-      const gap = Math.abs(avg_calories - tCal) / tCal; // 0 best
-      adherence_score = Math.max(0, Math.min(100, Math.round(100 - gap * 200)));
-    }
+  let observed_tdee: number | null = null;
+  if (logged_days >= 3 && weight_trend_kg != null) {
+    observed_tdee = Math.round(avg_calories - (weight_trend_kg * 7700) / 7);
+  }
 
-    // Estimate weight for safety floors.
-    let weightKg: number | null = null;
-    if (weighRows.length > 0) weightKg = Number(weighRows[weighRows.length - 1].weight_kg);
-    if (!weightKg && profile.measurement_weight_kg) weightKg = Number(profile.measurement_weight_kg);
-    if (!weightKg && profile.dexa_lean_mass_kg && profile.dexa_body_fat_pct != null) {
-      const lean = Number(profile.dexa_lean_mass_kg);
-      const bf = Number(profile.dexa_body_fat_pct);
-      if (lean > 0 && bf >= 0 && bf < 95) weightKg = Math.round((lean / (1 - bf / 100)) * 10) / 10;
-    }
+  let adherence_score: number | null = null;
+  if (tCal && tCal > 0 && logged_days > 0) {
+    const gap = Math.abs(avg_calories - tCal) / tCal;
+    adherence_score = Math.max(0, Math.min(100, Math.round(100 - gap * 200)));
+  }
 
-    // Gates.
-    const blockers: string[] = [];
-    if (logged_days < REQ_DAYS) blockers.push(`Log at least ${REQ_DAYS} nutrition days before changing targets.`);
-    if (weigh_in_count < REQ_WEIGH) blockers.push(`Add at least ${REQ_WEIGH} weigh-ins before changing targets.`);
-    if (hasPendingOrFailed) blockers.push("Some meals are incomplete, so targets are held.");
-    if (!tCal) blockers.push("No active macro target for the review week.");
+  let weightKg: number | null = null;
+  if (weighRows.length > 0) weightKg = Number(weighRows[weighRows.length - 1].weight_kg);
+  if (!weightKg && profile.measurement_weight_kg) weightKg = Number(profile.measurement_weight_kg);
+  if (!weightKg && profile.dexa_lean_mass_kg && profile.dexa_body_fat_pct != null) {
+    const lean = Number(profile.dexa_lean_mass_kg);
+    const bf = Number(profile.dexa_body_fat_pct);
+    if (lean > 0 && bf >= 0 && bf < 95) weightKg = Math.round((lean / (1 - bf / 100)) * 10) / 10;
+  }
 
-    const goal = (profile.goal as string | null) ?? null;
+  const blockers: string[] = [];
+  if (logged_days < REQ_DAYS) blockers.push(`Log at least ${REQ_DAYS} nutrition days before changing targets.`);
+  if (weigh_in_count < REQ_WEIGH) blockers.push(`Add at least ${REQ_WEIGH} weigh-ins before changing targets.`);
+  if (hasPendingOrFailed) blockers.push("Some meals are incomplete, so targets are held.");
+  if (!tCal) blockers.push("No active macro target for the review week.");
 
-    if (blockers.length > 0) {
-      return {
-        review_week_start: weekStart,
-        review_week_end: weekEnd,
-        decision: "Insufficient data",
-        confidence: "low",
-        reason: blockers[0],
-        logged_days,
-        required_logged_days: REQ_DAYS,
-        weigh_in_count,
-        required_weigh_ins: REQ_WEIGH,
-        avg_calories,
-        avg_target_calories: tCal,
-        avg_protein_g,
-        avg_target_protein_g: tP,
-        adherence_score,
-        weight_trend_kg,
-        observed_tdee,
-        current_target_calories: tCal,
-        recommended_target_calories: tCal,
-        calorie_delta: 0,
-        recommended_protein_g: tP,
-        recommended_carbs_g: tC,
-        recommended_fat_g: tF,
-        can_apply: false,
-        blockers,
-        coach_note: blockers[0],
-        last7_logged_days,
-        goal,
-      };
-    }
+  const goal = (profile.goal as string | null) ?? null;
 
-    // Decision rules (gates passed).
-    let delta = 0;
-    let reason = "Holding targets.";
-    let decision: MacroReviewDecision = "Hold";
-    const adherenceHigh = (adherence_score ?? 0) >= 75;
-    const trend = weight_trend_kg ?? 0;
-    const proteinRatio = tP && tP > 0 ? avg_protein_g / tP : 1;
-    const proteinConsistent = proteinRatio >= 0.9;
-
-    if (goal === "fat_loss") {
-      if (!proteinConsistent) { decision = "Hold"; reason = "Protein consistency is low. Fix adherence before changing calories."; }
-      else if (trend > -0.1 && trend <= 0.2 && adherenceHigh) { delta = -150; decision = "Ready to adjust"; reason = "Fat-loss target, adherence high, weight trend flat."; }
-      else if (trend < -0.7) { delta = +100; decision = "Ready to adjust"; reason = "Weight dropping too fast — small increase to protect lean mass."; }
-      else { decision = "Hold"; reason = "Trend within expected range — hold targets."; }
-    } else if (goal === "muscle_gain") {
-      if (!proteinConsistent) { decision = "Hold"; reason = "Protein consistency is low. Fix adherence before changing calories."; }
-      else if (trend < 0.1 && adherenceHigh) { delta = +150; decision = "Ready to adjust"; reason = "Muscle-gain target, adherence high, weight trend flat."; }
-      else if (trend > 0.5) { delta = -100; decision = "Ready to adjust"; reason = "Weight rising too fast — small reduction to limit fat gain."; }
-      else { decision = "Hold"; reason = "Trend within expected range — hold targets."; }
-    } else {
-      // maintenance / recomposition / strength / athletic — default hold.
-      if (!proteinConsistent) { decision = "Hold"; reason = "Protein consistency is low. Hold and coach protein."; }
-      else if (Math.abs(trend) <= 0.3) { decision = "Hold"; reason = "Trend is flat — maintenance holding."; }
-      else { decision = "Hold"; reason = "Trend unclear — hold until pattern is consistent."; }
-    }
-
-    // Safety clamps.
-    let recommended = (tCal ?? 0) + delta;
-    if (bmr && recommended < bmr) {
-      recommended = Math.round(bmr);
-      reason = "Adjustment capped to keep calories above BMR floor.";
-      delta = recommended - (tCal ?? 0);
-    }
-    // Fat floor: max(0.4 g/kg, 25% kcal).
-    let recommended_fat_g = tF;
-    if (recommended > 0 && weightKg) {
-      const fatFromKcal = (recommended * 0.25) / 9;
-      const fatFromWeight = weightKg * 0.4;
-      recommended_fat_g = Math.max(Math.round(fatFromKcal), Math.round(fatFromWeight));
-    }
-    const recommended_protein_g = tP; // hold protein; coach drives protein separately.
-    // Carbs back-fill remaining calories.
-    let recommended_carbs_g: number | null = tC;
-    if (recommended > 0 && recommended_protein_g != null && recommended_fat_g != null) {
-      const remaining = recommended - recommended_protein_g * 4 - recommended_fat_g * 9;
-      recommended_carbs_g = Math.max(0, Math.round(remaining / 4));
-    }
-
-    const confidence: "low" | "medium" | "high" =
-      logged_days >= 5 && weigh_in_count >= 4 ? "high" : logged_days >= 4 ? "medium" : "low";
-
+  if (blockers.length > 0) {
     return {
       review_week_start: weekStart,
       review_week_end: weekEnd,
-      decision,
-      confidence,
-      reason,
+      decision: "Insufficient data",
+      confidence: "low",
+      reason: blockers[0],
       logged_days,
       required_logged_days: REQ_DAYS,
       weigh_in_count,
@@ -1051,18 +980,100 @@ export const getMacroAdjustmentReview = createServerFn({ method: "GET" })
       weight_trend_kg,
       observed_tdee,
       current_target_calories: tCal,
-      recommended_target_calories: recommended,
-      calorie_delta: delta,
-      recommended_protein_g,
-      recommended_carbs_g,
-      recommended_fat_g,
-      // Apply deferred in this patch — review only.
+      recommended_target_calories: tCal,
+      calorie_delta: 0,
+      recommended_protein_g: tP,
+      recommended_carbs_g: tC,
+      recommended_fat_g: tF,
       can_apply: false,
-      blockers: [],
-      coach_note: reason,
+      blockers,
+      coach_note: blockers[0],
       last7_logged_days,
       goal,
     };
+  }
+
+  let delta = 0;
+  let reason = "Holding targets.";
+  let decision: MacroReviewDecision = "Hold";
+  const adherenceHigh = (adherence_score ?? 0) >= 75;
+  const trend = weight_trend_kg ?? 0;
+  const proteinRatio = tP && tP > 0 ? avg_protein_g / tP : 1;
+  const proteinConsistent = proteinRatio >= 0.9;
+
+  if (goal === "fat_loss") {
+    if (!proteinConsistent) { decision = "Hold"; reason = "Protein consistency is low. Fix adherence before changing calories."; }
+    else if (trend > -0.1 && trend <= 0.2 && adherenceHigh) { delta = -150; decision = "Ready to adjust"; reason = "Fat-loss target, adherence high, weight trend flat."; }
+    else if (trend < -0.7) { delta = +100; decision = "Ready to adjust"; reason = "Weight dropping too fast — small increase to protect lean mass."; }
+    else { decision = "Hold"; reason = "Trend within expected range — hold targets."; }
+  } else if (goal === "muscle_gain") {
+    if (!proteinConsistent) { decision = "Hold"; reason = "Protein consistency is low. Fix adherence before changing calories."; }
+    else if (trend < 0.1 && adherenceHigh) { delta = +150; decision = "Ready to adjust"; reason = "Muscle-gain target, adherence high, weight trend flat."; }
+    else if (trend > 0.5) { delta = -100; decision = "Ready to adjust"; reason = "Weight rising too fast — small reduction to limit fat gain."; }
+    else { decision = "Hold"; reason = "Trend within expected range — hold targets."; }
+  } else {
+    if (!proteinConsistent) { decision = "Hold"; reason = "Protein consistency is low. Hold and coach protein."; }
+    else if (Math.abs(trend) <= 0.3) { decision = "Hold"; reason = "Trend is flat — maintenance holding."; }
+    else { decision = "Hold"; reason = "Trend unclear — hold until pattern is consistent."; }
+  }
+
+  let recommended = (tCal ?? 0) + delta;
+  if (bmr && recommended < bmr) {
+    recommended = Math.round(bmr);
+    reason = "Adjustment capped to keep calories above BMR floor.";
+    delta = recommended - (tCal ?? 0);
+  }
+  let recommended_fat_g = tF;
+  if (recommended > 0 && weightKg) {
+    const fatFromKcal = (recommended * 0.25) / 9;
+    const fatFromWeight = weightKg * 0.4;
+    recommended_fat_g = Math.max(Math.round(fatFromKcal), Math.round(fatFromWeight));
+  }
+  const recommended_protein_g = tP;
+  let recommended_carbs_g: number | null = tC;
+  if (recommended > 0 && recommended_protein_g != null && recommended_fat_g != null) {
+    const remaining = recommended - recommended_protein_g * 4 - recommended_fat_g * 9;
+    recommended_carbs_g = Math.max(0, Math.round(remaining / 4));
+  }
+
+  const confidence: "low" | "medium" | "high" =
+    logged_days >= 5 && weigh_in_count >= 4 ? "high" : logged_days >= 4 ? "medium" : "low";
+
+  return {
+    review_week_start: weekStart,
+    review_week_end: weekEnd,
+    decision,
+    confidence,
+    reason,
+    logged_days,
+    required_logged_days: REQ_DAYS,
+    weigh_in_count,
+    required_weigh_ins: REQ_WEIGH,
+    avg_calories,
+    avg_target_calories: tCal,
+    avg_protein_g,
+    avg_target_protein_g: tP,
+    adherence_score,
+    weight_trend_kg,
+    observed_tdee,
+    current_target_calories: tCal,
+    recommended_target_calories: recommended,
+    calorie_delta: delta,
+    recommended_protein_g,
+    recommended_carbs_g,
+    recommended_fat_g,
+    can_apply: false,
+    blockers: [],
+    coach_note: reason,
+    last7_logged_days,
+    goal,
+  };
+}
+
+export const getMacroAdjustmentReview = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<MacroAdjustmentReview> => {
+    return computeMacroAdjustmentReview(context.supabase, context.userId);
   });
 
 // ============================================================================
