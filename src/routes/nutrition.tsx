@@ -941,10 +941,14 @@ function StackedBarChart({
   days,
   yMax,
   target,
+  targetLabel = "Target",
+  empty = false,
 }: {
   days: WeeklyDay[];
   yMax: number;
   target: number | null;
+  targetLabel?: string;
+  empty?: boolean;
 }) {
   const W = 320;
   const H = 180;
@@ -961,7 +965,7 @@ function StackedBarChart({
   const targetY = target != null && target > 0 ? y(target) : null;
 
   return (
-    <div className="rounded-2xl bg-bg-2 border border-white/5 p-3">
+    <div className="relative rounded-2xl bg-bg-2 border border-white/5 p-3">
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto">
         {/* baseline */}
         <line x1={padL} x2={W - padR} y1={padT + innerH} y2={padT + innerH} stroke="rgba(255,255,255,0.08)" />
@@ -977,7 +981,7 @@ function StackedBarChart({
               strokeDasharray="3 3"
             />
             <text x={W - padR} y={targetY - 4} textAnchor="end" className="fill-text-tertiary" style={{ fontSize: 9 }}>
-              Target {target?.toLocaleString()}
+              {targetLabel} {target?.toLocaleString()}
             </text>
           </>
         )}
