@@ -616,6 +616,87 @@ export const getWeeklyNutritionInsight = createServerFn({ method: "GET" })
     } else {
       coach_note = "Tighten the main driver before adjusting macros.";
     }
+    const confidence_label: "low" | "ok" = logged_days < 3 ? "low" : "ok";
+
+    // Decision insight — one short Apple-style sentence.
+    let decision_insight: string;
+    if (logged_days < 3) {
+      decision_insight = "Early signal only. Log at least 3 days before changing targets.";
+    } else if (
+      calorie_on_target_days < logged_days / 2 &&
+      avg_target_calories != null &&
+      avg_calories > avg_target_calories
+    ) {
+      decision_insight = "Portion control is the main lever this week.";
+    } else if (fat_over_days >= 3) {
+      decision_insight = "Fat intake is the main pressure point this week.";
+    } else if (protein_hit_days < logged_days / 2) {
+      decision_insight = "Protein consistency is the priority this week.";
+    } else if (weekly_nutrition_score != null && weekly_nutrition_score >= 80) {
+      decision_insight = "Good weekly adherence. Stay consistent.";
+    } else {
+      decision_insight = "Tighten the main driver before adjusting macros.";
+    }
+
+    // Early signal for the compact preview.
+    let early_signal: string;
+    if (logged_days === 0) {
+      early_signal = "Start with today's first meal to unlock your weekly view.";
+    } else if (logged_days < 3) {
+      const remaining = Math.max(1, 3 - logged_days);
+      early_signal = `Log ${remaining} more day${remaining === 1 ? "" : "s"} to unlock a reliable weekly pattern.`;
+    } else if (fat_over_days >= 3) {
+      early_signal = "Early signal: fat intake is running high.";
+    } else if (cal_over_days >= 3) {
+      early_signal = "Early signal: calories are trending over target.";
+    } else if (protein_hit_days < logged_days / 2) {
+      early_signal = "Early signal: protein is missing on most days.";
+    } else if (weekly_nutrition_score != null && weekly_nutrition_score >= 80) {
+      early_signal = "On track for a strong week.";
+    } else {
+      early_signal = "Pattern is holding — keep logging.";
+    }
+
+    // Build full Mon–Sun series for the graph (includes future days as empty).
+    const WEEKDAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const days: WeeklyDay[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(weekStart, i);
+      const dateISO = toISO(d);
+      const inFuture = dateISO > todayISO;
+      const dayMeals = meals.filter((m) => m.entry_date === dateISO);
+      const counted = dayMeals.filter((m) =>
+        ["estimated", "manual_edited"].includes(m.calorie_estimate_status),
+      );
+      const cal = Math.round(counted.reduce((s, m) => s + Number(m.estimated_calories ?? 0), 0));
+      const p = Math.round(counted.reduce((s, m) => s + Number(m.estimated_protein_g ?? 0), 0));
+      const c = Math.round(counted.reduce((s, m) => s + Number(m.estimated_carbs_g ?? 0), 0));
+      const f = Math.round(counted.reduce((s, m) => s + Number(m.estimated_fat_g ?? 0), 0));
+      const t = targetFor(dateISO);
+      const pCal = p * 4;
+      const cCal = c * 4;
+      const fCal = f * 9;
+      days.push({
+        entry_date: dateISO,
+        weekday_label: WEEKDAY[i],
+        in_future: inFuture,
+        has_logged_meals: counted.length > 0,
+        pending_meal_count: dayMeals.filter((m) => m.calorie_estimate_status === "pending").length,
+        failed_meal_count: dayMeals.filter((m) => m.calorie_estimate_status === "failed").length,
+        consumed_calories: cal,
+        consumed_protein_g: p,
+        consumed_carbs_g: c,
+        consumed_fat_g: f,
+        protein_calories: pCal,
+        carb_calories: cCal,
+        fat_calories: fCal,
+        macro_total_calories: pCal + cCal + fCal,
+        target_calories: t?.target_calories != null ? Number(t.target_calories) : null,
+        target_protein_g: t?.target_protein_g != null ? Number(t.target_protein_g) : null,
+        target_carbs_g: t?.target_carbs_g != null ? Number(t.target_carbs_g) : null,
+        target_fat_g: t?.target_fat_g != null ? Number(t.target_fat_g) : null,
+      });
+    }
 
     return {
       week_start_date: weekStartISO,
@@ -643,12 +724,17 @@ export const getWeeklyNutritionInsight = createServerFn({ method: "GET" })
       avg_macro_adherence_score,
       weekly_nutrition_score,
 
+      confidence_label,
       main_weekly_driver,
       weekly_diagnosis,
       coach_note,
+      decision_insight,
+      early_signal,
 
       pending_meal_count,
       failed_meal_count,
+
+      days,
     };
   });
 
