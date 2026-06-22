@@ -313,10 +313,32 @@ function Nutrition() {
 
       {diagOpen && (
         <div className="mx-5 mt-2 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3 text-[10px] leading-tight text-text-secondary">
-          <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center justify-between mb-1 gap-2">
             <span className="font-semibold text-amber-300">DIAG · Fuel</span>
-            <button onClick={refreshDiag} className="text-amber-300 underline">refresh</button>
+            <div className="flex items-center gap-3">
+              <button onClick={refreshDiag} className="text-amber-300 underline">refresh</button>
+              <button
+                onClick={async () => {
+                  const txt = JSON.stringify(diag, null, 2);
+                  try {
+                    await navigator.clipboard.writeText(txt);
+                    alert("Diagnostics copied");
+                  } catch {
+                    // Fallback for installed PWAs without clipboard permission
+                    const ta = document.createElement("textarea");
+                    ta.value = txt;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { document.execCommand("copy"); alert("Diagnostics copied"); }
+                    catch { alert("Copy failed — long-press the JSON block to select."); }
+                    document.body.removeChild(ta);
+                  }
+                }}
+                className="text-amber-300 underline"
+              >copy</button>
+            </div>
           </div>
+
           <pre className="whitespace-pre-wrap break-all text-[10px]">
 {JSON.stringify(diag, null, 2)}
           </pre>
