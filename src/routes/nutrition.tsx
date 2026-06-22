@@ -1052,6 +1052,12 @@ function StackedBarChart({
           );
         })}
       </svg>
+      {empty && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 pointer-events-none">
+          <p className="text-[13px] font-semibold text-white">No meals logged this week yet.</p>
+          <p className="mt-1 text-[12px] text-text-tertiary">Log meals to see your weekly pattern.</p>
+        </div>
+      )}
     </div>
   );
 }
