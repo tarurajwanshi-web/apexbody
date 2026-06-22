@@ -538,3 +538,40 @@ function HydrationInsight({ hydration }: { hydration: HydrationSummary | null })
   );
 }
 
+
+function VerdictBadge({ verdict }: { verdict: string }) {
+  const tone =
+    verdict === "On track"
+      ? { bg: "rgba(16,185,129,0.12)", border: "rgba(16,185,129,0.35)", color: "#10B981" }
+      : verdict === "Slightly off"
+        ? { bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.35)", color: "#F59E0B" }
+        : verdict === "Off target"
+          ? { bg: "rgba(239,68,68,0.10)", border: "rgba(239,68,68,0.30)", color: "#EF4444" }
+          : { bg: "rgba(255,255,255,0.05)", border: "rgba(255,255,255,0.10)", color: "#9CA3AF" };
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+      style={{ background: tone.bg, border: `1px solid ${tone.border}`, color: tone.color }}
+    >
+      {verdict}
+    </span>
+  );
+}
+
+function ScorePill({
+  label, value, emphasized,
+}: { label: string; value: number | null; emphasized?: boolean }) {
+  const color =
+    value == null ? "#6B7280" : value >= 80 ? "#10B981" : value >= 60 ? "#F59E0B" : "#EF4444";
+  return (
+    <div className="flex flex-col items-center">
+      <p className="text-[10px] text-text-tertiary uppercase tracking-wider text-center">{label}</p>
+      <p
+        className={`mt-1 tabular-nums ${emphasized ? "text-lg font-bold" : "text-base font-semibold"}`}
+        style={{ color }}
+      >
+        {value == null ? "—" : value}
+      </p>
+    </div>
+  );
+}
