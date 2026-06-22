@@ -71,8 +71,11 @@ const EMPTY: Draft = {
 
 function ProfileSetup() {
   const navigate = useNavigate();
+  const { reset: isResetParam } = Route.useSearch();
+  const isReset = isResetParam === "true";
   const logMeasure = useServerFn(logBodyMeasurement);
-  const [step, setStep] = useState(1);
+  const minStep = isReset ? 3 : 1;
+  const [step, setStep] = useState(minStep);
   const [bodySub, setBodySub] = useState<"A" | "B">("A"); // sub-step inside step 6
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [submitting, setSubmitting] = useState(false);
@@ -95,7 +98,7 @@ function ProfileSetup() {
       }
       case 2: return !!draft.inputPath;
       case 3: return !!draft.goal;
-      case 4: return draft.days >= 1 && draft.days <= 6;
+      case 4: return draft.trainingDays.length >= 1;
       case 5: return !!draft.equipment;
       case 6: return bodySub === "A" ? bodyAValid : bodyBValid;
       case 7: return true;
@@ -110,7 +113,7 @@ function ProfileSetup() {
   };
   const back = () => {
     if (step === 6 && bodySub === "B") { setBodySub("A"); return; }
-    setStep((s) => Math.max(s - 1, 1));
+    setStep((s) => Math.max(s - 1, minStep));
   };
 
   const skipBody = () => {
@@ -131,30 +134,52 @@ function ProfileSetup() {
       if (uerr || !userRes.user) throw new Error("Not signed in");
       const userId = userRes.user.id;
 
-      const now = new Date();
-      const unlock = new Date(now.getTime() + 7 * 86400000);
-      const unlockDate = unlock.toISOString().slice(0, 10);
+      const trainingDaysCount = draft.trainingDays.length || draft.days;
 
-      const payload = {
-        user_id: userId,
-        name: draft.name.trim(),
-        age: Number(draft.age),
-        biological_sex: draft.sex,
-        input_path_preference: draft.inputPath,
-        goal: draft.goal,
-        training_days_per_week: draft.days,
-        equipment_access: draft.equipment,
-        body_data_type: draft.bodyDataType,
-        dexa_body_fat_pct: draft.bodyDataType === "dexa" && draft.dexaBf ? Number(draft.dexaBf) : null,
-        dexa_lean_mass_kg: draft.bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
-        measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
-        measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
-        measurement_weight_kg: draft.weight ? Number(draft.weight) : null,
-        measurement_height_cm: draft.height ? Number(draft.height) : null,
-        profile_completed_at: now.toISOString(),
-        plan_unlock_date: unlockDate,
-        timezone: getBrowserTimezone(),
-      };
+      let payload: Record<string, unknown>;
+      if (isReset) {
+        // Reset mode: only update plan-shaping fields. Identity, recovery method,
+        // and profile_completed_at are preserved so we don't reset learning phase.
+        payload = {
+          user_id: userId,
+          goal: draft.goal,
+          training_days_per_week: trainingDaysCount,
+          training_day_codes: draft.trainingDays,
+          equipment_access: draft.equipment,
+          body_data_type: draft.bodyDataType,
+          dexa_body_fat_pct: draft.bodyDataType === "dexa" && draft.dexaBf ? Number(draft.dexaBf) : null,
+          dexa_lean_mass_kg: draft.bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
+          measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
+          measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
+          measurement_weight_kg: draft.weight ? Number(draft.weight) : null,
+          measurement_height_cm: draft.height ? Number(draft.height) : null,
+        };
+      } else {
+        const now = new Date();
+        const unlock = new Date(now.getTime() + 7 * 86400000);
+        const unlockDate = unlock.toISOString().slice(0, 10);
+        payload = {
+          user_id: userId,
+          name: draft.name.trim(),
+          age: Number(draft.age),
+          biological_sex: draft.sex,
+          input_path_preference: draft.inputPath,
+          goal: draft.goal,
+          training_days_per_week: trainingDaysCount,
+          training_day_codes: draft.trainingDays,
+          equipment_access: draft.equipment,
+          body_data_type: draft.bodyDataType,
+          dexa_body_fat_pct: draft.bodyDataType === "dexa" && draft.dexaBf ? Number(draft.dexaBf) : null,
+          dexa_lean_mass_kg: draft.bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
+          measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
+          measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
+          measurement_weight_kg: draft.weight ? Number(draft.weight) : null,
+          measurement_height_cm: draft.height ? Number(draft.height) : null,
+          profile_completed_at: now.toISOString(),
+          plan_unlock_date: unlockDate,
+          timezone: getBrowserTimezone(),
+        };
+      }
 
       const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "user_id" });
       if (error) throw error;
@@ -182,13 +207,15 @@ function ProfileSetup() {
       }
 
       // Mirror name to local store so the dashboard greets immediately.
-      try {
-        const raw = localStorage.getItem("apex_user_profile");
-        const obj = raw ? JSON.parse(raw) : {};
-        obj.name = draft.name.trim();
-        obj.goal = draft.goal;
-        localStorage.setItem("apex_user_profile", JSON.stringify(obj));
-      } catch {}
+      if (!isReset) {
+        try {
+          const raw = localStorage.getItem("apex_user_profile");
+          const obj = raw ? JSON.parse(raw) : {};
+          obj.name = draft.name.trim();
+          obj.goal = draft.goal;
+          localStorage.setItem("apex_user_profile", JSON.stringify(obj));
+        } catch {}
+      }
 
       const [macroRes, planRes] = await Promise.allSettled([
         supabase.functions.invoke("calculate-macros", { body: { user_id: userId } }),
