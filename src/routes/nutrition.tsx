@@ -47,6 +47,7 @@ function Nutrition() {
   const [hydrationEvents, setHydrationEvents] = useState<HydrationEvent[]>([]);
   const [hydrationOpen, setHydrationOpen] = useState(false);
   const [openMeal, setOpenMeal] = useState<TodayMeal | null>(null);
+  const [weekly, setWeekly] = useState<WeeklyNutritionInsight | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [ptrDelta, setPtrDelta] = useState(0);
@@ -56,6 +57,7 @@ function Nutrition() {
   const fetchMeals = useServerFn(getTodayMeals);
   const fetchHydration = useServerFn(getTodayHydration);
   const fetchHydrationEvents = useServerFn(getTodayHydrationEvents);
+  const fetchWeekly = useServerFn(getWeeklyNutritionInsight);
 
   const isToday = selectedDate === todayLocalISO();
   const dateLabel = formatNutritionDateLabel(selectedDate);
