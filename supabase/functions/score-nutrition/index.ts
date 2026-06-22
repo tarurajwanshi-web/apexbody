@@ -75,14 +75,15 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Idempotency: if already fully scored AND estimated/manually edited,
-    // skip work. Prevents trigger+client double-dispatch from re-billing
-    // Anthropic and from clobbering a manual_edited row.
-    if (
-      row.claude_score_status === "scored" &&
-      (row.calorie_estimate_status === "estimated" ||
-        row.calorie_estimate_status === "manual_edited")
-    ) {
+    // Split idempotency: quality and macros are independent. Re-run only what
+    // is actually missing/failed. Critical: `manual_edited` is treated as
+    // locked for macros — never overwrite a user-corrected meal even if a
+    // retry forces claude_score_status back to 'pending'.
+    const skipQuality = row.claude_score_status === "scored";
+    const skipMacros =
+      row.calorie_estimate_status === "estimated" ||
+      row.calorie_estimate_status === "manual_edited";
+    if (skipQuality && skipMacros) {
       return new Response(JSON.stringify({ skipped: true, row }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
