@@ -150,7 +150,7 @@ function ManualRecoveryForm({ onSaved }: { onSaved: () => void }) {
     try {
       const { data: s } = await supabase.auth.getSession();
       if (!s.session) throw new Error("Your session expired. Please sign in again.");
-      await fn({ data: { recovery_self_rating: rating, sleep_hours: sleep, mood_emoji: mood } });
+      await fn({ data: { recovery_self_rating: rating, sleep_hours: sleep, mood_emoji: mood, client_timezone: getBrowserTimezone() } });
       onSaved();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not save. Try again.";
