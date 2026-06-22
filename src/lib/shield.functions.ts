@@ -64,12 +64,14 @@ export const upsertManualRecovery = createServerFn({ method: "POST" })
       // change profiles.input_path_preference in that case — they remain a
       // device-path user. Default 'manual' for ordinary manual-path entries.
       recovery_source: z.enum(["manual", "device_parse_failed_fallback"]).optional(),
+      // IANA TZ hint used only when profiles.timezone is NULL (first-session race).
+      client_timezone: z.string().max(64).optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
     const payload = {
       user_id: context.userId,
-      entry_date: await userToday(context.supabase, context.userId),
+      entry_date: await userTodayWithHint(context.supabase, context.userId, data.client_timezone),
       recovery_self_rating: data.recovery_self_rating,
       sleep_hours: data.sleep_hours,
       recovery_source: data.recovery_source ?? "manual",
