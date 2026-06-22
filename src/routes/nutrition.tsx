@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, Loader2, RefreshCw, Droplet } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, RefreshCw, Droplet, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { AICard } from "@/components/AIOrb";
@@ -16,7 +16,7 @@ import {
   formatShortDate,
 } from "@/components/NutritionDateHeader";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
-import { getTodayMacroSummary, getWeeklyNutritionInsight, type MacroSummary, type WeeklyNutritionInsight } from "@/lib/macros.functions";
+import { getTodayMacroSummary, getWeeklyNutritionInsight, type MacroSummary, type WeeklyNutritionInsight, type WeeklyDay } from "@/lib/macros.functions";
 import {
   getTodayMeals,
   getTodayHydration,
@@ -46,6 +46,7 @@ function Nutrition() {
   const [hydration, setHydration] = useState<HydrationSummary | null>(null);
   const [hydrationEvents, setHydrationEvents] = useState<HydrationEvent[]>([]);
   const [hydrationOpen, setHydrationOpen] = useState(false);
+  const [weeklySheetOpen, setWeeklySheetOpen] = useState(false);
   const [openMeal, setOpenMeal] = useState<TodayMeal | null>(null);
   const [weekly, setWeekly] = useState<WeeklyNutritionInsight | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -270,6 +271,8 @@ function Nutrition() {
 
       {isToday && hasHydrationTarget && <HydrationInsight hydration={hydration} />}
 
+      <WeeklyPreviewCard weekly={weekly} onOpen={() => setWeeklySheetOpen(true)} />
+
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs uppercase tracking-wider text-text-tertiary">
@@ -300,11 +303,14 @@ function Nutrition() {
         </div>
       )}
 
-      <WeeklyInsightCard weekly={weekly} />
-
       <BottomNav onLogged={reload} />
       <HydrationLogModal open={hydrationOpen} onClose={() => setHydrationOpen(false)} onSaved={reload} />
       <MealDetailModal meal={openMeal} onClose={() => setOpenMeal(null)} />
+      <WeeklyGraphSheet
+        open={weeklySheetOpen}
+        onClose={() => setWeeklySheetOpen(false)}
+        initialAnchor={selectedDate}
+      />
     </div>
   );
 }
@@ -641,29 +647,28 @@ function ScorePill({
   );
 }
 
-function WeeklyInsightCard({ weekly }: { weekly: WeeklyNutritionInsight | null }) {
-  if (!weekly) return null;
-  const {
-    logged_days,
-    days_elapsed,
-    avg_calories,
-    avg_target_calories,
-    protein_hit_days,
-    calorie_on_target_days,
-    weekly_nutrition_score,
-    main_weekly_driver,
-    coach_note,
-  } = weekly;
+// ---------------------------------------------------------------------------
+// Weekly Preview (compact card on the main scroll)
+// ---------------------------------------------------------------------------
 
-  const lowConfidence = logged_days > 0 && logged_days < 3;
+function WeeklyPreviewCard({
+  weekly,
+  onOpen,
+}: {
+  weekly: WeeklyNutritionInsight | null;
+  onOpen: () => void;
+}) {
+  if (!weekly) return null;
+  const { logged_days, days_elapsed, weekly_nutrition_score, confidence_label, early_signal } = weekly;
+  const lowConfidence = confidence_label === "low";
 
   return (
-    <section className="mx-5 mt-5 rounded-3xl bg-bg-2 border border-white/5 p-4">
-      <div className="flex items-center justify-between">
-        <p className="text-[10px] uppercase tracking-wider text-text-tertiary">This week</p>
-        {weekly_nutrition_score != null && (
+    <section className="mx-5 mt-4 rounded-3xl bg-bg-2 border border-white/5 p-4">
+      <div className="flex items-baseline justify-between">
+        <p className="text-[15px] font-semibold text-white">This week so far</p>
+        {weekly_nutrition_score != null && !lowConfidence && (
           <span
-            className="text-[11px] font-semibold tabular-nums px-2 py-0.5 rounded-full bg-white/5 border border-white/10"
+            className="text-[12px] font-semibold tabular-nums"
             style={{ color: scoreColor(weekly_nutrition_score) }}
           >
             {weekly_nutrition_score}
@@ -671,58 +676,352 @@ function WeeklyInsightCard({ weekly }: { weekly: WeeklyNutritionInsight | null }
         )}
       </div>
 
-      {logged_days === 0 ? (
-        <div className="mt-2">
-          <p className="text-[14px] font-semibold text-white">No meals logged this week yet.</p>
-          <p className="text-[12px] text-text-secondary mt-1">Start with today's first meal.</p>
-        </div>
-      ) : (
-        <>
-          <div className="mt-2.5 grid grid-cols-3 gap-2">
-            <WeeklyStat
-              label="Logged"
-              value={`${logged_days}/${days_elapsed}`}
-              sub="days"
-            />
-            <WeeklyStat
-              label="Avg kcal"
-              value={avg_calories.toLocaleString()}
-              sub={avg_target_calories != null ? `/ ${avg_target_calories.toLocaleString()}` : "no target"}
-            />
-            <WeeklyStat
-              label="Protein hit"
-              value={`${protein_hit_days}/${logged_days}`}
-              sub="days"
-            />
-          </div>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <WeeklyStat
-              label="kcal on target"
-              value={`${calorie_on_target_days}/${logged_days}`}
-              sub="days"
-            />
-            <WeeklyStat
-              label="Confidence"
-              value={lowConfidence ? "Low" : "OK"}
-              sub={lowConfidence ? "<3 days" : `${logged_days} days`}
-            />
-          </div>
-          <p className="mt-3 text-[12px] text-text-secondary">{main_weekly_driver}</p>
-          <div className="mt-2 rounded-full bg-white/5 border border-white/10 px-3 py-1 text-[11px] text-text-secondary text-center">
-            {coach_note}
-          </div>
-        </>
-      )}
+      <div className="mt-1 flex items-baseline gap-2">
+        <span className="text-2xl font-extrabold tabular-nums text-white leading-none">
+          {logged_days}
+        </span>
+        <span className="text-[12px] text-text-tertiary">
+          {logged_days === 1 ? "day logged" : "days logged"}
+          <span className="text-text-tertiary/70"> · of {days_elapsed}</span>
+        </span>
+        {lowConfidence && logged_days > 0 && (
+          <span className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-medium border border-white/10 bg-white/5 text-text-tertiary">
+            Confidence low
+          </span>
+        )}
+      </div>
+
+      <p className="mt-2 text-[12px] text-text-secondary leading-snug">{early_signal}</p>
+
+      <button
+        type="button"
+        onClick={onOpen}
+        className="mt-3 w-full inline-flex items-center justify-between rounded-2xl bg-white/[0.04] border border-white/10 px-3 py-2 text-[12px] font-semibold text-text-primary active:scale-[0.99] transition"
+      >
+        <span>View weekly graph</span>
+        <ChevronRight size={16} className="text-text-tertiary" />
+      </button>
     </section>
   );
 }
 
-function WeeklyStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+// ---------------------------------------------------------------------------
+// Weekly Graph Bottom Sheet
+// ---------------------------------------------------------------------------
+
+function formatRangeLabel(startISO: string, endISO: string): string {
+  const fmt = (iso: string) => {
+    const [y, m, d] = iso.split("-").map(Number);
+    return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString(undefined, {
+      day: "2-digit",
+      month: "short",
+    });
+  };
+  return `${fmt(startISO)} – ${fmt(endISO)}`;
+}
+
+function shiftAnchor(anchorISO: string, weeks: number): string {
+  const [y, m, d] = anchorISO.split("-").map(Number);
+  const dt = new Date(y, (m ?? 1) - 1, d ?? 1);
+  dt.setDate(dt.getDate() + weeks * 7);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+function WeeklyGraphSheet({
+  open,
+  onClose,
+  initialAnchor,
+}: {
+  open: boolean;
+  onClose: () => void;
+  initialAnchor: string;
+}) {
+  const [anchor, setAnchor] = useState(initialAnchor);
+  const [data, setData] = useState<WeeklyNutritionInsight | null>(null);
+  const [loading, setLoading] = useState(false);
+  const fetchWeekly = useServerFn(getWeeklyNutritionInsight);
+
+  // Re-sync anchor whenever the sheet opens from a (possibly new) selectedDate.
+  useEffect(() => {
+    if (open) setAnchor(initialAnchor);
+  }, [open, initialAnchor]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    fetchWeekly({ data: { anchorDate: anchor } } as any)
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch(() => { if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, anchor, fetchWeekly]);
+
+  // Close on Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const todayISO = todayLocalISO();
+  // "This week" anchor (today). Next-week disabled when anchor is in current week.
+  const currentWeekAnchor = todayISO;
+  const isCurrentOrFutureWeek = data ? data.week_end_date >= currentWeekAnchor : true;
+
+  const rangeLabel = data ? formatRangeLabel(data.week_start_date, data.week_end_date) : "";
+  const isThisWeek = data ? data.week_start_date <= todayISO && todayISO <= data.week_end_date : false;
+
   return (
-    <div className="rounded-2xl bg-white/[0.03] border border-white/5 px-2.5 py-2">
-      <p className="text-[9px] uppercase tracking-wider text-text-tertiary">{label}</p>
-      <p className="mt-0.5 text-[14px] font-semibold tabular-nums text-white leading-tight">{value}</p>
-      {sub && <p className="text-[10px] text-text-tertiary leading-tight">{sub}</p>}
+    <div className="fixed inset-0 z-[80] flex items-end" role="dialog" aria-modal="true">
+      {/* Backdrop */}
+      <button
+        aria-label="Close"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+      />
+      {/* Sheet */}
+      <div
+        className="relative w-full bg-bg-1 rounded-t-3xl border-t border-white/10 max-h-[88vh] flex flex-col"
+        style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)" }}
+      >
+        <div className="flex items-center justify-center pt-2.5">
+          <span className="h-1 w-10 rounded-full bg-white/20" />
+        </div>
+        <div className="px-5 pt-3 pb-2 flex items-start justify-between">
+          <div className="min-w-0">
+            <p className="text-[17px] font-semibold text-white tracking-tight">Weekly adherence</p>
+            <p className="mt-0.5 text-[12px] text-text-tertiary">{rangeLabel || "Loading…"}</p>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close weekly graph"
+            className="h-8 w-8 rounded-full flex items-center justify-center bg-white/5 border border-white/10 text-text-secondary active:scale-95 transition"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Week nav */}
+        <div className="mx-5 mt-1 flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-1.5 py-1">
+          <button
+            onClick={() => setAnchor(shiftAnchor(anchor, -1))}
+            aria-label="Previous week"
+            className="p-2 rounded-full text-text-secondary active:scale-95 transition"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <span className="text-[13px] font-semibold text-white">
+            {isThisWeek ? "This week" : rangeLabel}
+          </span>
+          <button
+            onClick={() => setAnchor(shiftAnchor(anchor, 1))}
+            disabled={isCurrentOrFutureWeek}
+            aria-label="Next week"
+            className="p-2 rounded-full text-text-secondary active:scale-95 transition disabled:opacity-30 disabled:active:scale-100"
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 pt-4">
+          {loading && !data ? (
+            <div className="py-12 flex justify-center">
+              <Loader2 size={18} className="animate-spin text-text-tertiary" />
+            </div>
+          ) : data ? (
+            <WeeklyGraphContent data={data} />
+          ) : (
+            <p className="py-8 text-center text-[12px] text-text-tertiary">
+              Couldn't load this week.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WeeklyGraphContent({ data }: { data: WeeklyNutritionInsight }) {
+  const { days, avg_target_calories, logged_days, calorie_on_target_days, protein_hit_days, avg_calories, confidence_label, decision_insight } = data;
+
+  // Y-scale: max of (highest day total, avg target * 1.2, 800).
+  const maxStack = Math.max(...days.map((d) => d.macro_total_calories), 0);
+  const tgt = avg_target_calories ?? 0;
+  const yMax = Math.max(maxStack * 1.05, tgt * 1.15, 800);
+
+  return (
+    <div className="space-y-5">
+      {/* Legend */}
+      <div className="flex items-center justify-center gap-4 text-[11px] text-text-secondary">
+        <LegendDot color="#F59E0B" label="Protein" />
+        <LegendDot color="#10B981" label="Carbs" />
+        <LegendDot color="#3B82F6" label="Fat" />
+      </div>
+
+      {/* Chart */}
+      <StackedBarChart days={days} yMax={yMax} target={avg_target_calories} />
+
+      {/* Summary metrics */}
+      <div className="grid grid-cols-2 gap-2">
+        <MetricCard
+          label="Average calories"
+          value={avg_calories > 0 ? avg_calories.toLocaleString() : "—"}
+          sub={avg_target_calories != null ? `of ${avg_target_calories.toLocaleString()} target` : "no target set"}
+        />
+        <MetricCard
+          label="On-target days"
+          value={logged_days > 0 ? `${calorie_on_target_days} of ${logged_days}` : "—"}
+          sub="calories within range"
+        />
+        <MetricCard
+          label="Protein hit"
+          value={logged_days > 0 ? `${protein_hit_days} of ${logged_days}` : "—"}
+          sub="days at protein target"
+        />
+        <MetricCard
+          label="Confidence"
+          value={confidence_label === "low" ? "Low" : "OK"}
+          sub={confidence_label === "low" ? "Log 3+ days" : `${logged_days} days logged`}
+        />
+      </div>
+
+      {/* Diagnosis */}
+      <div className="rounded-2xl bg-white/[0.03] border border-white/5 px-4 py-3">
+        <p className="text-[11px] uppercase tracking-wider text-text-tertiary">Insight</p>
+        <p className="mt-1 text-[13px] text-text-secondary leading-snug">{decision_insight}</p>
+      </div>
+    </div>
+  );
+}
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="h-2 w-2 rounded-full" style={{ background: color }} />
+      <span>{label}</span>
+    </span>
+  );
+}
+
+function StackedBarChart({
+  days,
+  yMax,
+  target,
+}: {
+  days: WeeklyDay[];
+  yMax: number;
+  target: number | null;
+}) {
+  const W = 320;
+  const H = 180;
+  const padL = 28;
+  const padR = 8;
+  const padT = 12;
+  const padB = 22;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const slot = innerW / 7;
+  const barW = Math.min(22, slot * 0.55);
+
+  const y = (cal: number) => padT + innerH - (cal / yMax) * innerH;
+  const targetY = target != null && target > 0 ? y(target) : null;
+
+  return (
+    <div className="rounded-2xl bg-bg-2 border border-white/5 p-3">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto">
+        {/* baseline */}
+        <line x1={padL} x2={W - padR} y1={padT + innerH} y2={padT + innerH} stroke="rgba(255,255,255,0.08)" />
+        {/* Target line */}
+        {targetY != null && (
+          <>
+            <line
+              x1={padL}
+              x2={W - padR}
+              y1={targetY}
+              y2={targetY}
+              stroke="rgba(255,255,255,0.35)"
+              strokeDasharray="3 3"
+            />
+            <text x={W - padR} y={targetY - 4} textAnchor="end" className="fill-text-tertiary" style={{ fontSize: 9 }}>
+              Target {target?.toLocaleString()}
+            </text>
+          </>
+        )}
+        {/* Bars */}
+        {days.map((d, i) => {
+          const cx = padL + slot * i + slot / 2;
+          const bx = cx - barW / 2;
+          if (!d.has_logged_meals) {
+            // Empty placeholder
+            return (
+              <g key={d.entry_date}>
+                <rect
+                  x={bx}
+                  y={padT + innerH - 4}
+                  width={barW}
+                  height={4}
+                  rx={2}
+                  fill={d.in_future ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.08)"}
+                />
+                <text x={cx} y={H - 6} textAnchor="middle" className="fill-text-tertiary" style={{ fontSize: 10 }}>
+                  {d.weekday_label[0]}
+                </text>
+              </g>
+            );
+          }
+          // Stack: protein (bottom), carbs, fat (top)
+          const segs = [
+            { v: d.protein_calories, color: "#F59E0B" },
+            { v: d.carb_calories, color: "#10B981" },
+            { v: d.fat_calories, color: "#3B82F6" },
+          ];
+          let cursor = padT + innerH;
+          return (
+            <g key={d.entry_date}>
+              {segs.map((s, idx) => {
+                if (s.v <= 0) return null;
+                const h = (s.v / yMax) * innerH;
+                cursor -= h;
+                const isTop = idx === segs.length - 1 || segs.slice(idx + 1).every((x) => x.v <= 0);
+                const isBottom = idx === 0 || segs.slice(0, idx).every((x) => x.v <= 0);
+                const rx = isTop || isBottom ? 3 : 0;
+                return (
+                  <rect
+                    key={idx}
+                    x={bx}
+                    y={cursor}
+                    width={barW}
+                    height={h}
+                    rx={rx}
+                    fill={s.color}
+                    opacity={0.92}
+                  />
+                );
+              })}
+              <text x={cx} y={H - 6} textAnchor="middle" className="fill-text-secondary" style={{ fontSize: 10 }}>
+                {d.weekday_label[0]}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-2xl bg-white/[0.03] border border-white/5 px-3 py-2.5">
+      <p className="text-[11px] text-text-tertiary">{label}</p>
+      <p className="mt-0.5 text-[16px] font-semibold tabular-nums text-white leading-tight">{value}</p>
+      {sub && <p className="text-[11px] text-text-tertiary leading-tight mt-0.5">{sub}</p>}
     </div>
   );
 }
