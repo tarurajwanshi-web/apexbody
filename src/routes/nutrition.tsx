@@ -160,7 +160,10 @@ function Nutrition() {
       </p>
 
       <section className="mx-5 mt-3 rounded-3xl bg-bg-2 border border-white/5 p-5">
-        <div className="flex items-end justify-between">
+        {macros?.verdict && (
+          <VerdictBadge verdict={macros.verdict} />
+        )}
+        <div className="flex items-end justify-between mt-2">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-text-tertiary">{dateLabel}</p>
             <div className="mt-1 flex items-end gap-1">
@@ -186,20 +189,32 @@ function Nutrition() {
                 <span className="text-sm text-text-tertiary">No target yet.</span>
               )}
             </div>
-            {/* Informational over-target line — keep tone calm and factual,
-                consistent with other nutrition copy in the app. */}
-            {hasTarget && hasMeals && cCal > tCal! && (
-              <p className="mt-2 text-[12px]" style={{ color: "#F59E0B" }}>
-                {(cCal - tCal!).toLocaleString()} kcal over today's target
-              </p>
+            {hasTarget && hasMeals && (() => {
+              const diff = cCal - tCal!;
+              if (diff > 0) {
+                return (
+                  <p className="mt-2 text-[12px]" style={{ color: "#F59E0B" }}>
+                    {diff.toLocaleString()} kcal over target
+                  </p>
+                );
+              }
+              if (diff < 0) {
+                return (
+                  <p className="mt-2 text-[12px] text-text-tertiary">
+                    {Math.abs(diff).toLocaleString()} kcal {isToday ? "remaining" : "under target"}
+                  </p>
+                );
+              }
+              return null;
+            })()}
+            {macros?.main_driver && hasMeals && (
+              <p className="mt-1 text-[12px] text-text-secondary">{macros.main_driver}</p>
             )}
           </div>
         </div>
         {hasTarget && (() => {
           const ratio = tCal! > 0 ? cCal / tCal! : 0;
           const over = ratio > 1;
-          // Bar fills to 100% at target, then shifts to amber to flag the overage
-          // without becoming alarming. No red — copy elsewhere stays informational.
           const barColor = over ? "#F59E0B" : undefined;
           const widthPct = Math.min(100, Math.round(ratio * 100));
           return (
@@ -216,6 +231,18 @@ function Nutrition() {
           <Macro label="Carbs"   v={macros?.consumed_carbs_g ?? 0}   t={macros?.target_carbs_g ?? 0}   color="#10B981" hasMeals={hasMeals} />
           <Macro label="Fat"     v={macros?.consumed_fat_g ?? 0}     t={macros?.target_fat_g ?? 0}     color="#3B82F6" hasMeals={hasMeals} />
         </div>
+        {macros?.coaching_line && hasMeals && (
+          <div className="mt-4 rounded-full bg-white/5 border border-white/10 px-3 py-1.5 text-[11px] text-text-secondary text-center">
+            {macros.coaching_line}
+          </div>
+        )}
+        {(macros?.meal_quality_score != null || macros?.macro_adherence_score != null || macros?.nutrition_day_score != null) && (
+          <div className="mt-4 grid grid-cols-3 gap-2 border-t border-white/5 pt-3">
+            <ScorePill label="Meal quality" value={macros?.meal_quality_score ?? null} />
+            <ScorePill label="Macro adherence" value={macros?.macro_adherence_score ?? null} />
+            <ScorePill label="Nutrition score" value={macros?.nutrition_day_score ?? null} emphasized />
+          </div>
+        )}
       </section>
 
       {/* Hydration card — ACSM-aligned target, with quick-add launcher.
@@ -249,10 +276,10 @@ function Nutrition() {
                 : `Meals on ${formatShortDate(selectedDate)}`}
           </p>
           <p className="text-[11px] text-text-accent">
-            {isToday ? "Tap + below to log a meal" : "Meal logging is for today only"}
+            {isToday ? "Tap + below to log a meal" : "Viewing this day. New meals log to today only."}
           </p>
         </div>
-        <UnifiedTimeline meals={meals} hydration={hydrationEvents} onOpenMeal={setOpenMeal} />
+        <UnifiedTimeline meals={meals} hydration={hydrationEvents} selectedDate={selectedDate} onOpenMeal={setOpenMeal} />
       </section>
 
 
@@ -391,10 +418,11 @@ function BottleFill({ pct, disabled }: { pct: number; disabled?: boolean }) {
 
 /** Chronological "Today" timeline: meals + hydration interleaved by timestamp. */
 function UnifiedTimeline({
-  meals, hydration, onOpenMeal,
+  meals, hydration, selectedDate, onOpenMeal,
 }: {
   meals: TodayMeal[] | null;
   hydration: HydrationEvent[];
+  selectedDate: string;
   onOpenMeal: (m: TodayMeal) => void;
 }) {
   if (meals == null) {
@@ -405,9 +433,16 @@ function UnifiedTimeline({
     );
   }
   if (meals.length === 0 && hydration.length === 0) {
+    const label = formatNutritionDateLabel(selectedDate);
+    const emptyCopy =
+      label === "Today"
+        ? "Nothing logged yet today."
+        : label === "Yesterday"
+          ? "Nothing logged yesterday."
+          : `Nothing logged on ${formatShortDate(selectedDate)}.`;
     return (
       <div className="rounded-2xl bg-bg-2 border border-white/5 p-5">
-        <p className="text-sm text-text-secondary">Nothing logged yet today. Tap the + in the nav below to log a meal, or use Log water above.</p>
+        <p className="text-sm text-text-secondary">{emptyCopy}</p>
       </div>
     );
   }
@@ -503,3 +538,40 @@ function HydrationInsight({ hydration }: { hydration: HydrationSummary | null })
   );
 }
 
+
+function VerdictBadge({ verdict }: { verdict: string }) {
+  const tone =
+    verdict === "On track"
+      ? { bg: "rgba(16,185,129,0.12)", border: "rgba(16,185,129,0.35)", color: "#10B981" }
+      : verdict === "Slightly off"
+        ? { bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.35)", color: "#F59E0B" }
+        : verdict === "Off target"
+          ? { bg: "rgba(239,68,68,0.10)", border: "rgba(239,68,68,0.30)", color: "#EF4444" }
+          : { bg: "rgba(255,255,255,0.05)", border: "rgba(255,255,255,0.10)", color: "#9CA3AF" };
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+      style={{ background: tone.bg, border: `1px solid ${tone.border}`, color: tone.color }}
+    >
+      {verdict}
+    </span>
+  );
+}
+
+function ScorePill({
+  label, value, emphasized,
+}: { label: string; value: number | null; emphasized?: boolean }) {
+  const color =
+    value == null ? "#6B7280" : value >= 80 ? "#10B981" : value >= 60 ? "#F59E0B" : "#EF4444";
+  return (
+    <div className="flex flex-col items-center">
+      <p className="text-[10px] text-text-tertiary uppercase tracking-wider text-center">{label}</p>
+      <p
+        className={`mt-1 tabular-nums ${emphasized ? "text-lg font-bold" : "text-base font-semibold"}`}
+        style={{ color }}
+      >
+        {value == null ? "—" : value}
+      </p>
+    </div>
+  );
+}
