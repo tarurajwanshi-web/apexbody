@@ -125,10 +125,11 @@ function Nutrition() {
   const cProtein = macros?.consumed_protein_g ?? 0;
   const proteinShort = tProtein != null ? Math.max(0, tProtein - cProtein) : 0;
 
+  const hasHydrationTarget = (hydration?.target_ml ?? 0) > 0;
   return (
     <div
       ref={ptrRef}
-      className="min-h-screen bg-bg-1 pb-32 relative"
+      className="min-h-screen bg-bg-1 pb-44 relative"
       style={{
         transform: ptrDelta ? `translateY(${ptrDelta}px)` : undefined,
         transition: ptrDelta ? "none" : "transform 0.2s ease",
