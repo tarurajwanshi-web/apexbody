@@ -35,6 +35,12 @@ import {
   type HydrationSummary,
   type HydrationEvent,
 } from "@/lib/shield.functions";
+import { debugReadMealById, debugListMealsForDate } from "@/lib/shield.functions";
+import { supabase } from "@/integrations/supabase/client";
+import { getBrowserTimezone } from "@/lib/dates";
+
+const DIAG_BUILD_STAMP = new Date().toISOString();
+
 
 export const Route = createFileRoute("/nutrition")({
   head: () => ({ meta: [{ title: "Nutrition — APEX" }] }),
