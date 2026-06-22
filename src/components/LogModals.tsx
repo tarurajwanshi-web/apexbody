@@ -1082,6 +1082,27 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
           <p className="text-[12px] text-text-tertiary">Adjust servings before saving.</p>
           {photoUrl && (<img src={photoUrl} alt="Meal" className="w-full max-h-36 object-cover rounded-xl" />)}
 
+          {/* Meal slot selector — 4 buttons, pre-selected by time-of-day. */}
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-text-tertiary mb-2">Meal time</p>
+            <div className="grid grid-cols-4 gap-2">
+              {(["breakfast", "lunch", "dinner", "snack"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setMealSlot(s)}
+                  className={`rounded-xl py-2 text-[12px] font-semibold capitalize transition ${
+                    mealSlot === s
+                      ? "gradient-brand text-white"
+                      : "border border-white/10 bg-bg-1 text-text-secondary"
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Top macro summary — live total */}
           <div className="rounded-2xl p-3 grid grid-cols-4 gap-2"
             style={{ background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.25)" }}>
@@ -1090,6 +1111,18 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
             <SummaryStat label="carbs" value={`${Math.round(totals.c)}g`} color="#10B981" />
             <SummaryStat label="fat" value={`${Math.round(totals.f)}g`} color="#3B82F6" />
           </div>
+
+          {/* Quick save — for when the AI read looks right and no per-item
+              edits are needed. Skips to saveMeal directly. */}
+          <button
+            type="button"
+            onClick={saveMeal}
+            disabled={busy || items.length === 0}
+            className="w-full rounded-2xl py-3 text-[14px] font-semibold text-white active:scale-[0.99] transition disabled:opacity-50 flex items-center justify-center gap-2"
+            style={{ background: "rgba(16,185,129,0.18)", border: "1px solid rgba(16,185,129,0.55)" }}
+          >
+            <Check size={14} /> Looks right → Save
+          </button>
 
           {/* Items */}
           <ul className="space-y-2">
