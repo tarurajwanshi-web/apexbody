@@ -738,6 +738,58 @@ export const restoreMeal = createServerFn({ method: "POST" })
     return { id: row.id as string, deleted: false as const };
   });
 
+// ---------- Diagnostics (dev/debug-only; auth-required, self-only) ----------
+// Returns the raw DB truth for a single meal id owned by the caller, bypassing
+// the SELECT-policy filter on `deleted=true`. Used by the Fuel diagnostics
+// panel to confirm post-delete state in the live (PWA) build.
+export const debugReadMealById = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row, error } = await supabaseAdmin
+      .from("shield_nutrition_logs")
+      .select("id, user_id, entry_date, deleted, estimated_calories")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row || row.user_id !== context.userId) return null;
+    return {
+      id: row.id as string,
+      entry_date: row.entry_date as string,
+      deleted: row.deleted as boolean | null,
+      estimated_calories: row.estimated_calories as number | null,
+    };
+  });
+
+// Returns every nutrition log for the caller on a given entry_date including
+// deleted ones, via admin client. Lets the diagnostics panel show DB-truth
+// next to the client/RLS-filtered list.
+export const debugListMealsForDate = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: rows, error } = await supabaseAdmin
+      .from("shield_nutrition_logs")
+      .select("id, entry_date, deleted, estimated_calories, created_at")
+      .eq("user_id", context.userId)
+      .eq("entry_date", data.entryDate)
+      .order("created_at", { ascending: true });
+    if (error) throw new Error(error.message);
+    return (rows ?? []).map((r: any) => ({
+      id: r.id as string,
+      entry_date: r.entry_date as string,
+      deleted: !!r.deleted,
+      estimated_calories: r.estimated_calories as number | null,
+      created_at: r.created_at as string,
+    }));
+  });
+
+
+
 // ---------- Body measurement events ----------
 
 export type BodyMeasurement = {
