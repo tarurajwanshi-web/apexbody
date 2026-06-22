@@ -1352,6 +1352,7 @@ export function BodyMeasurementModal({ open, onClose, onSaved }: Props) {
           hip_cm: num(toCm(hipDisp)),
           arm_cm: num(toCm(armDisp)),
           thigh_cm: num(toCm(thighDisp)),
+          client_timezone: getBrowserTimezone(),
         },
       });
       onSaved?.();
