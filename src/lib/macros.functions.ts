@@ -44,7 +44,9 @@ export const getTodayMacroSummary = createServerFn({ method: "GET" })
     // The prior `order by calculated_at` approach surfaced future-dated rows
     // (e.g. a Monday weekly-review insert that activates next Monday but is
     // calculated today) immediately, instead of waiting for them to take effect.
-    const todayStr = today();
+    // Resolve target as of the selected date, not always today, so historical
+    // days show the target that was active on that date.
+    const todayStr = entryDate;
     const { data: target } = await context.supabase
       .from("daily_macro_targets")
       .select("target_calories, target_protein_g, target_carbs_g, target_fat_g, effective_start_date, effective_end_date")
