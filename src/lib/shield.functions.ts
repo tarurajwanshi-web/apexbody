@@ -381,6 +381,20 @@ const VisionItemSchema = ConfirmedItemSchema.partial({
   estimated_grams: true, calories: true, protein_g: true, carbs_g: true, fat_g: true,
 }).extend({ name: z.string().min(1) });
 
+function inferMealSlot(tz: string): "breakfast" | "lunch" | "dinner" | "snack" {
+  try {
+    const hourStr = new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone: tz }).format(new Date());
+    const hour = parseInt(hourStr, 10);
+    if (!Number.isFinite(hour)) return "snack";
+    if (hour < 11) return "breakfast";
+    if (hour < 15) return "lunch";
+    if (hour < 20) return "dinner";
+    return "snack";
+  } catch {
+    return "snack";
+  }
+}
+
 export const logMeal = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
@@ -394,16 +408,19 @@ export const logMeal = createServerFn({ method: "POST" })
       vision_detected_items: z.array(VisionItemSchema).optional(),
       vision_provider: z.string().nullable().optional(),
       vision_confidence: z.number().nullable().optional(),
+      meal_slot: z.enum(["breakfast", "lunch", "dinner", "snack"]).optional(),
       client_timezone: z.string().max(64).optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
     const confirmed = data.confirmed_items;
+    const tz = await resolveUserTimezoneWithHint(context.supabase, context.userId, data.client_timezone);
     const row: Record<string, unknown> = {
       user_id: context.userId,
-      entry_date: await userTodayWithHint(context.supabase, context.userId, data.client_timezone),
+      entry_date: getLocalDateISO(tz),
       meal_description: data.meal_description ?? null,
       meal_photo_url: data.meal_photo_url ?? null,
+      meal_slot: data.meal_slot ?? inferMealSlot(tz),
       claude_score_status: "pending",
     };
     if (data.vision_detected_items) row.vision_detected_items = data.vision_detected_items;
@@ -556,6 +573,7 @@ export type TodayMeal = {
   user_confirmed_vision: boolean;
   calorie_estimate_status: CalorieEstimateStatus | null;
   user_corrected: boolean;
+  meal_slot: "breakfast" | "lunch" | "dinner" | "snack" | null;
   created_at: string;
 };
 
@@ -568,7 +586,7 @@ export const getTodayMeals = createServerFn({ method: "GET" })
     const entryDate = data?.entryDate ?? await userToday(context.supabase, context.userId);
     const { data: rows, error } = await context.supabase
       .from("shield_nutrition_logs")
-      .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, estimated_items, calorie_estimate_status, user_corrected, created_at, deleted, entry_date, confirmed_items, user_confirmed_vision")
+      .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, estimated_items, calorie_estimate_status, user_corrected, created_at, deleted, entry_date, confirmed_items, user_confirmed_vision, meal_slot")
       .eq("user_id", context.userId)
       .eq("entry_date", entryDate)
       .eq("deleted", false)
@@ -589,6 +607,7 @@ export const getTodayMeals = createServerFn({ method: "GET" })
       user_confirmed_vision: !!r.user_confirmed_vision,
       calorie_estimate_status: r.calorie_estimate_status ?? null,
       user_corrected: !!r.user_corrected,
+      meal_slot: (r.meal_slot as TodayMeal["meal_slot"]) ?? null,
       created_at: r.created_at,
     }));
   });
