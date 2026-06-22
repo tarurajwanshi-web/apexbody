@@ -362,7 +362,9 @@ export type Database = {
           name: string | null
           plan_unlock_date: string | null
           profile_completed_at: string | null
+          soft_reset_at: string | null
           timezone: string | null
+          training_day_codes: string[] | null
           training_days_per_week: number | null
           updated_at: string
           user_id: string
@@ -387,7 +389,9 @@ export type Database = {
           name?: string | null
           plan_unlock_date?: string | null
           profile_completed_at?: string | null
+          soft_reset_at?: string | null
           timezone?: string | null
+          training_day_codes?: string[] | null
           training_days_per_week?: number | null
           updated_at?: string
           user_id: string
@@ -412,7 +416,9 @@ export type Database = {
           name?: string | null
           plan_unlock_date?: string | null
           profile_completed_at?: string | null
+          soft_reset_at?: string | null
           timezone?: string | null
+          training_day_codes?: string[] | null
           training_days_per_week?: number | null
           updated_at?: string
           user_id?: string

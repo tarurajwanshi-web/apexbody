@@ -6,9 +6,11 @@ import { useServerFn } from "@tanstack/react-start";
 import { logBodyMeasurement } from "@/lib/shield.functions";
 import { getBrowserTimezone } from "@/lib/dates";
 import { toast } from "sonner";
+import { z } from "zod";
 
 export const Route = createFileRoute("/_authenticated/onboarding")({
   head: () => ({ meta: [{ title: "Profile setup — APEX" }] }),
+  validateSearch: z.object({ reset: z.string().optional() }),
   component: ProfileSetup,
 });
 
@@ -45,6 +47,7 @@ type Draft = {
   inputPath: InputPath | null;
   goal: Goal | null;
   days: number;
+  trainingDays: string[];
   equipment: Equipment | null;
   bodyDataType: BodyDataType;       // "dexa" | "measurements" | null  (null = skipped)
   dexaBf: string;                   // body-fat %  (path-agnostic; named for legacy column)
@@ -60,7 +63,7 @@ type Draft = {
 
 const EMPTY: Draft = {
   name: "", age: "", sex: null, inputPath: null,
-  goal: null, days: 3, equipment: null, bodyDataType: null,
+  goal: null, days: 3, trainingDays: [], equipment: null, bodyDataType: null,
   dexaBf: "", dexaLean: "", dexaFileName: null,
   waist: "", hip: "", arm: "", thigh: "", weight: "", height: "",
 };
@@ -68,8 +71,11 @@ const EMPTY: Draft = {
 
 function ProfileSetup() {
   const navigate = useNavigate();
+  const { reset: isResetParam } = Route.useSearch();
+  const isReset = isResetParam === "true";
   const logMeasure = useServerFn(logBodyMeasurement);
-  const [step, setStep] = useState(1);
+  const minStep = isReset ? 3 : 1;
+  const [step, setStep] = useState(minStep);
   const [bodySub, setBodySub] = useState<"A" | "B">("A"); // sub-step inside step 6
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [submitting, setSubmitting] = useState(false);
@@ -92,7 +98,7 @@ function ProfileSetup() {
       }
       case 2: return !!draft.inputPath;
       case 3: return !!draft.goal;
-      case 4: return draft.days >= 1 && draft.days <= 6;
+      case 4: return draft.trainingDays.length >= 1;
       case 5: return !!draft.equipment;
       case 6: return bodySub === "A" ? bodyAValid : bodyBValid;
       case 7: return true;
@@ -107,7 +113,7 @@ function ProfileSetup() {
   };
   const back = () => {
     if (step === 6 && bodySub === "B") { setBodySub("A"); return; }
-    setStep((s) => Math.max(s - 1, 1));
+    setStep((s) => Math.max(s - 1, minStep));
   };
 
   const skipBody = () => {
@@ -128,30 +134,52 @@ function ProfileSetup() {
       if (uerr || !userRes.user) throw new Error("Not signed in");
       const userId = userRes.user.id;
 
-      const now = new Date();
-      const unlock = new Date(now.getTime() + 7 * 86400000);
-      const unlockDate = unlock.toISOString().slice(0, 10);
+      const trainingDaysCount = draft.trainingDays.length || draft.days;
 
-      const payload = {
-        user_id: userId,
-        name: draft.name.trim(),
-        age: Number(draft.age),
-        biological_sex: draft.sex,
-        input_path_preference: draft.inputPath,
-        goal: draft.goal,
-        training_days_per_week: draft.days,
-        equipment_access: draft.equipment,
-        body_data_type: draft.bodyDataType,
-        dexa_body_fat_pct: draft.bodyDataType === "dexa" && draft.dexaBf ? Number(draft.dexaBf) : null,
-        dexa_lean_mass_kg: draft.bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
-        measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
-        measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
-        measurement_weight_kg: draft.weight ? Number(draft.weight) : null,
-        measurement_height_cm: draft.height ? Number(draft.height) : null,
-        profile_completed_at: now.toISOString(),
-        plan_unlock_date: unlockDate,
-        timezone: getBrowserTimezone(),
-      };
+      let payload: any;
+      if (isReset) {
+        // Reset mode: only update plan-shaping fields. Identity, recovery method,
+        // and profile_completed_at are preserved so we don't reset learning phase.
+        payload = {
+          user_id: userId,
+          goal: draft.goal,
+          training_days_per_week: trainingDaysCount,
+          training_day_codes: draft.trainingDays,
+          equipment_access: draft.equipment,
+          body_data_type: draft.bodyDataType,
+          dexa_body_fat_pct: draft.bodyDataType === "dexa" && draft.dexaBf ? Number(draft.dexaBf) : null,
+          dexa_lean_mass_kg: draft.bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
+          measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
+          measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
+          measurement_weight_kg: draft.weight ? Number(draft.weight) : null,
+          measurement_height_cm: draft.height ? Number(draft.height) : null,
+        };
+      } else {
+        const now = new Date();
+        const unlock = new Date(now.getTime() + 7 * 86400000);
+        const unlockDate = unlock.toISOString().slice(0, 10);
+        payload = {
+          user_id: userId,
+          name: draft.name.trim(),
+          age: Number(draft.age),
+          biological_sex: draft.sex,
+          input_path_preference: draft.inputPath,
+          goal: draft.goal,
+          training_days_per_week: trainingDaysCount,
+          training_day_codes: draft.trainingDays,
+          equipment_access: draft.equipment,
+          body_data_type: draft.bodyDataType,
+          dexa_body_fat_pct: draft.bodyDataType === "dexa" && draft.dexaBf ? Number(draft.dexaBf) : null,
+          dexa_lean_mass_kg: draft.bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
+          measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
+          measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
+          measurement_weight_kg: draft.weight ? Number(draft.weight) : null,
+          measurement_height_cm: draft.height ? Number(draft.height) : null,
+          profile_completed_at: now.toISOString(),
+          plan_unlock_date: unlockDate,
+          timezone: getBrowserTimezone(),
+        };
+      }
 
       const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "user_id" });
       if (error) throw error;
@@ -179,13 +207,15 @@ function ProfileSetup() {
       }
 
       // Mirror name to local store so the dashboard greets immediately.
-      try {
-        const raw = localStorage.getItem("apex_user_profile");
-        const obj = raw ? JSON.parse(raw) : {};
-        obj.name = draft.name.trim();
-        obj.goal = draft.goal;
-        localStorage.setItem("apex_user_profile", JSON.stringify(obj));
-      } catch {}
+      if (!isReset) {
+        try {
+          const raw = localStorage.getItem("apex_user_profile");
+          const obj = raw ? JSON.parse(raw) : {};
+          obj.name = draft.name.trim();
+          obj.goal = draft.goal;
+          localStorage.setItem("apex_user_profile", JSON.stringify(obj));
+        } catch {}
+      }
 
       const [macroRes, planRes] = await Promise.allSettled([
         supabase.functions.invoke("calculate-macros", { body: { user_id: userId } }),
@@ -208,7 +238,7 @@ function ProfileSetup() {
   return (
     <div className="min-h-screen bg-bg-1 pb-32" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
       <header className="flex items-center justify-between px-5 pt-6">
-        <button onClick={step === 1 ? () => navigate({ to: "/" }) : back} className="text-text-secondary">
+        <button onClick={step === minStep ? () => navigate({ to: isReset ? "/dashboard" : "/" }) : back} className="text-text-secondary">
           <ChevronLeft size={24} />
         </button>
         <span className="text-[11px] uppercase tracking-wider text-text-tertiary">{stepLabel}</span>
@@ -223,7 +253,7 @@ function ProfileSetup() {
         {step === 1 && <AboutYouStep name={draft.name} age={draft.age} sex={draft.sex} onName={(n) => patch({ name: n })} onAge={(age) => patch({ age })} onSex={(sex) => patch({ sex })} />}
         {step === 2 && <RecoveryMethodStep value={draft.inputPath} onChange={(v) => patch({ inputPath: v })} />}
         {step === 3 && <GoalStep value={draft.goal} onChange={(goal) => patch({ goal })} />}
-        {step === 4 && <DaysStep value={draft.days} onChange={(days) => patch({ days })} />}
+        {step === 4 && <DaysStep value={draft.trainingDays} onChange={(trainingDays, count) => patch({ trainingDays, days: count || draft.days })} />}
         {step === 5 && <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />}
         {step === 6 && <BodyStep draft={draft} patch={patch} subStep={bodySub} onSkip={skipBody} />}
         {step === 7 && <ReviewStep draft={draft} />}
@@ -397,35 +427,45 @@ function GoalStep({ value, onChange }: { value: Goal | null; onChange: (g: Goal)
   );
 }
 
-function DaysStep({ value, onChange }: { value: number; onChange: (n: number) => void }) {
-  const pct = ((value - 1) / 5) * 100;
+function DaysStep({ value, onChange }: { value: string[]; onChange: (days: string[], count: number) => void }) {
+  const DAYS: { id: string; label: string }[] = [
+    { id: "mon", label: "M" },
+    { id: "tue", label: "T" },
+    { id: "wed", label: "W" },
+    { id: "thu", label: "T" },
+    { id: "fri", label: "F" },
+    { id: "sat", label: "S" },
+    { id: "sun", label: "S" },
+  ];
+  const toggle = (id: string) => {
+    const next = value.includes(id) ? value.filter((d) => d !== id) : [...value, id];
+    onChange(next, next.length);
+  };
+  const count = value.length;
   return (
     <>
-      <StepHeader title="How many days per week can you train?" />
-      <div className="text-center mt-2 mb-8">
-        <span className="text-6xl font-bold tabular-nums text-white">{value}</span>
-        <span className="ml-2 text-base text-text-tertiary">{value === 1 ? "day" : "days"} / week</span>
-      </div>
-      <div className="px-2">
-        <div className="relative h-10 flex items-center">
-          <div className="absolute inset-x-0 h-2 rounded-full bg-white/10" />
-          <div className="absolute h-2 rounded-full gradient-brand pointer-events-none" style={{ width: `${pct}%` }} />
-          <div className="absolute h-6 w-6 rounded-full bg-white shadow-lg pointer-events-none -translate-x-1/2"
-            style={{ left: `${pct}%`, boxShadow: "0 0 0 4px rgba(124,58,237,0.25)" }} />
-          <input type="range" min={1} max={6} step={1} value={value}
-            onChange={(e) => onChange(Number(e.target.value))}
-            className="relative w-full h-10 opacity-0 cursor-pointer z-10" aria-label="Training days per week" />
-        </div>
-        <div className="mt-3 flex justify-between px-0.5">
-          {[1, 2, 3, 4, 5, 6].map((n) => (
-            <button key={n} type="button" onClick={() => onChange(n)}
-              className={`text-xs tabular-nums w-6 h-6 rounded-full transition ${n === value ? "text-white font-semibold" : "text-text-tertiary"}`}>
-              {n}
+      <StepHeader title="Which days can you train?" sub="Tap the days that work for your schedule." />
+      <div className="grid grid-cols-7 gap-2 mt-2">
+        {DAYS.map(({ id, label }) => {
+          const active = value.includes(id);
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => toggle(id)}
+              aria-pressed={active}
+              className={`h-12 rounded-full text-sm font-semibold transition active:scale-95 ${active ? "gradient-brand text-white" : "bg-bg-2 text-text-secondary border border-white/5"}`}
+            >
+              {label}
             </button>
-          ))}
-        </div>
+          );
+        })}
       </div>
-      <p className="mt-10 text-center text-xs text-text-tertiary">Drag the slider or tap a number.</p>
+      <div className="text-center mt-8">
+        <span className="text-4xl font-bold tabular-nums text-white">{count}</span>
+        <span className="ml-2 text-base text-text-tertiary">{count === 1 ? "day" : "days"} / week</span>
+      </div>
+      <p className="mt-4 text-center text-xs text-text-tertiary">Pick at least one day to continue.</p>
     </>
   );
 }
