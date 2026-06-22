@@ -7,6 +7,8 @@ import { useProfile } from "@/lib/store";
 import { askCoach } from "@/lib/coach.functions";
 import { getActivityWeek, type ActivityWeek } from "@/lib/shield.functions";
 import { supabase } from "@/integrations/supabase/client";
+import { useUserTimezone, getLocalDateISO, addDaysISO } from "@/lib/dates";
+import { ApexStreakStrip, type ApexStreakDay } from "@/components/ApexStreakStrip";
 
 export const Route = createFileRoute("/coach")({
   head: () => ({ meta: [{ title: "APEX Coach" }] }),
