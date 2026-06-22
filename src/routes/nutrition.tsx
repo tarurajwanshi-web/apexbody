@@ -202,8 +202,22 @@ function Nutrition() {
         profileRow = data ?? null;
       }
       const dbRows = await fetchDebugList({ data: { entryDate: selectedDate } } as any).catch((e: any) => ({ error: String(e?.message ?? e) }));
+      // Runtime detection — covers desktop browser, mobile browser, iOS PWA
+      // (Add to Home Screen) and Android PWA (TWA / display-mode standalone).
+      const displayStandalone =
+        (typeof window !== "undefined" &&
+          (window.matchMedia?.("(display-mode: standalone)").matches ||
+            (window.navigator as any).standalone === true)) || false;
+      const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+      const isIOS = /iPad|iPhone|iPod/.test(ua);
+      const isAndroid = /Android/.test(ua);
+      const runtime = displayStandalone
+        ? isIOS ? "iOS PWA" : isAndroid ? "Android PWA" : "Installed PWA"
+        : isIOS || isAndroid ? "Mobile browser" : "Desktop browser";
       setDiag({
         build: DIAG_BUILD_STAMP,
+        runtime,
+        userAgent: ua,
         supabaseUrl: (import.meta as any).env?.VITE_SUPABASE_URL ?? null,
         supabaseProjectId: (import.meta as any).env?.VITE_SUPABASE_PROJECT_ID ?? null,
         authUid: uid,
@@ -216,6 +230,7 @@ function Nutrition() {
         visibleMealIds: (meals ?? []).map((m) => ({ id: m.id, kcal: m.estimated_calories })),
         dbRowsForSelectedDate: dbRows,
       });
+
     } catch (e: any) {
       setDiag({ error: String(e?.message ?? e) });
     }
@@ -298,10 +313,32 @@ function Nutrition() {
 
       {diagOpen && (
         <div className="mx-5 mt-2 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3 text-[10px] leading-tight text-text-secondary">
-          <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center justify-between mb-1 gap-2">
             <span className="font-semibold text-amber-300">DIAG · Fuel</span>
-            <button onClick={refreshDiag} className="text-amber-300 underline">refresh</button>
+            <div className="flex items-center gap-3">
+              <button onClick={refreshDiag} className="text-amber-300 underline">refresh</button>
+              <button
+                onClick={async () => {
+                  const txt = JSON.stringify(diag, null, 2);
+                  try {
+                    await navigator.clipboard.writeText(txt);
+                    alert("Diagnostics copied");
+                  } catch {
+                    // Fallback for installed PWAs without clipboard permission
+                    const ta = document.createElement("textarea");
+                    ta.value = txt;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { document.execCommand("copy"); alert("Diagnostics copied"); }
+                    catch { alert("Copy failed — long-press the JSON block to select."); }
+                    document.body.removeChild(ta);
+                  }
+                }}
+                className="text-amber-300 underline"
+              >copy</button>
+            </div>
           </div>
+
           <pre className="whitespace-pre-wrap break-all text-[10px]">
 {JSON.stringify(diag, null, 2)}
           </pre>
