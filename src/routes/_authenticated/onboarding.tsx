@@ -238,7 +238,7 @@ function ProfileSetup() {
   return (
     <div className="min-h-screen bg-bg-1 pb-32" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
       <header className="flex items-center justify-between px-5 pt-6">
-        <button onClick={step === minStep ? () => navigate({ to: "/dashboard" }) : back} className="text-text-secondary">
+        <button onClick={step === minStep ? () => navigate({ to: isReset ? "/dashboard" : "/" }) : back} className="text-text-secondary">
           <ChevronLeft size={24} />
         </button>
         <span className="text-[11px] uppercase tracking-wider text-text-tertiary">{stepLabel}</span>
