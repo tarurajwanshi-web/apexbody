@@ -555,6 +555,7 @@ export type Database = {
           carb_quality_score: number | null
           claude_quality_score: number | null
           claude_score_status: string
+          correction_count: number
           created_at: string
           deleted: boolean
           entry_date: string
@@ -566,9 +567,15 @@ export type Database = {
           id: string
           meal_description: string | null
           meal_photo_url: string | null
+          original_estimated_calories: number | null
+          original_estimated_carbs_g: number | null
+          original_estimated_fat_g: number | null
+          original_estimated_items: Json | null
+          original_estimated_protein_g: number | null
           protein_tier: number | null
           timing_score: number | null
           updated_at: string
+          user_corrected: boolean
           user_id: string
         }
         Insert: {
@@ -576,6 +583,7 @@ export type Database = {
           carb_quality_score?: number | null
           claude_quality_score?: number | null
           claude_score_status?: string
+          correction_count?: number
           created_at?: string
           deleted?: boolean
           entry_date: string
@@ -587,9 +595,15 @@ export type Database = {
           id?: string
           meal_description?: string | null
           meal_photo_url?: string | null
+          original_estimated_calories?: number | null
+          original_estimated_carbs_g?: number | null
+          original_estimated_fat_g?: number | null
+          original_estimated_items?: Json | null
+          original_estimated_protein_g?: number | null
           protein_tier?: number | null
           timing_score?: number | null
           updated_at?: string
+          user_corrected?: boolean
           user_id: string
         }
         Update: {
@@ -597,6 +611,7 @@ export type Database = {
           carb_quality_score?: number | null
           claude_quality_score?: number | null
           claude_score_status?: string
+          correction_count?: number
           created_at?: string
           deleted?: boolean
           entry_date?: string
@@ -608,9 +623,15 @@ export type Database = {
           id?: string
           meal_description?: string | null
           meal_photo_url?: string | null
+          original_estimated_calories?: number | null
+          original_estimated_carbs_g?: number | null
+          original_estimated_fat_g?: number | null
+          original_estimated_items?: Json | null
+          original_estimated_protein_g?: number | null
           protein_tier?: number | null
           timing_score?: number | null
           updated_at?: string
+          user_corrected?: boolean
           user_id?: string
         }
         Relationships: []
@@ -771,6 +792,10 @@ export type Database = {
       }
       shield_dispatch_parse_device_upload: {
         Args: { _entry_date: string; _upload_id: string; _user_id: string }
+        Returns: undefined
+      }
+      shield_dispatch_score_nutrition: {
+        Args: { _id: string }
         Returns: undefined
       }
     }

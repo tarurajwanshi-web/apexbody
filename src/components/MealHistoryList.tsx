@@ -47,7 +47,7 @@ export function MealHistoryList({ onMutationStart, onMutationDone }: Props) {
       autoRetriedRef.current.add(m.id);
       void retryScore(m.id, /*silent*/ true).then(() => setTimeout(reload, 3000));
     }
-    const hasPending = meals.some((m) => m.claude_score_status === "pending" || (m.meal_photo_url && !m.estimated_items));
+    const hasPending = meals.some((m) => m.claude_score_status === "pending" || (m.meal_photo_url && !m.estimated_items && m.calorie_estimate_status !== "manual_edited"));
     if (!hasPending) return;
     const id = setInterval(reload, 5000);
     return () => clearInterval(id);
@@ -148,6 +148,12 @@ export function MealHistoryList({ onMutationStart, onMutationDone }: Props) {
                           <>
                             <span>•</span>
                             <span className="tabular-nums">{m.estimated_calories} kcal · {m.estimated_protein_g ?? 0}P · {m.estimated_carbs_g ?? 0}C · {m.estimated_fat_g ?? 0}F</span>
+                          </>
+                        )}
+                        {(m.calorie_estimate_status === "manual_edited" || m.user_corrected) && (
+                          <>
+                            <span>•</span>
+                            <span className="text-text-secondary italic">Adjusted by you</span>
                           </>
                         )}
                       </div>

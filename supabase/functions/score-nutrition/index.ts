@@ -75,6 +75,19 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Idempotency: if already fully scored AND estimated/manually edited,
+    // skip work. Prevents trigger+client double-dispatch from re-billing
+    // Anthropic and from clobbering a manual_edited row.
+    if (
+      row.claude_score_status === "scored" &&
+      (row.calorie_estimate_status === "estimated" ||
+        row.calorie_estimate_status === "manual_edited")
+    ) {
+      return new Response(JSON.stringify({ skipped: true, row }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Pull training context for same date (if any) for timing evaluation.
     const { data: training } = await supabase
       .from("shield_training_logs")
@@ -174,30 +187,42 @@ Deno.serve(async (req) => {
 
       if (upErr) throw upErr;
 
-      // SEPARATE, parallel call: calorie/macro estimation from the photo.
-      // This MUST NOT affect protein_tier/carb_quality_score/timing_score.
+      // SEPARATE, parallel call: calorie/macro estimation.
+      // Runs whenever we have a photo OR a description (text-only meals
+      // are estimated from the description alone). Priority order:
+      //   - photo + description: both image + description text
+      //   - description only:    text-only call
+      //   - photo only:          image + "(none)" description
+      //   - neither:             skip
       let estimate: { calories: number; protein_g: number; carbs_g: number; fat_g: number } | null = null;
-      if (row.meal_photo_url) {
+      const hasDescription = !!(row.meal_description && String(row.meal_description).trim().length > 0);
+      const hasPhoto = !!row.meal_photo_url;
+      if (hasPhoto || hasDescription) {
         try {
           const estContent: Array<Record<string, unknown>> = [];
-          try {
-            const imgRes = await fetch(row.meal_photo_url);
-            const buf = new Uint8Array(await imgRes.arrayBuffer());
-            let bin = ""; for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
-            const b64 = btoa(bin);
-            const media_type = imgRes.headers.get("content-type") || "image/jpeg";
-            estContent.push({ type: "image", source: { type: "base64", media_type, data: b64 } });
-          } catch (_) { /* ignore */ }
-          estContent.push({
-            type: "text",
-            text:
-              `Description (user override, takes priority): ${row.meal_description ?? "(none)"}. ` +
+          if (hasPhoto) {
+            try {
+              const imgRes = await fetch(row.meal_photo_url);
+              const buf = new Uint8Array(await imgRes.arrayBuffer());
+              let bin = ""; for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+              const b64 = btoa(bin);
+              const media_type = imgRes.headers.get("content-type") || "image/jpeg";
+              estContent.push({ type: "image", source: { type: "base64", media_type, data: b64 } });
+            } catch (_) { /* ignore — fall through to text-only */ }
+          }
+          const promptText = hasPhoto
+            ? (`Description (user override, takes priority): ${row.meal_description ?? "(none)"}. ` +
               `Decompose this plate into its visible components. For each component, estimate weight in grams (for discrete items like fries or nuggets, also include approximate count, e.g. "~85g (approx. 25 fries)"). ` +
               `Use visible reference cues: plate diameter (~26-28cm standard), utensil size, hand size, and branded packaging known sizes (e.g. McDonald's medium fries ≈ 110g, Hardee's small burger patty ≈ 60-80g). ` +
               `For each component, recall its real nutritional profile per estimated weight — protein is dominated by what's actually present (meat, fish, eggs, dairy, legumes, tofu, protein powder); refined-flour breads, rice, potatoes, fried doughs, fruits and most vegetables are LOW protein regardless of portion. ` +
               `If a sauce, oil, or hidden ingredient is likely but uncertain, include it as a labelled line with a sensible default — never silently omit. ` +
-              `Sum item macros to plate totals. Return only the final JSON.`,
-          });
+              `Sum item macros to plate totals. Return only the final JSON.`)
+            : (`Meal description (text-only — no photo available): ${row.meal_description}. ` +
+              `Decompose this meal into its named components based on the description. For each component, estimate a sensible weight in grams (use standard portion sizes when the user didn't specify). ` +
+              `Recall the real nutritional profile per estimated weight — protein comes from meat, fish, eggs, dairy, legumes, tofu, protein powder; refined-flour breads, rice, potatoes, fried doughs, fruits and most vegetables are LOW protein regardless of portion. ` +
+              `If a sauce, oil, or hidden ingredient is likely but the user didn't mention it, include it as a labelled line with a sensible default — never silently omit. ` +
+              `Sum item macros to plate totals. Return only the final JSON.`);
+          estContent.push({ type: "text", text: promptText });
           const estRes = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
@@ -205,8 +230,8 @@ Deno.serve(async (req) => {
               model: "claude-haiku-4-5-20251001",
               max_tokens: 900,
               system:
-                "You estimate the itemized contents of a meal photo. " +
-                "Always decompose the plate into 1+ named components — never return a single combined dish-label. Even for a single-item meal, return the item + estimated grams. " +
+                "You estimate the itemized contents of a meal. " +
+                "Always decompose the meal into 1+ named components — never return a single combined dish-label. Even for a single-item meal, return the item + estimated grams. " +
                 "Ground every macro in the specific food + estimated grams, not in proportional distribution of total calories. A larger portion of a low-protein food is still low protein. " +
                 "Respond with ONLY a single JSON object, no prose, no fences: " +
                 "{ \"items\": [ { \"name\": <string, includes qty/approx if useful e.g. 'French fries, small (~25 fries)'>, \"grams\": <number>, \"calories\": <number>, \"protein_g\": <number>, \"carbs_g\": <number>, \"fat_g\": <number> } ], " +
@@ -242,14 +267,23 @@ Deno.serve(async (req) => {
       }
 
       if (estimate) {
-        await supabase.from("shield_nutrition_logs").update({
+        const macroPatch: Record<string, unknown> = {
           estimated_calories: estimate.calories,
           estimated_protein_g: estimate.protein_g,
           estimated_carbs_g: estimate.carbs_g,
           estimated_fat_g: estimate.fat_g,
           estimated_items: (estimate as any).items ?? null,
           calorie_estimate_status: "estimated",
-        }).eq("id", nutrition_log_id);
+        };
+        // Preserve the original AI baseline: only set original_* on first estimate.
+        if (row.original_estimated_items == null && row.original_estimated_calories == null) {
+          macroPatch.original_estimated_items = (estimate as any).items ?? null;
+          macroPatch.original_estimated_calories = estimate.calories;
+          macroPatch.original_estimated_protein_g = estimate.protein_g;
+          macroPatch.original_estimated_carbs_g = estimate.carbs_g;
+          macroPatch.original_estimated_fat_g = estimate.fat_g;
+        }
+        await supabase.from("shield_nutrition_logs").update(macroPatch).eq("id", nutrition_log_id);
       } else {
         await supabase.from("shield_nutrition_logs").update({
           calorie_estimate_status: "failed",
