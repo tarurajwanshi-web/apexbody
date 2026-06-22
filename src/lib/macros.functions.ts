@@ -1,10 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+import {
+  resolveUserTimezone,
+  getLocalDateISO,
+  addDaysISO,
+  getLocalWeekRange,
+  getPreviousCompletedLocalWeek,
+} from "@/lib/dates";
 
 const dateInput = z
   .object({ entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() })
@@ -88,7 +91,8 @@ export const getTodayMacroSummary = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => dateInput.parse(d))
   .handler(async ({ data, context }): Promise<MacroSummary> => {
-    const entryDate = data?.entryDate ?? today();
+    const tz = await resolveUserTimezone(context.supabase, context.userId);
+    const entryDate = data?.entryDate ?? getLocalDateISO(tz);
 
     // Pull all non-deleted meals for the day; we need quality scores and
     // pending/failed counts in addition to consumed macros.
@@ -166,7 +170,7 @@ export const getTodayMacroSummary = createServerFn({ method: "GET" })
         : meal_quality_score ?? macro_adherence_score;
 
     // Verdict.
-    const isToday = entryDate === today();
+    const isToday = entryDate === getLocalDateISO(tz);
     let verdict: string;
     if (counted.length === 0 && pendingMeals.length === 0 && failedMeals.length === 0) {
       verdict = "No meals logged";
@@ -376,8 +380,9 @@ export const getWeeklyNutritionInsight = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => weeklyInput.parse(d))
   .handler(async ({ data, context }): Promise<WeeklyNutritionInsight> => {
-    const anchorISO = data?.anchorDate ?? today();
-    const todayISO = today();
+    const tz = await resolveUserTimezone(context.supabase, context.userId);
+    const anchorISO = data?.anchorDate ?? getLocalDateISO(tz);
+    const todayISO = getLocalDateISO(tz);
     const anchor = parseISO(anchorISO);
     const weekStart = mondayOf(anchor);
     const weekEnd = addDays(weekStart, 6);
@@ -784,46 +789,28 @@ export type MacroAdjustmentReview = {
   goal: string | null;
 };
 
-function localTodayISO(): string {
-  // YYYY-MM-DD in the user's local timezone.
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function localTodayISO(tz: string): string {
+  // YYYY-MM-DD in the user's TZ (profiles.timezone → browser → UTC).
+  return getLocalDateISO(tz);
 }
 
-function priorMondayRange(): { start: string; end: string } {
-  // Previous completed Mon–Sun in local time.
-  const today = new Date();
-  const dow = today.getDay(); // 0=Sun..6=Sat
-  // Days back to *this* week's Monday:
-  const toMon = dow === 0 ? 6 : dow - 1;
-  const thisMon = new Date(today);
-  thisMon.setDate(today.getDate() - toMon);
-  const prevMon = new Date(thisMon);
-  prevMon.setDate(thisMon.getDate() - 7);
-  const prevSun = new Date(prevMon);
-  prevSun.setDate(prevMon.getDate() + 6);
-  const fmt = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  return { start: fmt(prevMon), end: fmt(prevSun) };
+function priorMondayRange(tz: string): { start: string; end: string } {
+  // Previous completed Mon–Sun in user-local time.
+  return getPreviousCompletedLocalWeek(tz);
 }
 
 export const getMacroAdjustmentReview = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<MacroAdjustmentReview> => {
-    const { start: weekStart, end: weekEnd } = priorMondayRange();
+    const tz = await resolveUserTimezone(context.supabase, context.userId);
+    const { start: weekStart, end: weekEnd } = priorMondayRange(tz);
     const REQ_DAYS = 3;
     const REQ_WEIGH = 3;
 
-    // Build last-7-day streak (ending today).
-    const today = localTodayISO();
+    // Build last-7-day streak (ending today, user-local).
+    const today = localTodayISO(tz);
     const last7Dates: string[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      last7Dates.push(
-        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`,
-      );
-    }
+    for (let i = 6; i >= 0; i--) last7Dates.push(addDaysISO(today, -i));
     const streakStart = last7Dates[0];
 
     const [mealsRes, weighRes, targetRes, profileRes] = await Promise.all([
@@ -1139,18 +1126,13 @@ export const getNutritionCoachContext = createServerFn({ method: "GET" })
     z.object({ entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional().parse(d),
   )
   .handler(async ({ data, context }): Promise<NutritionCoachContext> => {
-    const selectedDate = data?.entryDate ?? localTodayISO();
-    const todayISO = localTodayISO();
+    const tz = await resolveUserTimezone(context.supabase, context.userId);
+    const selectedDate = data?.entryDate ?? localTodayISO(tz);
+    const todayISO = localTodayISO(tz);
 
-    // last 7 days for logged-days streak
+    // last 7 days for logged-days streak (user-local)
     const last7: string[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      last7.push(
-        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`,
-      );
-    }
+    for (let i = 6; i >= 0; i--) last7.push(addDaysISO(todayISO, -i));
 
     // Pull selected-day + today + last-7 meals (all live under same query window).
     const minDate = last7[0] < selectedDate ? last7[0] : selectedDate;
@@ -1276,7 +1258,7 @@ export const getNutritionCoachContext = createServerFn({ method: "GET" })
       : null;
 
     // Macro adjustment review — reuse prior-week range query.
-    const { start: rwStart, end: rwEnd } = priorMondayRange();
+    const { start: rwStart, end: rwEnd } = priorMondayRange(tz);
     const [reviewMealsRes, weighRes] = await Promise.all([
       context.supabase
         .from("shield_nutrition_logs")

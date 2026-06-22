@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { resolveUserTimezone, getLocalDateISO, addDaysISO } from "@/lib/dates";
 
 export const setInputPathPreference = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -30,8 +31,13 @@ export const getInputPathPreference = createServerFn({ method: "GET" })
     return v === "device" || v === "manual" ? v : null;
   });
 
-function today() {
-  return new Date().toISOString().slice(0, 10);
+/** User-local YYYY-MM-DD. Reads profiles.timezone with UTC fallback. */
+async function userToday(
+  supabase: { from: (t: string) => any },
+  userId: string,
+): Promise<string> {
+  const tz = await resolveUserTimezone(supabase, userId);
+  return getLocalDateISO(tz);
 }
 
 export const upsertManualRecovery = createServerFn({ method: "POST" })
@@ -52,7 +58,7 @@ export const upsertManualRecovery = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const payload = {
       user_id: context.userId,
-      entry_date: today(),
+      entry_date: await userToday(context.supabase, context.userId),
       recovery_self_rating: data.recovery_self_rating,
       sleep_hours: data.sleep_hours,
       recovery_source: data.recovery_source ?? "manual",
@@ -76,7 +82,7 @@ export const upsertMood = createServerFn({ method: "POST" })
     const { error } = await context.supabase
       .from("shield_manual_inputs")
       .upsert(
-        { user_id: context.userId, entry_date: today(), mood_emoji: data.mood_emoji },
+        { user_id: context.userId, entry_date: await userToday(context.supabase, context.userId), mood_emoji: data.mood_emoji },
         { onConflict: "user_id,entry_date" },
       );
     if (error) throw new Error(error.message);
@@ -114,15 +120,10 @@ export type HydrationSummary = {
 export const getTodayHydration = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<HydrationSummary> => {
-    const date = today();
-    const yesterday = (() => {
-      const d = new Date(date + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 1);
-      return d.toISOString().slice(0, 10);
-    })();
-    const baselineFrom = (() => {
-      const d = new Date(date + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 8);
-      return d.toISOString().slice(0, 10);
-    })();
+    const date = await userToday(context.supabase, context.userId);
+    const yesterday = addDaysISO(date, -1);
+    const baselineFrom = addDaysISO(date, -8);
+    
     const [profileRes, manualRes, trainingRes, scoresRes] = await Promise.all([
       context.supabase
         .from("profiles")
@@ -223,7 +224,7 @@ export const getTodayHydrationEvents = createServerFn({ method: "GET" })
     z.object({ entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional().parse(d),
   )
   .handler(async ({ data, context }): Promise<HydrationEvent[]> => {
-    const entryDate = data?.entryDate ?? today();
+    const entryDate = data?.entryDate ?? await userToday(context.supabase, context.userId);
     const { data: rows, error } = await context.supabase
       .from("hydration_events")
       .select("id, amount_ml, created_at")
@@ -244,7 +245,7 @@ export const upsertDeviceRecovery = createServerFn({ method: "POST" })
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const entry_date = today();
+    const entry_date = await userToday(context.supabase, context.userId);
     const { data: row, error } = await context.supabase
       .from("shield_device_uploads")
       .upsert(
@@ -297,7 +298,7 @@ export const getTodayDeviceUploadStatus = createServerFn({ method: "GET" })
       .from("shield_device_uploads")
       .select("id, parse_status, parsed_hrv, parsed_rhr, parsed_sleep_hours, parsed_date, entry_date, device_source")
       .eq("user_id", context.userId)
-      .eq("entry_date", today())
+      .eq("entry_date", await userToday(context.supabase, context.userId))
       .maybeSingle();
     if (error) return null;
     return (data as DeviceUploadStatus) ?? null;
@@ -316,7 +317,7 @@ export const supplementDeviceRhr = createServerFn({ method: "POST" })
       .from("shield_device_uploads")
       .update({ parsed_rhr: data.rhr_bpm })
       .eq("user_id", context.userId)
-      .eq("entry_date", today());
+      .eq("entry_date", await userToday(context.supabase, context.userId));
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -383,7 +384,7 @@ export const logMeal = createServerFn({ method: "POST" })
     const confirmed = data.confirmed_items;
     const row: Record<string, unknown> = {
       user_id: context.userId,
-      entry_date: today(),
+      entry_date: await userToday(context.supabase, context.userId),
       meal_description: data.meal_description ?? null,
       meal_photo_url: data.meal_photo_url ?? null,
       claude_score_status: "pending",
@@ -547,7 +548,7 @@ export const getTodayMeals = createServerFn({ method: "GET" })
     z.object({ entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional().parse(d),
   )
   .handler(async ({ data, context }): Promise<TodayMeal[]> => {
-    const entryDate = data?.entryDate ?? today();
+    const entryDate = data?.entryDate ?? await userToday(context.supabase, context.userId);
     const { data: rows, error } = await context.supabase
       .from("shield_nutrition_logs")
       .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, estimated_items, calorie_estimate_status, user_corrected, created_at, deleted, entry_date, confirmed_items, user_confirmed_vision")
@@ -773,7 +774,7 @@ export const upsertTraining = createServerFn({ method: "POST" })
       .upsert(
         {
           user_id: context.userId,
-          entry_date: today(),
+          entry_date: await userToday(context.supabase, context.userId),
           strain_value: data.strain_value ?? null,
           session_notes: data.session_notes ?? null,
         },
@@ -817,15 +818,23 @@ export const getTodayReadiness = createServerFn({ method: "GET" })
 
 // ---------- Activity / streak ----------
 //
-// "Activity" for a given date = at least one row exists for that date in ANY
-// of: shield_nutrition_logs, shield_training_logs, shield_manual_inputs,
-// workout_set_logs.
-// Returns: current consecutive streak ending today (0 if today not logged),
-// and last 7 days (oldest→today) booleans.
+// Coach 7-day unlock streak — user-TZ aware.
+//
+// "Activity" for a given local date = at least one row exists in ANY of:
+//   - shield_nutrition_logs (excluding soft-deleted)
+//   - shield_training_logs
+//   - shield_manual_inputs
+//   - workout_set_logs
+//   - body_measurement_events
+//   - shield_device_uploads (parsed)
+// Returns the current consecutive streak ending today (in user TZ) and the
+// last 7 user-local days as a boolean array (oldest → today).
 
 export type ActivityWeek = {
   streak: number;
-  last7: boolean[]; // length 7, index 0 = 6 days ago, index 6 = today
+  last7: boolean[]; // length 7, index 0 = 6 days ago (local), index 6 = today (local)
+  /** YYYY-MM-DD dates aligned 1:1 with last7. */
+  last7_dates: string[];
 };
 
 export const getActivityWeek = createServerFn({ method: "GET" })
@@ -833,43 +842,41 @@ export const getActivityWeek = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<ActivityWeek> => {
     const supa = context.supabase;
     const uid = context.userId;
-    // Pull last 60 days of activity dates from all 4 sources.
-    const since = new Date();
-    since.setDate(since.getDate() - 60);
-    const sinceISO = since.toISOString().slice(0, 10);
+    const tz = await resolveUserTimezone(supa, uid);
+    const todayISO = getLocalDateISO(tz);
+    const sinceISO = addDaysISO(todayISO, -60);
 
-    const sources: Array<Promise<{ data: { entry_date: string }[] | null }>> = [
-      supa.from("shield_nutrition_logs").select("entry_date").eq("user_id", uid).gte("entry_date", sinceISO) as any,
+    const sources: Array<Promise<{ data: any[] | null }>> = [
+      supa.from("shield_nutrition_logs").select("entry_date,deleted").eq("user_id", uid).gte("entry_date", sinceISO).eq("deleted", false) as any,
       supa.from("shield_training_logs").select("entry_date").eq("user_id", uid).gte("entry_date", sinceISO) as any,
       supa.from("shield_manual_inputs").select("entry_date").eq("user_id", uid).gte("entry_date", sinceISO) as any,
       supa.from("workout_set_logs").select("entry_date").eq("user_id", uid).gte("entry_date", sinceISO) as any,
+      supa.from("body_measurement_events").select("entry_date").eq("user_id", uid).gte("entry_date", sinceISO) as any,
+      supa.from("shield_device_uploads").select("entry_date,parse_status").eq("user_id", uid).gte("entry_date", sinceISO).eq("parse_status", "parsed") as any,
     ];
     const results = await Promise.all(sources);
     const days = new Set<string>();
     for (const r of results) for (const row of r.data ?? []) if (row?.entry_date) days.add(row.entry_date);
 
-    const todayISO = new Date().toISOString().slice(0, 10);
-
     // Streak ending today (or yesterday — grace so users don't lose streak
-    // before they've logged today's data).
+    // before they've logged today's data). User-local.
     let streak = 0;
-    const cursor = new Date();
-    // If today not logged, start counting from yesterday.
-    if (!days.has(todayISO)) cursor.setDate(cursor.getDate() - 1);
-    while (true) {
-      const iso = cursor.toISOString().slice(0, 10);
-      if (days.has(iso)) { streak++; cursor.setDate(cursor.getDate() - 1); }
-      else break;
+    let cursor = todayISO;
+    if (!days.has(cursor)) cursor = addDaysISO(cursor, -1);
+    while (days.has(cursor)) {
+      streak++;
+      cursor = addDaysISO(cursor, -1);
     }
 
-    // last 7 days oldest -> today
+    // last 7 user-local days oldest -> today
+    const last7_dates: string[] = [];
     const last7: boolean[] = [];
     for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      last7.push(days.has(d.toISOString().slice(0, 10)));
+      const iso = addDaysISO(todayISO, -i);
+      last7_dates.push(iso);
+      last7.push(days.has(iso));
     }
 
-    return { streak, last7 };
+    return { streak, last7, last7_dates };
   });
 

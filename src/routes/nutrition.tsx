@@ -11,10 +11,10 @@ import { HydrationLogModal } from "@/components/LogModals";
 import { MealDetailModal } from "@/components/MealDetailModal";
 import {
   NutritionDateHeader,
-  todayLocalISO,
   formatNutritionDateLabel,
   formatShortDate,
 } from "@/components/NutritionDateHeader";
+import { useUserTimezone, getLocalDateISO } from "@/lib/dates";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import {
   getTodayMacroSummary,
@@ -50,7 +50,8 @@ const GOAL_LABEL: Record<string, string> = {
 };
 
 function Nutrition() {
-  const [selectedDate, setSelectedDate] = useState<string>(() => todayLocalISO());
+  const userTz = useUserTimezone();
+  const [selectedDate, setSelectedDate] = useState<string>(() => getLocalDateISO(userTz));
   const [macros, setMacros] = useState<MacroSummary | null>(null);
   const [meals, setMeals] = useState<TodayMeal[] | null>(null);
   const [hydration, setHydration] = useState<HydrationSummary | null>(null);
@@ -77,8 +78,10 @@ function Nutrition() {
   const softDelete = useServerFn(softDeleteMeal);
   const restore = useServerFn(restoreMeal);
 
-  const isToday = selectedDate === todayLocalISO();
-  const dateLabel = formatNutritionDateLabel(selectedDate);
+  const todayISO = getLocalDateISO(userTz);
+  const isToday = selectedDate === todayISO;
+  const dateLabel = formatNutritionDateLabel(selectedDate, userTz);
+
 
   const reload = async () => {
     setRefreshing(true);
