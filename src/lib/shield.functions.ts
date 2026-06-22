@@ -89,13 +89,16 @@ export const upsertManualRecovery = createServerFn({ method: "POST" })
 export const upsertMood = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ mood_emoji: z.string().min(1).max(8) }).parse(d),
+    z.object({
+      mood_emoji: z.string().min(1).max(8),
+      client_timezone: z.string().max(64).optional(),
+    }).parse(d),
   )
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("shield_manual_inputs")
       .upsert(
-        { user_id: context.userId, entry_date: await userToday(context.supabase, context.userId), mood_emoji: data.mood_emoji },
+        { user_id: context.userId, entry_date: await userTodayWithHint(context.supabase, context.userId, data.client_timezone), mood_emoji: data.mood_emoji },
         { onConflict: "user_id,entry_date" },
       );
     if (error) throw new Error(error.message);
