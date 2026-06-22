@@ -148,6 +148,7 @@ function Coach() {
           name={profile.name || "athlete"}
           daysUntilUnlock={daysUntilUnlock}
           activity={activity}
+          userTz={userTz}
         />
       ) : (
         <UnlockedHero name={profile.name || "athlete"} />
