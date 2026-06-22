@@ -16,7 +16,7 @@ import {
   formatShortDate,
 } from "@/components/NutritionDateHeader";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
-import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
+import { getTodayMacroSummary, getWeeklyNutritionInsight, type MacroSummary, type WeeklyNutritionInsight } from "@/lib/macros.functions";
 import {
   getTodayMeals,
   getTodayHydration,
@@ -47,6 +47,7 @@ function Nutrition() {
   const [hydrationEvents, setHydrationEvents] = useState<HydrationEvent[]>([]);
   const [hydrationOpen, setHydrationOpen] = useState(false);
   const [openMeal, setOpenMeal] = useState<TodayMeal | null>(null);
+  const [weekly, setWeekly] = useState<WeeklyNutritionInsight | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [ptrDelta, setPtrDelta] = useState(0);
@@ -56,6 +57,7 @@ function Nutrition() {
   const fetchMeals = useServerFn(getTodayMeals);
   const fetchHydration = useServerFn(getTodayHydration);
   const fetchHydrationEvents = useServerFn(getTodayHydrationEvents);
+  const fetchWeekly = useServerFn(getWeeklyNutritionInsight);
 
   const isToday = selectedDate === todayLocalISO();
   const dateLabel = formatNutritionDateLabel(selectedDate);
@@ -63,16 +65,15 @@ function Nutrition() {
   const reload = async () => {
     setRefreshing(true);
     const dateArg = { data: { entryDate: selectedDate } } as any;
+    const weeklyArg = { data: { anchorDate: selectedDate } } as any;
     await Promise.allSettled([
       fetchMacros(dateArg).then(setMacros),
       fetchMeals(dateArg).then(setMeals).catch(() => setMeals([])),
-      // Hydration card stays scoped to today (target / quick-add are today-only);
-      // skip the fetch on past dates so we don't show today's bottle as if it
-      // belonged to the selected past day.
       isToday
         ? fetchHydration().then(setHydration).catch(() => {})
         : Promise.resolve(setHydration(null)),
       fetchHydrationEvents(dateArg).then(setHydrationEvents).catch(() => setHydrationEvents([])),
+      fetchWeekly(weeklyArg).then(setWeekly).catch(() => setWeekly(null)),
     ]);
     setLastUpdatedAt(Date.now());
     setRefreshing(false);
@@ -299,7 +300,7 @@ function Nutrition() {
         </div>
       )}
 
-
+      <WeeklyInsightCard weekly={weekly} />
 
       <BottomNav onLogged={reload} />
       <HydrationLogModal open={hydrationOpen} onClose={() => setHydrationOpen(false)} onSaved={reload} />
@@ -639,3 +640,90 @@ function ScorePill({
     </div>
   );
 }
+
+function WeeklyInsightCard({ weekly }: { weekly: WeeklyNutritionInsight | null }) {
+  if (!weekly) return null;
+  const {
+    logged_days,
+    days_elapsed,
+    avg_calories,
+    avg_target_calories,
+    protein_hit_days,
+    calorie_on_target_days,
+    weekly_nutrition_score,
+    main_weekly_driver,
+    coach_note,
+  } = weekly;
+
+  const lowConfidence = logged_days > 0 && logged_days < 3;
+
+  return (
+    <section className="mx-5 mt-5 rounded-3xl bg-bg-2 border border-white/5 p-4">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] uppercase tracking-wider text-text-tertiary">This week</p>
+        {weekly_nutrition_score != null && (
+          <span
+            className="text-[11px] font-semibold tabular-nums px-2 py-0.5 rounded-full bg-white/5 border border-white/10"
+            style={{ color: scoreColor(weekly_nutrition_score) }}
+          >
+            {weekly_nutrition_score}
+          </span>
+        )}
+      </div>
+
+      {logged_days === 0 ? (
+        <div className="mt-2">
+          <p className="text-[14px] font-semibold text-white">No meals logged this week yet.</p>
+          <p className="text-[12px] text-text-secondary mt-1">Start with today's first meal.</p>
+        </div>
+      ) : (
+        <>
+          <div className="mt-2.5 grid grid-cols-3 gap-2">
+            <WeeklyStat
+              label="Logged"
+              value={`${logged_days}/${days_elapsed}`}
+              sub="days"
+            />
+            <WeeklyStat
+              label="Avg kcal"
+              value={avg_calories.toLocaleString()}
+              sub={avg_target_calories != null ? `/ ${avg_target_calories.toLocaleString()}` : "no target"}
+            />
+            <WeeklyStat
+              label="Protein hit"
+              value={`${protein_hit_days}/${logged_days}`}
+              sub="days"
+            />
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <WeeklyStat
+              label="kcal on target"
+              value={`${calorie_on_target_days}/${logged_days}`}
+              sub="days"
+            />
+            <WeeklyStat
+              label="Confidence"
+              value={lowConfidence ? "Low" : "OK"}
+              sub={lowConfidence ? "<3 days" : `${logged_days} days`}
+            />
+          </div>
+          <p className="mt-3 text-[12px] text-text-secondary">{main_weekly_driver}</p>
+          <div className="mt-2 rounded-full bg-white/5 border border-white/10 px-3 py-1 text-[11px] text-text-secondary text-center">
+            {coach_note}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function WeeklyStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-2xl bg-white/[0.03] border border-white/5 px-2.5 py-2">
+      <p className="text-[9px] uppercase tracking-wider text-text-tertiary">{label}</p>
+      <p className="mt-0.5 text-[14px] font-semibold tabular-nums text-white leading-tight">{value}</p>
+      {sub && <p className="text-[10px] text-text-tertiary leading-tight">{sub}</p>}
+    </div>
+  );
+}
+
