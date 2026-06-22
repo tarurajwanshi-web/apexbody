@@ -150,6 +150,8 @@ function Nutrition() {
         <RefreshStamp refreshing={refreshing} lastUpdatedAt={lastUpdatedAt} />
       </div>
 
+      <NutritionDateHeader selectedDate={selectedDate} onChange={setSelectedDate} />
+
       {/* Goal-based framing line */}
       <p className="mx-5 mt-5 text-[12px] text-text-secondary leading-snug">
         {goalText
@@ -160,7 +162,7 @@ function Nutrition() {
       <section className="mx-5 mt-3 rounded-3xl bg-bg-2 border border-white/5 p-5">
         <div className="flex items-end justify-between">
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Today</p>
+            <p className="text-[10px] uppercase tracking-wider text-text-tertiary">{dateLabel}</p>
             <div className="mt-1 flex items-end gap-1">
               {hasTarget ? (
                 hasMeals ? (
