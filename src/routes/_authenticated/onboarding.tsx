@@ -136,7 +136,7 @@ function ProfileSetup() {
 
       const trainingDaysCount = draft.trainingDays.length || draft.days;
 
-      let payload: Record<string, unknown>;
+      let payload: any;
       if (isReset) {
         // Reset mode: only update plan-shaping fields. Identity, recovery method,
         // and profile_completed_at are preserved so we don't reset learning phase.
