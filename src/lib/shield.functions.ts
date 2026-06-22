@@ -604,21 +604,13 @@ export const updateMeal = createServerFn({ method: "POST" })
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
+    // Only update description/photo. Do NOT touch macros or scoring status —
+    // editing the caption shouldn't wipe the user's reviewed item macros.
     const { error } = await context.supabase
       .from("shield_nutrition_logs")
       .update({
         meal_description: data.meal_description ?? null,
         meal_photo_url: data.meal_photo_url ?? null,
-        protein_tier: null,
-        carb_quality_score: null,
-        timing_score: null,
-        claude_score_status: "pending",
-        estimated_calories: null,
-        estimated_protein_g: null,
-        estimated_carbs_g: null,
-        estimated_fat_g: null,
-        estimated_items: null,
-        calorie_estimate_status: "pending",
       })
       .eq("id", data.id)
       .eq("user_id", context.userId);

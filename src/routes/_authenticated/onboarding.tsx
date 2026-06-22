@@ -150,6 +150,7 @@ function ProfileSetup() {
         measurement_height_cm: draft.height ? Number(draft.height) : null,
         profile_completed_at: now.toISOString(),
         plan_unlock_date: unlockDate,
+        timezone: getBrowserTimezone(),
       };
 
       const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "user_id" });
