@@ -267,7 +267,7 @@ function Nutrition() {
         </div>
       )}
 
-      {isToday && <HydrationInsight hydration={hydration} />}
+      {isToday && hasHydrationTarget && <HydrationInsight hydration={hydration} />}
 
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
