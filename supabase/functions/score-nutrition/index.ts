@@ -75,14 +75,15 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Idempotency: if already fully scored AND estimated/manually edited,
-    // skip work. Prevents trigger+client double-dispatch from re-billing
-    // Anthropic and from clobbering a manual_edited row.
-    if (
-      row.claude_score_status === "scored" &&
-      (row.calorie_estimate_status === "estimated" ||
-        row.calorie_estimate_status === "manual_edited")
-    ) {
+    // Split idempotency: quality and macros are independent. Re-run only what
+    // is actually missing/failed. Critical: `manual_edited` is treated as
+    // locked for macros — never overwrite a user-corrected meal even if a
+    // retry forces claude_score_status back to 'pending'.
+    const skipQuality = row.claude_score_status === "scored";
+    const skipMacros =
+      row.calorie_estimate_status === "estimated" ||
+      row.calorie_estimate_status === "manual_edited";
+    if (skipQuality && skipMacros) {
       return new Response(JSON.stringify({ skipped: true, row }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -142,62 +143,66 @@ Deno.serve(async (req) => {
     });
 
     try {
-      const aRes = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": anthropicKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 400,
-          system: systemPrompt,
-          messages: [{ role: "user", content: userContent }],
-        }),
-      });
+      let updated: any = row;
 
-      if (!aRes.ok) {
-        throw new Error(`Anthropic ${aRes.status}: ${await aRes.text()}`);
+      if (!skipQuality) {
+        const aRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": anthropicKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 400,
+            system: systemPrompt,
+            messages: [{ role: "user", content: userContent }],
+          }),
+        });
+
+        if (!aRes.ok) {
+          throw new Error(`Anthropic ${aRes.status}: ${await aRes.text()}`);
+        }
+
+        const aJson = await aRes.json();
+        const text = aJson?.content?.[0]?.text ?? "";
+        const parsed = JSON.parse(stripFences(text));
+
+        const protein_tier = clamp(parsed.protein_tier);
+        const carb_quality_score = clamp(parsed.carb_quality_score);
+        const timing_score = clamp(parsed.timing_score);
+        // claude_quality_score is a generated column in the DB — don't write it directly.
+        const claude_quality_score = Math.round(
+          0.4 * protein_tier + 0.35 * carb_quality_score + 0.25 * timing_score,
+        );
+
+        const { data: upRow, error: upErr } = await supabase
+          .from("shield_nutrition_logs")
+          .update({
+            protein_tier,
+            carb_quality_score,
+            timing_score,
+            claude_score_status: "scored",
+          })
+          .eq("id", nutrition_log_id)
+          .select()
+          .single();
+
+        if (upErr) throw upErr;
+        updated = upRow;
+        (updated as any)._lastReasoning = parsed.reasoning;
+        (updated as any)._lastScores = { protein_tier, carb_quality_score, timing_score, claude_quality_score };
       }
 
-      const aJson = await aRes.json();
-      const text = aJson?.content?.[0]?.text ?? "";
-      const parsed = JSON.parse(stripFences(text));
 
-      const protein_tier = clamp(parsed.protein_tier);
-      const carb_quality_score = clamp(parsed.carb_quality_score);
-      const timing_score = clamp(parsed.timing_score);
-      // claude_quality_score is a generated column in the DB — don't write it directly.
-      const claude_quality_score = Math.round(
-        0.4 * protein_tier + 0.35 * carb_quality_score + 0.25 * timing_score,
-      );
-
-      const { data: updated, error: upErr } = await supabase
-        .from("shield_nutrition_logs")
-        .update({
-          protein_tier,
-          carb_quality_score,
-          timing_score,
-          claude_score_status: "scored",
-        })
-        .eq("id", nutrition_log_id)
-        .select()
-        .single();
-
-      if (upErr) throw upErr;
-
-      // SEPARATE, parallel call: calorie/macro estimation.
-      // Runs whenever we have a photo OR a description (text-only meals
-      // are estimated from the description alone). Priority order:
-      //   - photo + description: both image + description text
-      //   - description only:    text-only call
-      //   - photo only:          image + "(none)" description
-      //   - neither:             skip
+      // SEPARATE call: calorie/macro estimation. Runs whenever we have a
+      // photo OR a description, and only if not skipped (skipMacros covers
+      // both 'estimated' and 'manual_edited' — never overwrite a user edit).
       let estimate: { calories: number; protein_g: number; carbs_g: number; fat_g: number } | null = null;
       const hasDescription = !!(row.meal_description && String(row.meal_description).trim().length > 0);
       const hasPhoto = !!row.meal_photo_url;
-      if (hasPhoto || hasDescription) {
+      if (!skipMacros && (hasPhoto || hasDescription)) {
         try {
           const estContent: Array<Record<string, unknown>> = [];
           if (hasPhoto) {
@@ -266,42 +271,50 @@ Deno.serve(async (req) => {
         } catch (e) { console.error("Macro estimate failed:", e); }
       }
 
-      if (estimate) {
-        const macroPatch: Record<string, unknown> = {
-          estimated_calories: estimate.calories,
-          estimated_protein_g: estimate.protein_g,
-          estimated_carbs_g: estimate.carbs_g,
-          estimated_fat_g: estimate.fat_g,
-          estimated_items: (estimate as any).items ?? null,
-          calorie_estimate_status: "estimated",
-        };
-        // Preserve the original AI baseline: only set original_* on first estimate.
-        if (row.original_estimated_items == null && row.original_estimated_calories == null) {
-          macroPatch.original_estimated_items = (estimate as any).items ?? null;
-          macroPatch.original_estimated_calories = estimate.calories;
-          macroPatch.original_estimated_protein_g = estimate.protein_g;
-          macroPatch.original_estimated_carbs_g = estimate.carbs_g;
-          macroPatch.original_estimated_fat_g = estimate.fat_g;
+      if (!skipMacros) {
+        if (estimate) {
+          const macroPatch: Record<string, unknown> = {
+            estimated_calories: estimate.calories,
+            estimated_protein_g: estimate.protein_g,
+            estimated_carbs_g: estimate.carbs_g,
+            estimated_fat_g: estimate.fat_g,
+            estimated_items: (estimate as any).items ?? null,
+            calorie_estimate_status: "estimated",
+          };
+          // Preserve the original AI baseline: only set original_* on first estimate.
+          if (row.original_estimated_items == null && row.original_estimated_calories == null) {
+            macroPatch.original_estimated_items = (estimate as any).items ?? null;
+            macroPatch.original_estimated_calories = estimate.calories;
+            macroPatch.original_estimated_protein_g = estimate.protein_g;
+            macroPatch.original_estimated_carbs_g = estimate.carbs_g;
+            macroPatch.original_estimated_fat_g = estimate.fat_g;
+          }
+          await supabase.from("shield_nutrition_logs").update(macroPatch).eq("id", nutrition_log_id);
+        } else if (hasPhoto || hasDescription) {
+          await supabase.from("shield_nutrition_logs").update({
+            calorie_estimate_status: "failed",
+          }).eq("id", nutrition_log_id);
         }
-        await supabase.from("shield_nutrition_logs").update(macroPatch).eq("id", nutrition_log_id);
-      } else {
-        await supabase.from("shield_nutrition_logs").update({
-          calorie_estimate_status: "failed",
-        }).eq("id", nutrition_log_id);
       }
 
+      const lastScores = (updated as any)._lastScores ?? null;
+      const lastReasoning = (updated as any)._lastReasoning ?? null;
       return new Response(
         JSON.stringify({
           row: updated,
-          scores: { protein_tier, carb_quality_score, timing_score, claude_quality_score },
+          skipped_quality: skipQuality,
+          skipped_macros: skipMacros,
+          scores: lastScores,
           estimate,
-          reasoning: parsed.reasoning,
+          reasoning: lastReasoning,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     } catch (err) {
       console.error("Scoring failed:", err);
-      const updated = await markFailed(nutrition_log_id);
+      // Only mark quality as failed if we actually attempted it. Otherwise the
+      // existing 'scored' state must be preserved.
+      const updated = skipQuality ? row : await markFailed(nutrition_log_id);
       return new Response(
         JSON.stringify({ error: String(err instanceof Error ? err.message : err), row: updated }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
