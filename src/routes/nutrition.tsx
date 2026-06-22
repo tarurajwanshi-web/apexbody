@@ -169,6 +169,54 @@ function Nutrition() {
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [selectedDate]);
   useAutoRefreshOnVisible(reload, lastUpdatedAt);
 
+  // ---- Diagnostics panel (gated by ?diag=1 or DEV) ----
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diag, setDiag] = useState<any>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const enabled = import.meta.env.DEV || new URLSearchParams(window.location.search).get("diag") === "1";
+    setDiagOpen(enabled);
+  }, []);
+  const fetchDebugList = useServerFn(debugListMealsForDate);
+  const refreshDiag = async () => {
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const uid = u.user?.id ?? null;
+      const provider = (u.user?.app_metadata as any)?.provider ?? (u.user?.identities?.[0]?.provider ?? null);
+      let profileRow: any = null;
+      if (uid) {
+        const { data } = await supabase
+          .from("profiles")
+          .select("id, user_id, timezone")
+          .eq("user_id", uid)
+          .maybeSingle();
+        profileRow = data ?? null;
+      }
+      const dbRows = await fetchDebugList({ data: { entryDate: selectedDate } } as any).catch((e: any) => ({ error: String(e?.message ?? e) }));
+      setDiag({
+        build: DIAG_BUILD_STAMP,
+        supabaseUrl: (import.meta as any).env?.VITE_SUPABASE_URL ?? null,
+        supabaseProjectId: (import.meta as any).env?.VITE_SUPABASE_PROJECT_ID ?? null,
+        authUid: uid,
+        provider,
+        profile: profileRow,
+        browserTz: getBrowserTimezone(),
+        userTz,
+        selectedDate,
+        todayISO,
+        visibleMealIds: (meals ?? []).map((m) => ({ id: m.id, kcal: m.estimated_calories })),
+        dbRowsForSelectedDate: dbRows,
+      });
+    } catch (e: any) {
+      setDiag({ error: String(e?.message ?? e) });
+    }
+  };
+  useEffect(() => {
+    if (diagOpen) refreshDiag();
+    // eslint-disable-next-line
+  }, [diagOpen, selectedDate, meals]);
+
+
   // Pull-to-refresh.
   useEffect(() => {
     const el = ptrRef.current;
