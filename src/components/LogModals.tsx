@@ -281,7 +281,7 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
     setBusy(true); setErr(null);
     try {
       if (hasMood && mood !== alreadyMood) {
-        try { await moodFn({ data: { mood_emoji: mood! } }); } catch { /* best-effort */ }
+        try { await moodFn({ data: { mood_emoji: mood!, client_timezone: getBrowserTimezone() } }); } catch { /* best-effort */ }
       }
       if (hasNewFile) {
         const { data: u } = await supabase.auth.getUser();
