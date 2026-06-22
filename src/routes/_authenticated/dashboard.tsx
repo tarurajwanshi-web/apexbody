@@ -121,14 +121,18 @@ function Dashboard() {
     (async () => {
       const { data: u } = await supabase.auth.getUser();
       if (!u.user) return;
-      const { data } = await supabase.from("profiles").select("name, goal").eq("user_id", u.user.id).maybeSingle();
+      const { data } = await supabase
+        .from("profiles")
+        .select("name, goal, profile_completed_at")
+        .eq("user_id", u.user.id)
+        .maybeSingle();
       if (data?.name && data.name !== profile.name) update({ name: data.name });
+      setServerProfile({ profile_completed_at: (data as any)?.profile_completed_at ?? null });
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    setDay(getDayOfJourney());
     const h = new Date().getHours();
     setGreet(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
     // Initial load — establishes the "Updated [time]" stamp.
