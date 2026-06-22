@@ -270,6 +270,8 @@ function Nutrition() {
 
       {isToday && hasHydrationTarget && <HydrationInsight hydration={hydration} />}
 
+      <WeeklyPreviewCard weekly={weekly} onOpen={() => setWeeklySheetOpen(true)} />
+
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs uppercase tracking-wider text-text-tertiary">
@@ -300,11 +302,14 @@ function Nutrition() {
         </div>
       )}
 
-      <WeeklyInsightCard weekly={weekly} />
-
       <BottomNav onLogged={reload} />
       <HydrationLogModal open={hydrationOpen} onClose={() => setHydrationOpen(false)} onSaved={reload} />
       <MealDetailModal meal={openMeal} onClose={() => setOpenMeal(null)} />
+      <WeeklyGraphSheet
+        open={weeklySheetOpen}
+        onClose={() => setWeeklySheetOpen(false)}
+        initialAnchor={selectedDate}
+      />
     </div>
   );
 }
