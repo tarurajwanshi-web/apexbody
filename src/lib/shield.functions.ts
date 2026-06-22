@@ -699,12 +699,11 @@ export const softDeleteMeal = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { error: updErr } = await context.supabase
-      .from("shield_nutrition_logs")
-      .update({ deleted: true })
-      .eq("id", data.id)
-      .eq("user_id", context.userId);
-    if (updErr) throw new Error(updErr.message);
+    const { error } = await context.supabase.rpc("soft_delete_meal", {
+      p_meal_id: data.id,
+      p_user_id: context.userId,
+    });
+    if (error) throw new Error(error.message);
     return { id: data.id as string, deleted: true as const };
   });
 
@@ -712,12 +711,11 @@ export const restoreMeal = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { error: updErr } = await context.supabase
-      .from("shield_nutrition_logs")
-      .update({ deleted: false })
-      .eq("id", data.id)
-      .eq("user_id", context.userId);
-    if (updErr) throw new Error(updErr.message);
+    const { error } = await context.supabase.rpc("restore_meal", {
+      p_meal_id: data.id,
+      p_user_id: context.userId,
+    });
+    if (error) throw new Error(error.message);
     return { id: data.id as string, deleted: false as const };
   });
 
