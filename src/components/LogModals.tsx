@@ -1384,22 +1384,25 @@ export function BodyMeasurementModal({ open, onClose, onSaved }: Props) {
   const num = (v: number | null) => v == null || !Number.isFinite(v) ? null : Number(v.toFixed(2));
 
   const submit = async (e: React.FormEvent) => {
+    // Step B submit — saves circumferences only. Step A (weight/BF/lean)
+    // was already saved via advanceToStepB so partial flows don't lose data.
     e.preventDefault();
     setBusy(true); setErr(null);
     try {
-      await log({
-        data: {
-          source: path === "device" ? "dexa" : "manual",
-          weight_kg: num(toKg(weightDisp)),
-          body_fat_pct: bfPct ? Number(bfPct) : null,
-          lean_mass_kg: num(toKg(leanDisp)),
-          waist_cm: num(toCm(waistDisp)),
-          hip_cm: num(toCm(hipDisp)),
-          arm_cm: num(toCm(armDisp)),
-          thigh_cm: num(toCm(thighDisp)),
-          client_timezone: getBrowserTimezone(),
-        },
-      });
+      const hasCirc =
+        waistDisp || hipDisp || armDisp || thighDisp;
+      if (hasCirc) {
+        await log({
+          data: {
+            source: "manual",
+            waist_cm: num(toCm(waistDisp)),
+            hip_cm: num(toCm(hipDisp)),
+            arm_cm: num(toCm(armDisp)),
+            thigh_cm: num(toCm(thighDisp)),
+            client_timezone: getBrowserTimezone(),
+          },
+        });
+      }
       onSaved?.();
       onClose();
     } catch (e) {
@@ -1407,6 +1410,37 @@ export function BodyMeasurementModal({ open, onClose, onSaved }: Props) {
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Save Step A's body composition before moving on, so a user who fills
+   *  in weight/BF and then closes without finishing Step B still keeps it. */
+  const advanceToStepB = async () => {
+    setErr(null);
+    const wKg = num(toKg(weightDisp));
+    const bf = bfPct ? Number(bfPct) : null;
+    const leanKg = num(toKg(leanDisp));
+    if (wKg != null || bf != null || leanKg != null) {
+      setBusy(true);
+      try {
+        await log({
+          data: {
+            source: path === "device" ? "dexa" : "manual",
+            weight_kg: wKg,
+            body_fat_pct: bf,
+            lean_mass_kg: leanKg,
+            client_timezone: getBrowserTimezone(),
+          },
+        });
+        // Notify parent so it can recompute macros after a weight change.
+        onSaved?.();
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Could not save body composition.");
+        setBusy(false);
+        return;
+      }
+      setBusy(false);
+    }
+    setStep("B");
   };
 
   return (
@@ -1445,11 +1479,11 @@ export function BodyMeasurementModal({ open, onClose, onSaved }: Props) {
           {err && <p className="text-[12px] text-red-400">{err}</p>}
 
           <div className="flex gap-2">
-            <button type="button" onClick={() => setStep("B")} className="flex-1 rounded-2xl border border-white/10 py-3 text-[14px] text-text-secondary">
+            <button type="button" disabled={busy} onClick={advanceToStepB} className="flex-1 rounded-2xl border border-white/10 py-3 text-[14px] text-text-secondary disabled:opacity-50">
               Skip to measurements
             </button>
-            <button type="button" onClick={() => setStep("B")} className="flex-1 rounded-2xl gradient-brand py-3 text-[14px] font-semibold text-white">
-              Next: measurements
+            <button type="button" disabled={busy} onClick={advanceToStepB} className="flex-1 rounded-2xl gradient-brand py-3 text-[14px] font-semibold text-white disabled:opacity-50">
+              {busy ? "Saving…" : "Next: measurements"}
             </button>
           </div>
         </div>
@@ -1483,6 +1517,58 @@ export function BodyMeasurementModal({ open, onClose, onSaved }: Props) {
           </div>
         </form>
       )}
+    </Sheet>
+  );
+}
+
+/** Lightweight weight-only logger. Saves today's weight + triggers macro
+ *  recalc. Lives next to BodyMeasurementModal so the full flow is unchanged. */
+export function WeightOnlyModal({ open, onClose, onSaved }: Props) {
+  const log = useServerFn(logBodyMeasurement);
+  const [wUnit, setWUnit] = useState<WeightUnit>("kg");
+  const [weightDisp, setWeightDisp] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) { setWeightDisp(""); setErr(null); setBusy(false); }
+  }, [open]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const n = Number(weightDisp);
+    if (!Number.isFinite(n) || n <= 0) { setErr("Enter a valid weight."); return; }
+    const kg = wUnit === "kg" ? n : lbToKg(n);
+    setBusy(true); setErr(null);
+    try {
+      await log({
+        data: {
+          source: "manual",
+          weight_kg: Number(kg.toFixed(2)),
+          client_timezone: getBrowserTimezone(),
+        },
+      });
+      onSaved?.();
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save weight.");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Quick weigh-in">
+      <form onSubmit={submit} className="space-y-5">
+        <p className="text-[12px] text-text-tertiary">Just today's weight — macro targets will update automatically.</p>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Unit</span>
+          <UnitToggle value={wUnit} onChange={(n) => setWUnit(n)} options={["kg", "lb"] as const} />
+        </div>
+        <Row label="Weight">
+          <NumField value={weightDisp} onChange={setWeightDisp} suffix={wUnit} ariaLabel="Weight" />
+        </Row>
+        {err && <p className="text-[12px] text-red-400">{err}</p>}
+        <SubmitBtn busy={busy} label="Log weight" disabled={!weightDisp} />
+      </form>
     </Sheet>
   );
 }
