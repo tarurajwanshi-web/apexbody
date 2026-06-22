@@ -252,7 +252,7 @@ function Nutrition() {
        *  Scoped to today only: target/quick-add and the score it feeds are
        *  current-day concepts. On past dates, the timeline below still shows
        *  hydration events that were logged on that date. */}
-      {isToday && (
+      {isToday && hasHydrationTarget && (
         <HydrationCard
           hydration={hydration}
           onLog={() => setHydrationOpen(true)}
