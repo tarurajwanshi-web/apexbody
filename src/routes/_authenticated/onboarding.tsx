@@ -6,9 +6,11 @@ import { useServerFn } from "@tanstack/react-start";
 import { logBodyMeasurement } from "@/lib/shield.functions";
 import { getBrowserTimezone } from "@/lib/dates";
 import { toast } from "sonner";
+import { z } from "zod";
 
 export const Route = createFileRoute("/_authenticated/onboarding")({
   head: () => ({ meta: [{ title: "Profile setup — APEX" }] }),
+  validateSearch: z.object({ reset: z.string().optional() }),
   component: ProfileSetup,
 });
 
@@ -45,6 +47,7 @@ type Draft = {
   inputPath: InputPath | null;
   goal: Goal | null;
   days: number;
+  trainingDays: string[];
   equipment: Equipment | null;
   bodyDataType: BodyDataType;       // "dexa" | "measurements" | null  (null = skipped)
   dexaBf: string;                   // body-fat %  (path-agnostic; named for legacy column)
@@ -60,7 +63,7 @@ type Draft = {
 
 const EMPTY: Draft = {
   name: "", age: "", sex: null, inputPath: null,
-  goal: null, days: 3, equipment: null, bodyDataType: null,
+  goal: null, days: 3, trainingDays: [], equipment: null, bodyDataType: null,
   dexaBf: "", dexaLean: "", dexaFileName: null,
   waist: "", hip: "", arm: "", thigh: "", weight: "", height: "",
 };
