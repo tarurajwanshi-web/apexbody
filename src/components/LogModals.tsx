@@ -983,6 +983,7 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
           vision_detected_items: vision?.raw,
           vision_provider: vision?.provider,
           vision_confidence: vision?.confidence ?? null,
+          meal_slot: mealSlot,
           client_timezone: getBrowserTimezone(),
         },
       });
