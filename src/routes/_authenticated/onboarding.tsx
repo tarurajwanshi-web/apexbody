@@ -169,6 +169,7 @@ function ProfileSetup() {
               hip_cm: draft.hip ? Number(draft.hip) : null,
               arm_cm: draft.arm ? Number(draft.arm) : null,
               thigh_cm: draft.thigh ? Number(draft.thigh) : null,
+              client_timezone: getBrowserTimezone(),
             },
           });
         } catch (e) {
