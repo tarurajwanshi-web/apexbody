@@ -490,7 +490,10 @@ function Nutrition() {
           hydration={hydrationEvents}
           selectedDate={selectedDate}
           onOpenMeal={setOpenMeal}
-          onDeleteMeal={handleDelete}
+          confirmDeleteId={confirmDeleteId}
+          onRequestDelete={(id) => setConfirmDeleteId(id)}
+          onConfirmDelete={handleDelete}
+          onCancelDelete={() => setConfirmDeleteId(null)}
         />
       </section>
 
@@ -699,13 +702,17 @@ function mealImpactTag(m: TodayMeal): { label: string; color: string; bg: string
 }
 
 function UnifiedTimeline({
-  meals, hydration, selectedDate, onOpenMeal, onDeleteMeal,
+  meals, hydration, selectedDate, onOpenMeal,
+  confirmDeleteId, onRequestDelete, onConfirmDelete, onCancelDelete,
 }: {
   meals: TodayMeal[] | null;
   hydration: HydrationEvent[];
   selectedDate: string;
   onOpenMeal: (m: TodayMeal) => void;
-  onDeleteMeal?: (id: string) => void;
+  confirmDeleteId?: string | null;
+  onRequestDelete?: (id: string) => void;
+  onConfirmDelete?: (id: string) => void;
+  onCancelDelete?: () => void;
 }) {
   if (meals == null) {
     return (
@@ -740,8 +747,6 @@ function UnifiedTimeline({
     <div className="space-y-2">
       {rows.map((r) =>
         r.kind === "meal" ? (
-          // div + role=button so we can render a real inner <button> for delete
-          // without nesting interactive controls.
           <div
             key={`m-${r.meal.id}`}
             role="button"
@@ -776,11 +781,11 @@ function UnifiedTimeline({
                     ? `${r.meal.claude_quality_score}/100`
                     : "scoring…"}
                 </p>
-                {onDeleteMeal && (
+                {onRequestDelete && confirmDeleteId !== r.meal.id && (
                   <button
                     type="button"
                     aria-label="Delete meal"
-                    onClick={(e) => { e.stopPropagation(); onDeleteMeal(r.meal.id); }}
+                    onClick={(e) => { e.stopPropagation(); onRequestDelete(r.meal.id); }}
                     className="h-7 w-7 rounded-full flex items-center justify-center text-text-tertiary active:scale-95 transition hover:bg-white/5"
                   >
                     <Trash2 size={14} />
@@ -788,6 +793,25 @@ function UnifiedTimeline({
                 )}
               </div>
             </div>
+            {confirmDeleteId === r.meal.id && (
+              <div className="mt-3 flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onCancelDelete?.(); }}
+                  className="rounded-xl px-3 py-1.5 text-[12px] text-text-secondary border border-white/10"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onConfirmDelete?.(r.meal.id); }}
+                  className="rounded-xl px-3 py-1.5 text-[12px] font-semibold text-white"
+                  style={{ background: "rgba(239,68,68,0.85)" }}
+                >
+                  Delete
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div
@@ -1352,7 +1376,7 @@ function MacroReviewCard({ review, compact = false }: { review: MacroAdjustmentR
 
       {locked ? (
         <>
-          <p className="mt-2 text-[15px] font-semibold text-white">🔒 Target review locked</p>
+          <p className="mt-2 text-[15px] font-semibold text-white">🔒 Macro adjustment locked</p>
           <p className="mt-1 text-[12px] text-text-secondary leading-snug">
             Log {reqDays} nutrition days and {reqWeigh} weigh-ins in last week's review window to unlock a reliable adjustment.
           </p>
