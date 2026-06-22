@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { resolveUserTimezone, getLocalDateISO, addDaysISO } from "@/lib/dates";
+import { resolveUserTimezone, resolveUserTimezoneWithHint, getLocalDateISO, addDaysISO } from "@/lib/dates";
 
 export const setInputPathPreference = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
