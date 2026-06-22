@@ -328,7 +328,7 @@ function Nutrition() {
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs uppercase tracking-wider text-text-tertiary">
-            {selectedDate === todayLocalISO()
+            {isToday
               ? "Today's meals"
               : dateLabel === "Yesterday"
                 ? "Yesterday's meals"
