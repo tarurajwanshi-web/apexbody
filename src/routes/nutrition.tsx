@@ -31,6 +31,7 @@ import {
   getTodayHydrationEvents,
   softDeleteMeal,
   restoreMeal,
+  deleteHydrationEvent,
   type TodayMeal,
   type HydrationSummary,
   type HydrationEvent,
@@ -80,6 +81,7 @@ function Nutrition() {
   // in iOS PWAs and inconsistent across browsers. Tapping the trash icon
   // shows inline Delete / Cancel buttons in the timeline row.
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDeleteWaterId, setConfirmDeleteWaterId] = useState<string | null>(null);
   const undoTimerRef = useRef<number | null>(null);
   const ptrRef = useRef<HTMLDivElement>(null);
   const ptrStart = useRef<number | null>(null);
@@ -91,8 +93,16 @@ function Nutrition() {
   const fetchMacroReview = useServerFn(getMacroAdjustmentReview);
   const softDelete = useServerFn(softDeleteMeal);
   const debugReadMeal = useServerFn(debugReadMealById);
+  const deleteWater = useServerFn(deleteHydrationEvent);
 
   const restore = useServerFn(restoreMeal);
+
+  const handleDeleteWater = async (id: string) => {
+    setConfirmDeleteWaterId(null);
+    try { await deleteWater({ data: { id } }); }
+    catch (e) { console.error("[water-delete]", e); }
+    await reloadNutritionSnapshot();
+  };
 
   const todayISO = getLocalDateISO(userTz);
   const isToday = selectedDate === todayISO;
@@ -476,6 +486,10 @@ function Nutrition() {
           onRequestDelete={(id) => setConfirmDeleteId(id)}
           onConfirmDelete={handleDelete}
           onCancelDelete={() => setConfirmDeleteId(null)}
+          confirmDeleteWaterId={confirmDeleteWaterId}
+          onRequestDeleteWater={(id) => setConfirmDeleteWaterId(id)}
+          onDeleteWater={handleDeleteWater}
+          onCancelDeleteWater={() => setConfirmDeleteWaterId(null)}
         />
       </section>
 
@@ -686,6 +700,7 @@ function mealImpactTag(m: TodayMeal): { label: string; color: string; bg: string
 function UnifiedTimeline({
   meals, hydration, selectedDate, onOpenMeal,
   confirmDeleteId, onRequestDelete, onConfirmDelete, onCancelDelete,
+  confirmDeleteWaterId, onRequestDeleteWater, onDeleteWater, onCancelDeleteWater,
 }: {
   meals: TodayMeal[] | null;
   hydration: HydrationEvent[];
@@ -695,6 +710,10 @@ function UnifiedTimeline({
   onRequestDelete?: (id: string) => void;
   onConfirmDelete?: (id: string) => void;
   onCancelDelete?: () => void;
+  confirmDeleteWaterId?: string | null;
+  onRequestDeleteWater?: (id: string) => void;
+  onDeleteWater?: (id: string) => void;
+  onCancelDeleteWater?: () => void;
 }) {
   if (meals == null) {
     return (
@@ -798,16 +817,47 @@ function UnifiedTimeline({
         ) : (
           <div
             key={`w-${r.ev.id}`}
-            className="rounded-2xl p-3 flex items-center gap-3"
+            className="rounded-2xl p-3"
             style={{ background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.20)" }}
           >
-            <div className="h-8 w-8 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(59,130,246,0.20)" }}>
-              <Droplet size={14} className="text-sleep" />
+            <div className="flex items-center gap-3">
+              <div className="h-8 w-8 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(59,130,246,0.20)" }}>
+                <Droplet size={14} className="text-sleep" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-white">Water — {r.ev.amount_ml} ml</p>
+                <p className="text-[11px] text-text-tertiary">{fmtTime(r.ts)}</p>
+              </div>
+              {onRequestDeleteWater && confirmDeleteWaterId !== r.ev.id && (
+                <button
+                  type="button"
+                  aria-label="Delete water log"
+                  onClick={() => onRequestDeleteWater(r.ev.id)}
+                  className="h-7 w-7 rounded-full flex items-center justify-center text-text-tertiary active:scale-95 transition hover:bg-white/5 shrink-0"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-white">Water — {r.ev.amount_ml} ml</p>
-              <p className="text-[11px] text-text-tertiary">{fmtTime(r.ts)}</p>
-            </div>
+            {confirmDeleteWaterId === r.ev.id && (
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => onCancelDeleteWater?.()}
+                  className="rounded-xl px-3 py-1.5 text-[12px] text-text-secondary border border-white/10"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeleteWater?.(r.ev.id)}
+                  className="rounded-xl px-3 py-1.5 text-[12px] font-semibold text-white"
+                  style={{ background: "rgba(239,68,68,0.85)" }}
+                >
+                  Delete
+                </button>
+              </div>
+            )}
           </div>
         ),
       )}
