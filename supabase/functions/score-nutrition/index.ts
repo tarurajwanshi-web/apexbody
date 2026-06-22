@@ -196,17 +196,13 @@ Deno.serve(async (req) => {
       }
 
 
-      // SEPARATE, parallel call: calorie/macro estimation.
-      // Runs whenever we have a photo OR a description (text-only meals
-      // are estimated from the description alone). Priority order:
-      //   - photo + description: both image + description text
-      //   - description only:    text-only call
-      //   - photo only:          image + "(none)" description
-      //   - neither:             skip
+      // SEPARATE call: calorie/macro estimation. Runs whenever we have a
+      // photo OR a description, and only if not skipped (skipMacros covers
+      // both 'estimated' and 'manual_edited' — never overwrite a user edit).
       let estimate: { calories: number; protein_g: number; carbs_g: number; fat_g: number } | null = null;
       const hasDescription = !!(row.meal_description && String(row.meal_description).trim().length > 0);
       const hasPhoto = !!row.meal_photo_url;
-      if (hasPhoto || hasDescription) {
+      if (!skipMacros && (hasPhoto || hasDescription)) {
         try {
           const estContent: Array<Record<string, unknown>> = [];
           if (hasPhoto) {
@@ -275,36 +271,42 @@ Deno.serve(async (req) => {
         } catch (e) { console.error("Macro estimate failed:", e); }
       }
 
-      if (estimate) {
-        const macroPatch: Record<string, unknown> = {
-          estimated_calories: estimate.calories,
-          estimated_protein_g: estimate.protein_g,
-          estimated_carbs_g: estimate.carbs_g,
-          estimated_fat_g: estimate.fat_g,
-          estimated_items: (estimate as any).items ?? null,
-          calorie_estimate_status: "estimated",
-        };
-        // Preserve the original AI baseline: only set original_* on first estimate.
-        if (row.original_estimated_items == null && row.original_estimated_calories == null) {
-          macroPatch.original_estimated_items = (estimate as any).items ?? null;
-          macroPatch.original_estimated_calories = estimate.calories;
-          macroPatch.original_estimated_protein_g = estimate.protein_g;
-          macroPatch.original_estimated_carbs_g = estimate.carbs_g;
-          macroPatch.original_estimated_fat_g = estimate.fat_g;
+      if (!skipMacros) {
+        if (estimate) {
+          const macroPatch: Record<string, unknown> = {
+            estimated_calories: estimate.calories,
+            estimated_protein_g: estimate.protein_g,
+            estimated_carbs_g: estimate.carbs_g,
+            estimated_fat_g: estimate.fat_g,
+            estimated_items: (estimate as any).items ?? null,
+            calorie_estimate_status: "estimated",
+          };
+          // Preserve the original AI baseline: only set original_* on first estimate.
+          if (row.original_estimated_items == null && row.original_estimated_calories == null) {
+            macroPatch.original_estimated_items = (estimate as any).items ?? null;
+            macroPatch.original_estimated_calories = estimate.calories;
+            macroPatch.original_estimated_protein_g = estimate.protein_g;
+            macroPatch.original_estimated_carbs_g = estimate.carbs_g;
+            macroPatch.original_estimated_fat_g = estimate.fat_g;
+          }
+          await supabase.from("shield_nutrition_logs").update(macroPatch).eq("id", nutrition_log_id);
+        } else if (hasPhoto || hasDescription) {
+          await supabase.from("shield_nutrition_logs").update({
+            calorie_estimate_status: "failed",
+          }).eq("id", nutrition_log_id);
         }
-        await supabase.from("shield_nutrition_logs").update(macroPatch).eq("id", nutrition_log_id);
-      } else {
-        await supabase.from("shield_nutrition_logs").update({
-          calorie_estimate_status: "failed",
-        }).eq("id", nutrition_log_id);
       }
 
+      const lastScores = (updated as any)._lastScores ?? null;
+      const lastReasoning = (updated as any)._lastReasoning ?? null;
       return new Response(
         JSON.stringify({
           row: updated,
-          scores: { protein_tier, carb_quality_score, timing_score, claude_quality_score },
+          skipped_quality: skipQuality,
+          skipped_macros: skipMacros,
+          scores: lastScores,
           estimate,
-          reasoning: parsed.reasoning,
+          reasoning: lastReasoning,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
