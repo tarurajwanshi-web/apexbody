@@ -1,82 +1,74 @@
-# Nutrition Closeout Patch — Diff Plan
+# Nutrition MVP Stabilization — Diff Plan
 
-Scope = three sections (A meal review, B delete/undo, C+D macro adjustment review with lock). No calendar, training, hydration, coach, graph redesign, or auto-apply work.
+Scope: tighten the existing capture → review → save → edit/delete → recalculate → expose-context loop. No new screens, no Coach chat, no auto-apply, no graph redesign.
 
-## Section A — Review-before-save loop
+## A. Fuel page IA (`src/routes/nutrition.tsx`)
+- Enforce section order: Date selector → Daily Fuel → Weekly Preview → **Macro Adjustment Review** → Meals timeline → (Hydration where it currently sits).
+- Remove any duplicate weekly card outside the Weekly Adherence sheet.
+- Add bottom padding so `FloatingCoach` never overlaps the last meal row or the Save/Delete CTAs (`pb-44` confirmed; bump on small viewports if needed).
 
-**Migration** `supabase/migrations/<ts>_nutrition_review.sql`
-- `ALTER TABLE shield_nutrition_logs ADD COLUMN vision_detected_items jsonb`
-- `ADD COLUMN confirmed_items jsonb`
-- `ADD COLUMN vision_provider text`
-- `ADD COLUMN vision_confidence numeric`
-- `ADD COLUMN user_confirmed_vision boolean NOT NULL DEFAULT false`
-- No new GRANTs (existing table grants apply).
+## B. Meal logging — capture → review → save (`src/components/LogModals.tsx`)
+- Capture step copy: title "Log a meal", "Photo recommended", note label "Anything not visible?", placeholder "e.g. oil, sauce, drink, extra rice", primary button "Detect food".
+- Detection calls `detectMealItems` only — never persists a row.
+- Review step "Review meal" / "Adjust servings before saving." with totals on top, per-item rows showing name, serving size, serving count, grams, P/C/F/kcal, confidence chip, source chip (photo / your note / photo + note), uncertainty note.
+- Structured serving controls: serving size enum (1 serving, 1 piece, 1 cup, 100g, full package, estimated portion, custom), numeric servings, editable grams.
+- Recompute rules: grams edit → proportional macro recompute from per-gram base; servings edit → grams + macros recompute when base serving exists; serving-size text alone never changes macros.
+- "Add item" opens an item editor sheet (no zero-row insertion). Validates non-empty name; warns "Add macros or estimate this item before saving." if grams set but all macros 0; requires explicit confirm for true zero-macro item.
+- Inputs `text-base` (≥16px) to block iOS zoom; sticky Save bar with safe-area padding; focus-scroll into view; long names truncate.
 
-**Edge function** reuse existing `score-nutrition`. Add a new lightweight server function (no edge fn) `detectMealItems` in `src/lib/shield.functions.ts` that:
-- Accepts `{ photo_url?, note?: string }`
-- Calls Lovable AI Gateway (already wired) with an anti-hallucination system prompt: forbid invented sauces/drinks/sides/counts; use generic names ("chicken pieces" vs "chicken breast") unless visible or in user note; tag each item with `source` (`photo` / `your note` / `photo + note`), `confidence`, `uncertainty_note`, `gram_range_min/max`.
-- Returns array of detected items (no DB write).
+## C. Anti-hallucination detection (`src/lib/shield.functions.ts` → `detectMealItems`)
+- Tighten prompt: only visible foods, no invented sides/sauces/drinks/counts, generic names when uncertain, tag each item `source: photo | your note | photo + note`, attach `confidence` and `uncertainty_note`. Packaged-food rule: when net weight visible → `serving_size: full package`, grams = net weight, note when macros are estimated vs label-read.
 
-**Server fn** `logMeal` (`src/lib/shield.functions.ts`):
-- Extend input to accept `confirmed_items`, `vision_detected_items`, `vision_provider`, `vision_confidence`.
-- When `confirmed_items` is present: derive `estimated_calories/protein/carbs/fat` and `estimated_items` from confirmed_items sum, set `calorie_estimate_status='manual_edited'`, set `user_confirmed_vision=true`. Skip score-nutrition macro re-estimation (still trigger quality scoring for protein_tier/carb_quality/timing).
-- `confirmed_items` becomes the source of truth; do NOT overwrite once set.
+## D. Save semantics (`logMeal` in `shield.functions.ts`)
+- Only on Save: upsert `shield_nutrition_logs` with `confirmed_items`, derived `estimated_*` macros (sum of confirmed_items), `vision_detected_items` (raw), `user_confirmed_vision=true`, `calorie_estimate_status='manual_edited'`.
+- Guard in `score-nutrition` consumer path: reviewed rows (`user_confirmed_vision=true` OR `calorie_estimate_status='manual_edited'`) keep their macros; scoring may update score fields only. (Server-side already respects `manual_edited`; verify and document — no edge-fn change.)
 
-**UI** `src/components/LogModals.tsx` — replace 2-step (capture → confirm description) with 3-step (capture → review → save):
-- Capture step copy: "Photo recommended", note label "Anything not visible?", placeholder "e.g. oil, sauce, drink, extra rice", primary button "Detect food".
-- New Review step: sheet titled "Review meal" / "Adjust servings before saving."
-  - Top macro summary (cal/P/C/F), recomputes live as user edits grams.
-  - Item rows: editable name, quantity_description, grams, kcal/P/C/F; confidence badge; source chip; uncertainty note; remove (×) and "Add item" button.
-  - Editing grams scales per-item macros proportionally from the per-gram density implied by the initial estimate.
-  - Primary "Save meal" persists `confirmed_items` + computed totals via extended `logMeal`.
-- Macros never persisted until "Save meal" tap.
+## E. Meal detail / edit / delete / undo
+- `MealDetailModal.tsx`: prefer `confirmed_items`; show serving size / count / grams, confidence, source. Add "Edit portions" entry that reopens the Review sheet pre-filled; on save it recomputes macros and keeps `manual_edited`.
+- `UnifiedTimeline` (in `nutrition.tsx`): trash icon → confirm dialog ("Delete this meal? This removes it from daily macros and weekly adherence."). Calls existing `softDeleteMeal` (ownership-checked, soft only, photo retained).
+- Snackbar "Meal deleted" + "Undo" (5s) → `restoreMeal` restores `deleted=false` without rescoring.
+- Centralize a `reloadNutrition(selectedDate)` helper that refetches: day meals, `getDayNutritionSummary`, `getTodayMacroSummary`, `getWeeklyNutritionInsight` (preview + sheet anchor), `getMacroAdjustmentReview`, pending/failed counters. Called after save/edit/delete/undo.
 
-**Meal detail modal** `src/components/MealDetailModal.tsx` — render `confirmed_items` when present (fallback to `estimated_items`) so names/portions stay consistent.
+## F. Filter audit (`src/lib/macros.functions.ts`, `shield.functions.ts`)
+- Every summary query filters `deleted=false`, includes statuses `('estimated','manual_edited')` for consumed totals, excludes `pending`/`failed` from consumed (counted separately).
+- Deleted pending rows excluded from pending counter.
+- Confirm weekly graph, macro review, readiness pillar consumers all share the filter.
 
-## Section B — Delete / undo in UnifiedTimeline
+## G. Macro Adjustment Review (`getMacroAdjustmentReview`)
+- Window: previous completed local Mon–Sun only.
+- Gates: ≥3 logged days, ≥3 weigh-ins, no abnormal-week flag, no major pending/failed, valid target row.
+- Failing gates → `decision: 'locked' | 'insufficient_data'`, `can_apply: false`, `blockers: [...]`, `unlock_progress: { logged_days, required_logged_days, weigh_in_count, required_weigh_ins }`, `last_7_days: [{date, logged}]`.
+- Safety: BMR floor, protein floor by goal/bodyweight, fat ≥ max(0.4 g/kg, 25% kcal), cap ±150 kcal/wk, no duplicate active targets.
+- Apply remains **deferred** ("Review only" label). No call to `apply_weekly_macro_review` from UI in this patch.
+- Return shape matches spec in section E6.
 
-**`src/routes/nutrition.tsx` `UnifiedTimeline`**:
-- Add small trash icon on each meal row → confirm dialog ("Delete this meal? This removes it from daily macros and weekly adherence." Cancel/Delete).
-- On confirm: call existing `softDeleteMeal({ id })`; optimistically remove from list.
-- Show snackbar "Meal deleted · Undo" (5s). Undo → `restoreMeal({ id })` then reload meals, daily fuel, weekly preview/sheet.
+## H. MacroReviewCard UI (`nutrition.tsx`)
+- Title "Next target review". Locked copy:
+  "Macro adjustment locked" / "Need {N} more logged days and {M} more weigh-ins to unlock a reliable adjustment." / support line "Apex only changes targets after enough data to avoid bad adjustments." / progress rows "Nutrition logs X/3", "Weigh-ins X/3".
+- Streak row: 7 evenly-spaced day cells, label under each, today marker aligned, 🔥 inside circle when logged, ○ when missing. Single header icon only.
+- Ready state: shows recommended kcal delta and per-macro deltas, "Review only" / "Apply deferred" badge — no Apply button.
 
-**Server fn** `src/lib/shield.functions.ts`:
-- Add `restoreMeal` (mirror of `softDeleteMeal`: set `deleted=false`, RLS-scoped, no re-score needed).
+## I. Weekly Preview / Sheet consistency
+- Both consume the same `getWeeklyNutritionInsight` result.
+- Stacked graph kept; title "Macro calories by day", subtitle "Protein, carbs, and fat stacked against your calorie target.". Empty state when `logged_days===0`: "No meals logged this week yet." / "Log meals to see your macro pattern.". Low-confidence chip when `logged_days < 3`.
 
-**Filter audit** verify `deleted=false` already applied in:
-- `getDayNutritionSummary`, `getTodayMacroSummary`, `getWeeklyNutritionInsight`, pending/failed counts in weekly insight, readiness nutrition signal in `calculate-score` if it reads nutrition logs. (Read-only check; patch any miss with a `.eq('deleted', false)`.)
+## J. Engine B context (`src/lib/coach.functions.ts` → `getNutritionCoachContext`)
+- Pure aggregator over existing summaries — no LLM call. Excludes deleted, includes manual_edited. Returns: `selected_date_summary, today_summary, weekly_insight, macro_adjustment_review, recent_meals, logged_days_last_7, unlock_status, blockers, next_best_action`.
+- Wired but not consumed by chat in this patch.
 
-## Section C+D — Macro adjustment review (locked-state, review-only)
+## K. Migration
+- Only if columns missing from prior patch: `vision_detected_items jsonb`, `confirmed_items jsonb`, `vision_provider text`, `vision_confidence numeric`, `user_confirmed_vision bool default false` on `shield_nutrition_logs`. Verify first via `supabase--read_query`; skip if present.
 
-**Server fn** `getMacroAdjustmentReview` in `src/lib/macros.functions.ts`:
-- Window = previous completed local Mon–Sun week relative to today.
-- Pull nutrition logs `deleted=false AND calorie_estimate_status IN ('estimated','manual_edited')`, weigh-ins from `body_measurement_events`, current `daily_macro_targets` for that week, profile (goal/sex/weight/BMR).
-- Gates: ≥3 logged days, ≥3 weigh-ins, no pending/failed meals in window, no abnormal flag, valid target. If any gate fails → `decision='Insufficient data'`, `can_apply=false`, populated `blockers[]`.
-- If gates pass: compute observed TDEE from avg intake + weight trend (7-day linear slope * 7700 kcal/kg). Apply decision rules per goal (fat-loss / muscle-gain / maintenance) with adherence + trend.
-- Safety clamps: never below BMR, fat ≥ max(0.4 g/kg, 25% kcal), cap delta ±150 kcal/week (±250 only if existing weekly-review backend permits — keep at ±150 since current `apply_weekly_macro_review` semantics differ).
-- Return full shape per spec including `recommended_protein_g/carbs_g/fat_g`, `coach_note`, `can_apply: false` (apply deferred — see below).
+## Out of scope (explicit)
+Calendar, training, hydration/onboarding, barcode, frequent meals, graph redesign, Coach chat, auto-apply, new nutrition page redesign.
 
-**No new edge fn**. `calculate-macros-weekly` stays untouched; we only read.
+## Files touched
+- `src/routes/nutrition.tsx`
+- `src/components/LogModals.tsx`
+- `src/components/MealDetailModal.tsx`
+- `src/lib/shield.functions.ts`
+- `src/lib/macros.functions.ts`
+- `src/lib/coach.functions.ts` (new helper only)
+- migration only if needed
 
-**Apply behavior**: **deferred**. `can_apply=false` always in this patch; no "Apply targets" button. Reasoning: existing `apply_weekly_macro_review` RPC requires exactly one active target row and a specific review-row contract — wiring it safely is out of MVP closeout scope.
-
-**UI** `src/routes/nutrition.tsx` — new compact card "Next target review" below weekly preview AND inside Weekly Adherence sheet:
-- **Locked state** (gates unmet): 🔒 "Target review locked" / "Log 3 nutrition days and 3 weigh-ins to unlock a reliable adjustment." Progress rows `Nutrition logs: X/3`, `Weigh-ins: X/3`. 7-day streak strip (🔥 filled / ○ empty / "Today" label).
-- **Insufficient (weekly adherence early signal)**: 🧊 "Early signal · Log {n} more days to unlock a reliable weekly pattern." Shown inside weekly sheet header when `logged_days < 3`.
-- **Unlocked / Ready**: 🔥 "Review unlocked" then decision card: title (Hold / Ready to adjust / Abnormal week), recommended kcal delta, reason, coach_note. No Apply button.
-- **Applied**: not reachable in this patch (apply deferred).
-
-## Files changed
-
-- `supabase/migrations/<ts>_nutrition_review.sql` (new)
-- `src/lib/shield.functions.ts` — `detectMealItems` (new), `logMeal` extended, `restoreMeal` (new), filter audit on read fns
-- `src/lib/macros.functions.ts` — `getMacroAdjustmentReview` (new); audit `deleted=false` filter
-- `src/components/LogModals.tsx` — 3-step review flow
-- `src/components/MealDetailModal.tsx` — prefer `confirmed_items`
-- `src/routes/nutrition.tsx` — UnifiedTimeline delete/undo, Next target review card (locked + unlocked states), 🧊 banner in weekly sheet
-- `src/integrations/supabase/types.ts` — regenerated after migration
-
-## What is NOT changed
-Calendar, training, hydration, onboarding, frequent meals, weekly stacked graph layout, Coach/Engine B, automatic macro adjustment apply, score-nutrition core logic.
-
-Awaiting approval before implementing.
+Reply **approve** to implement, or send edits to revise the plan.

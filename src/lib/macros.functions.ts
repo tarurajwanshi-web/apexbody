@@ -1078,3 +1078,271 @@ export const getMacroAdjustmentReview = createServerFn({ method: "GET" })
     };
   });
 
+// ============================================================================
+// Engine B context aggregator — pure read, no LLM call.
+// Composes existing nutrition summaries so a future coach turn can use one
+// consistent payload. Deleted meals are excluded; manual_edited meals count.
+// ============================================================================
+
+export type NutritionCoachContext = {
+  selected_date: string;
+  selected_date_summary: {
+    entry_date: string;
+    has_target: boolean;
+    consumed_calories: number;
+    consumed_protein_g: number;
+    consumed_carbs_g: number;
+    consumed_fat_g: number;
+    target_calories: number | null;
+    target_protein_g: number | null;
+    meal_count: number;
+    pending_meal_count: number;
+    failed_meal_count: number;
+  };
+  today_summary: NutritionCoachContext["selected_date_summary"];
+  weekly_insight: {
+    week_start: string;
+    week_end: string;
+    logged_days: number;
+    avg_calories: number | null;
+    avg_protein_g: number | null;
+    target_calories: number | null;
+    confidence: "low" | "medium" | "high";
+  } | null;
+  macro_adjustment_review: MacroAdjustmentReview | null;
+  recent_meals: Array<{
+    id: string;
+    entry_date: string;
+    description: string | null;
+    calories: number | null;
+    protein_g: number | null;
+    carbs_g: number | null;
+    fat_g: number | null;
+    status: string | null;
+    user_confirmed_vision: boolean;
+  }>;
+  logged_days_last_7: number;
+  unlock_status: {
+    locked: boolean;
+    logged_days: number;
+    required_logged_days: number;
+    weigh_in_count: number;
+    required_weigh_ins: number;
+  };
+  blockers: string[];
+  next_best_action: string;
+};
+
+export const getNutritionCoachContext = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional().parse(d),
+  )
+  .handler(async ({ data, context }): Promise<NutritionCoachContext> => {
+    const selectedDate = data?.entryDate ?? localTodayISO();
+    const todayISO = localTodayISO();
+
+    // last 7 days for logged-days streak
+    const last7: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      last7.push(
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`,
+      );
+    }
+
+    // Pull selected-day + today + last-7 meals (all live under same query window).
+    const minDate = last7[0] < selectedDate ? last7[0] : selectedDate;
+    const maxDate = todayISO > selectedDate ? todayISO : selectedDate;
+
+    const [mealsRes, targetRes] = await Promise.all([
+      context.supabase
+        .from("shield_nutrition_logs")
+        .select(
+          "id, entry_date, meal_description, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, calorie_estimate_status, user_confirmed_vision, deleted, created_at",
+        )
+        .eq("user_id", context.userId)
+        .gte("entry_date", minDate)
+        .lte("entry_date", maxDate)
+        .eq("deleted", false)
+        .order("created_at", { ascending: false }),
+      context.supabase
+        .from("daily_macro_targets")
+        .select("target_calories, target_protein_g, target_carbs_g, target_fat_g, effective_start_date, effective_end_date")
+        .eq("user_id", context.userId)
+        .lte("effective_start_date", maxDate)
+        .or(`effective_end_date.is.null,effective_end_date.gt.${minDate}`)
+        .order("effective_start_date", { ascending: false }),
+    ]);
+
+    const meals = (mealsRes.data ?? []) as any[];
+    const targets = (targetRes.data ?? []) as any[];
+
+    const targetFor = (date: string) => {
+      return targets.find(
+        (t) =>
+          t.effective_start_date <= date &&
+          (!t.effective_end_date || t.effective_end_date > date),
+      ) ?? null;
+    };
+
+    const summarizeDay = (date: string) => {
+      const dayMeals = meals.filter((m) => m.entry_date === date);
+      const counted = dayMeals.filter((m) =>
+        ["estimated", "manual_edited"].includes(m.calorie_estimate_status),
+      );
+      const sum = (k: string) => counted.reduce((a, m) => a + Number(m[k] ?? 0), 0);
+      const t = targetFor(date);
+      return {
+        entry_date: date,
+        has_target: !!t,
+        consumed_calories: Math.round(sum("estimated_calories")),
+        consumed_protein_g: Math.round(sum("estimated_protein_g")),
+        consumed_carbs_g: Math.round(sum("estimated_carbs_g")),
+        consumed_fat_g: Math.round(sum("estimated_fat_g")),
+        target_calories: t?.target_calories != null ? Number(t.target_calories) : null,
+        target_protein_g: t?.target_protein_g != null ? Number(t.target_protein_g) : null,
+        meal_count: counted.length,
+        pending_meal_count: dayMeals.filter((m) => m.calorie_estimate_status === "pending").length,
+        failed_meal_count: dayMeals.filter((m) => m.calorie_estimate_status === "failed").length,
+      };
+    };
+
+    const selected_date_summary = summarizeDay(selectedDate);
+    const today_summary = selectedDate === todayISO ? selected_date_summary : summarizeDay(todayISO);
+
+    // Logged-day count in last 7.
+    const loggedDays = new Set<string>();
+    for (const m of meals) {
+      if (
+        last7.includes(m.entry_date) &&
+        ["estimated", "manual_edited"].includes(m.calorie_estimate_status)
+      ) {
+        loggedDays.add(m.entry_date);
+      }
+    }
+    const logged_days_last_7 = loggedDays.size;
+
+    // Recent meals — top 5 across selected day + today.
+    const recent_meals = meals.slice(0, 5).map((m) => ({
+      id: m.id,
+      entry_date: m.entry_date,
+      description: m.meal_description ?? null,
+      calories: m.estimated_calories != null ? Number(m.estimated_calories) : null,
+      protein_g: m.estimated_protein_g != null ? Number(m.estimated_protein_g) : null,
+      carbs_g: m.estimated_carbs_g != null ? Number(m.estimated_carbs_g) : null,
+      fat_g: m.estimated_fat_g != null ? Number(m.estimated_fat_g) : null,
+      status: m.calorie_estimate_status ?? null,
+      user_confirmed_vision: !!m.user_confirmed_vision,
+    }));
+
+    // Weekly insight (this week containing selectedDate).
+    const [y, mo, dd] = selectedDate.split("-").map(Number);
+    const anchor = new Date(y, mo - 1, dd);
+    const day = anchor.getDay();
+    const toMon = (day + 6) % 7;
+    const monday = new Date(anchor);
+    monday.setDate(anchor.getDate() - toMon);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    const fmt = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const weekStart = fmt(monday);
+    const weekEnd = fmt(sunday);
+    const weekMeals = meals.filter(
+      (m) =>
+        m.entry_date >= weekStart &&
+        m.entry_date <= weekEnd &&
+        ["estimated", "manual_edited"].includes(m.calorie_estimate_status),
+    );
+    const weekLoggedDays = new Set(weekMeals.map((m) => m.entry_date)).size;
+    const weekTarget = targetFor(weekStart) ?? targetFor(weekEnd);
+    const weekly_insight = weekLoggedDays > 0
+      ? {
+          week_start: weekStart,
+          week_end: weekEnd,
+          logged_days: weekLoggedDays,
+          avg_calories: Math.round(
+            weekMeals.reduce((a, m) => a + Number(m.estimated_calories ?? 0), 0) / weekLoggedDays,
+          ),
+          avg_protein_g: Math.round(
+            weekMeals.reduce((a, m) => a + Number(m.estimated_protein_g ?? 0), 0) / weekLoggedDays,
+          ),
+          target_calories: weekTarget?.target_calories != null ? Number(weekTarget.target_calories) : null,
+          confidence: (weekLoggedDays >= 5 ? "high" : weekLoggedDays >= 3 ? "medium" : "low") as
+            "low" | "medium" | "high",
+        }
+      : null;
+
+    // Macro adjustment review — reuse prior-week range query.
+    const { start: rwStart, end: rwEnd } = priorMondayRange();
+    const [reviewMealsRes, weighRes] = await Promise.all([
+      context.supabase
+        .from("shield_nutrition_logs")
+        .select("entry_date, calorie_estimate_status, deleted")
+        .eq("user_id", context.userId)
+        .gte("entry_date", rwStart)
+        .lte("entry_date", rwEnd)
+        .eq("deleted", false),
+      context.supabase
+        .from("body_measurement_events")
+        .select("entry_date, weight_kg")
+        .eq("user_id", context.userId)
+        .gte("entry_date", rwStart)
+        .lte("entry_date", rwEnd)
+        .not("weight_kg", "is", null),
+    ]);
+    const reviewLogged = new Set<string>();
+    for (const m of (reviewMealsRes.data ?? []) as any[]) {
+      if (["estimated", "manual_edited"].includes(m.calorie_estimate_status)) {
+        reviewLogged.add(m.entry_date);
+      }
+    }
+    const weighIns = (weighRes.data ?? []).length;
+    const REQ_DAYS = 3;
+    const REQ_WEIGH = 3;
+    const locked = reviewLogged.size < REQ_DAYS || weighIns < REQ_WEIGH;
+    const unlock_status = {
+      locked,
+      logged_days: reviewLogged.size,
+      required_logged_days: REQ_DAYS,
+      weigh_in_count: weighIns,
+      required_weigh_ins: REQ_WEIGH,
+    };
+
+    const blockers: string[] = [];
+    if (reviewLogged.size < REQ_DAYS) {
+      blockers.push(`Log ${REQ_DAYS - reviewLogged.size} more day(s) for a reliable adjustment.`);
+    }
+    if (weighIns < REQ_WEIGH) {
+      blockers.push(`Add ${REQ_WEIGH - weighIns} more weigh-in(s) for a reliable adjustment.`);
+    }
+
+    let next_best_action = "Keep logging consistently.";
+    if (selected_date_summary.pending_meal_count > 0) {
+      next_best_action = "Finish reviewing pending meals.";
+    } else if (
+      selected_date_summary.has_target &&
+      selected_date_summary.target_protein_g &&
+      selected_date_summary.consumed_protein_g < selected_date_summary.target_protein_g * 0.7
+    ) {
+      next_best_action = "Protein is low today — add a protein-forward snack or meal.";
+    } else if (locked) {
+      next_best_action = blockers[0] ?? "Log meals and weigh-ins to unlock target review.";
+    }
+
+    return {
+      selected_date: selectedDate,
+      selected_date_summary,
+      today_summary,
+      weekly_insight,
+      macro_adjustment_review: null,
+      recent_meals,
+      logged_days_last_7,
+      unlock_status,
+      blockers,
+      next_best_action,
+    };
+  });
+
