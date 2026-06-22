@@ -276,10 +276,10 @@ function Nutrition() {
                 : `Meals on ${formatShortDate(selectedDate)}`}
           </p>
           <p className="text-[11px] text-text-accent">
-            {isToday ? "Tap + below to log a meal" : "Meal logging is for today only"}
+            {isToday ? "Tap + below to log a meal" : "Viewing this day. New meals log to today only."}
           </p>
         </div>
-        <UnifiedTimeline meals={meals} hydration={hydrationEvents} onOpenMeal={setOpenMeal} />
+        <UnifiedTimeline meals={meals} hydration={hydrationEvents} selectedDate={selectedDate} onOpenMeal={setOpenMeal} />
       </section>
 
 
