@@ -1324,12 +1324,25 @@ export const getNutritionCoachContext = createServerFn({ method: "GET" })
       next_best_action = blockers[0] ?? "Log meals and weigh-ins to unlock target review.";
     }
 
+    // BUG FIX (N-4): populate the full review payload instead of null so
+    // the coach turn can reason about adjustment readiness. Uses the shared
+    // helper so the rules engine isn't duplicated.
+    let macro_adjustment_review: MacroAdjustmentReview | null = null;
+    try {
+      macro_adjustment_review = await computeMacroAdjustmentReview(
+        context.supabase,
+        context.userId,
+      );
+    } catch (e) {
+      console.error("[coach-context] macro_adjustment_review failed", e);
+    }
+
     return {
       selected_date: selectedDate,
       selected_date_summary,
       today_summary,
       weekly_insight,
-      macro_adjustment_review: null,
+      macro_adjustment_review,
       recent_meals,
       logged_days_last_7,
       unlock_status,
