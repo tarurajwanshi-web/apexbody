@@ -865,7 +865,7 @@ function WeeklyGraphSheet({
 
   if (!open) return null;
 
-  const todayISO = todayLocalISO();
+  const todayISO = getLocalDateISO(typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC");
   // "This week" anchor (today). Next-week disabled when anchor is in current week.
   const currentWeekAnchor = todayISO;
   const isCurrentOrFutureWeek = data ? data.week_end_date >= currentWeekAnchor : true;
