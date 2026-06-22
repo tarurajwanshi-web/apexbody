@@ -129,31 +129,15 @@ function Nutrition() {
   // the meal right away. Confirmation is now handled inline (no window.confirm).
   const handleDelete = async (id: string) => {
     setConfirmDeleteId(null);
-    const snapshot = meals;
-    if (import.meta.env.DEV) {
-      console.log("[meal-delete] start", { id, beforeCount: snapshot?.length ?? 0, selectedDate });
-    }
     setMeals((prev) => (prev ? prev.filter((m) => m.id !== id) : prev));
     try {
-      const res = await softDelete({ data: { id } });
-      if (import.meta.env.DEV) console.log("[meal-delete] server response", res);
-      if (!res || res.deleted !== true) throw new Error("Delete not confirmed");
+      await softDelete({ data: { id } });
     } catch (e) {
       console.error("[meal-delete] failed", e);
-      setMeals(snapshot); // roll back optimistic removal
-      alert("Couldn't delete that meal. Please try again.");
+      await reloadNutritionSnapshot();
       return;
     }
     await reloadNutritionSnapshot();
-    if (import.meta.env.DEV) {
-      try {
-        const dbTruth = await debugReadMeal({ data: { id } } as any);
-        console.log("[meal-delete] post-reload", { id, dbTruth });
-      } catch (e) {
-        console.log("[meal-delete] post-reload (debug read failed)", e);
-      }
-    }
-
     setPendingUndo({ id });
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     undoTimerRef.current = window.setTimeout(() => setPendingUndo(null), 5000);
@@ -165,13 +149,11 @@ function Nutrition() {
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     setPendingUndo(null);
     try {
-      const res = await restore({ data: { id } });
-      if (!res || res.deleted !== false) throw new Error("Restore not confirmed");
+      await restore({ data: { id } });
     } catch (e) {
       console.error("[meal] restore failed", e);
-      alert("Couldn't restore that meal. Please try again.");
     }
-    reloadNutritionSnapshot();
+    await reloadNutritionSnapshot();
   };
 
 
