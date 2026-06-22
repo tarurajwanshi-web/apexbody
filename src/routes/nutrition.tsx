@@ -196,21 +196,21 @@ function Nutrition() {
               const diff = cCal - tCal!;
               if (diff > 0) {
                 return (
-                  <p className="mt-2 text-[12px]" style={{ color: "#F59E0B" }}>
+                  <p className="mt-1.5 text-[12px]" style={{ color: "#F59E0B" }}>
                     {diff.toLocaleString()} kcal over target
                   </p>
                 );
               }
               if (diff < 0) {
                 return (
-                  <p className="mt-2 text-[12px] text-text-tertiary">
+                  <p className="mt-1.5 text-[12px] text-text-tertiary">
                     {Math.abs(diff).toLocaleString()} kcal {isToday ? "remaining" : "under target"}
                   </p>
                 );
               }
               return null;
             })()}
-            {macros?.main_driver && hasMeals && (
+            {macros?.main_driver && hasMeals && !/^Calories were/.test(macros.main_driver) && (
               <p className="mt-1 text-[12px] text-text-secondary">{macros.main_driver}</p>
             )}
           </div>
