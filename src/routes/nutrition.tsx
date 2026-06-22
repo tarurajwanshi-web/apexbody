@@ -851,10 +851,12 @@ function WeeklyGraphSheet({
 function WeeklyGraphContent({ data }: { data: WeeklyNutritionInsight }) {
   const { days, avg_target_calories, logged_days, calorie_on_target_days, protein_hit_days, avg_calories, confidence_label, decision_insight } = data;
 
-  // Y-scale: max of (highest day total, avg target * 1.2, 800).
-  const maxStack = Math.max(...days.map((d) => d.macro_total_calories), 0);
+  // Y-scale uses consumed_calories (same source as summary + target line),
+  // not the macro Atwater sum, so bars, "Average calories", and the target
+  // dashed line all share one scale.
+  const maxConsumed = Math.max(...days.map((d) => d.consumed_calories), 0);
   const tgt = avg_target_calories ?? 0;
-  const yMax = Math.max(maxStack * 1.05, tgt * 1.15, 800);
+  const yMax = Math.max(maxConsumed * 1.05, tgt * 1.15, 800);
 
   return (
     <div className="space-y-5">
@@ -958,7 +960,7 @@ function StackedBarChart({
         {days.map((d, i) => {
           const cx = padL + slot * i + slot / 2;
           const bx = cx - barW / 2;
-          if (!d.has_logged_meals) {
+          if (!d.has_logged_meals || d.consumed_calories <= 0) {
             // Empty placeholder
             return (
               <g key={d.entry_date}>
@@ -976,19 +978,28 @@ function StackedBarChart({
               </g>
             );
           }
-          // Stack: protein (bottom), carbs, fat (top)
-          const segs = [
-            { v: d.protein_calories, color: "#F59E0B" },
-            { v: d.carb_calories, color: "#10B981" },
-            { v: d.fat_calories, color: "#3B82F6" },
-          ];
+          // Bar total height comes from consumed_calories (estimated_calories sum).
+          // Segment proportions come from macro calorie share so the stack story
+          // stays accurate even when the LLM's kcal differs slightly from p*4+c*4+f*9.
+          const barTotalH = (d.consumed_calories / yMax) * innerH;
+          const macroTotal = d.macro_total_calories;
+          const segs =
+            macroTotal > 0
+              ? [
+                  { v: (d.protein_calories / macroTotal) * barTotalH, color: "#F59E0B" },
+                  { v: (d.carb_calories / macroTotal) * barTotalH,    color: "#10B981" },
+                  { v: (d.fat_calories / macroTotal) * barTotalH,     color: "#3B82F6" },
+                ]
+              : [
+                  // Calories present but no macro breakdown — neutral bar fallback.
+                  { v: barTotalH, color: "rgba(255,255,255,0.25)" },
+                ];
           let cursor = padT + innerH;
           return (
             <g key={d.entry_date}>
               {segs.map((s, idx) => {
                 if (s.v <= 0) return null;
-                const h = (s.v / yMax) * innerH;
-                cursor -= h;
+                cursor -= s.v;
                 const isTop = idx === segs.length - 1 || segs.slice(idx + 1).every((x) => x.v <= 0);
                 const isBottom = idx === 0 || segs.slice(0, idx).every((x) => x.v <= 0);
                 const rx = isTop || isBottom ? 3 : 0;
@@ -998,7 +1009,7 @@ function StackedBarChart({
                     x={bx}
                     y={cursor}
                     width={barW}
-                    height={h}
+                    height={s.v}
                     rx={rx}
                     fill={s.color}
                     opacity={0.92}
