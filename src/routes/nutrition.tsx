@@ -435,6 +435,40 @@ function BottleFill({ pct, disabled }: { pct: number; disabled?: boolean }) {
 }
 
 /** Chronological "Today" timeline: meals + hydration interleaved by timestamp. */
+/** Deterministic single-tag classifier for a meal's macro shape.
+ *  Rules (priority order):
+ *    1. estimated/manual_edited with macros present, else null
+ *    2. kcal >= 700 → "High calorie"
+ *    3. fat kcal share > 45% → "High fat"
+ *    4. carb kcal share > 55% → "Carb heavy"
+ *    5. protein < 15g AND kcal >= 200 → "Protein light"
+ *    6. else → "Balanced" */
+function mealImpactTag(m: TodayMeal): { label: string; color: string; bg: string; border: string } | null {
+  const status = m.calorie_estimate_status;
+  if (status !== "estimated" && status !== "manual_edited") return null;
+  const kcal = Number(m.estimated_calories ?? 0);
+  const p = Number(m.estimated_protein_g ?? 0);
+  const c = Number(m.estimated_carbs_g ?? 0);
+  const f = Number(m.estimated_fat_g ?? 0);
+  if (kcal <= 0) return null;
+  const fatShare = (f * 9) / kcal;
+  const carbShare = (c * 4) / kcal;
+  let label: string;
+  if (kcal >= 700) label = "High calorie";
+  else if (fatShare > 0.45) label = "High fat";
+  else if (carbShare > 0.55) label = "Carb heavy";
+  else if (p < 15 && kcal >= 200) label = "Protein light";
+  else label = "Balanced";
+  const palette: Record<string, { color: string; bg: string; border: string }> = {
+    "High calorie": { color: "#F59E0B", bg: "rgba(245,158,11,0.10)", border: "rgba(245,158,11,0.30)" },
+    "High fat":     { color: "#3B82F6", bg: "rgba(59,130,246,0.10)", border: "rgba(59,130,246,0.30)" },
+    "Carb heavy":   { color: "#10B981", bg: "rgba(16,185,129,0.10)", border: "rgba(16,185,129,0.30)" },
+    "Protein light":{ color: "#EF4444", bg: "rgba(239,68,68,0.10)",  border: "rgba(239,68,68,0.30)" },
+    "Balanced":     { color: "#9CA3AF", bg: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.10)" },
+  };
+  return { label, ...palette[label] };
+}
+
 function UnifiedTimeline({
   meals, hydration, selectedDate, onOpenMeal,
 }: {
