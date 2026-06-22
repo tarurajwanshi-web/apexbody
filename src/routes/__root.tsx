@@ -12,6 +12,10 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 
+declare const __APP_BUILD_TIMESTAMP__: string;
+const APP_BUILD_TIMESTAMP =
+  typeof __APP_BUILD_TIMESTAMP__ !== "undefined" ? __APP_BUILD_TIMESTAMP__ : "unknown";
+
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-bg-1 px-4">
@@ -58,6 +62,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
       { name: "theme-color", content: "#0A0B0F" },
+      { httpEquiv: "Cache-Control", content: "no-cache, no-store, must-revalidate" },
+      { httpEquiv: "Pragma", content: "no-cache" },
+      { httpEquiv: "Expires", content: "0" },
+      { name: "app-version", content: APP_BUILD_TIMESTAMP },
       { title: "APEX — Adaptive Performance Coach" },
       { name: "description", content: "AI-first performance coaching. Adaptive training, nutrition and recovery — built around your data." },
       { property: "og:title", content: "APEX — Adaptive Performance Coach" },
