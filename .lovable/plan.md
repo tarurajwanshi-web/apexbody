@@ -1,64 +1,37 @@
-## Goal
-One user-local date system so Coach Day X, Fuel "Today", streaks, and meal entry_date are consistent on desktop and mobile.
+## QA Report — Timezone & Streak Sync Patch
 
-## 1. Timezone source of truth
-- Migration: make `profiles.timezone` nullable (drop NOT NULL + 'Asia/Dubai' default). Existing 'Asia/Dubai' rows stay as-is (no overwrite).
-- Priority: `profiles.timezone` → `Intl.DateTimeFormat().resolvedOptions().timeZone` → `'UTC'`.
-- On app load (in `_authenticated/route.tsx`): if profile row's `timezone` is NULL, write browser TZ once. Never overwrite an existing value.
+### Pass / Fail by area
 
-## 2. Shared date utilities — `src/lib/dates.ts`
-Pure, runtime-agnostic. All accept an optional `timezone` arg.
-- `getBrowserTimezone()`
-- `getLocalDateISO(timezone, at?)` → `YYYY-MM-DD` in that TZ (uses `Intl.DateTimeFormat` parts)
-- `toLocalDateISO(timestamp, timezone)`
-- `addDaysISO(iso, n)`
-- `isTodayLocal(iso, timezone)` / `isYesterdayLocal(iso, timezone)`
-- `getLocalWeekRange(anchorISO, timezone)` → Mon–Sun
-- `getPreviousCompletedLocalWeek(timezone)`
-- `formatNiceDate(iso, timezone)` / `formatShortDate(iso)`
+| Area | Result | Notes |
+| --- | --- | --- |
+| 1. First-session TZ race | ⚠️ FAIL (race window exists) | `useUserTimezone` writes browser TZ to `profiles` async. Server log fns only read `profiles.timezone` → if user logs a meal in the ~100–500 ms before the write commits, `resolveUserTimezone` returns UTC. Real bug for users in non-UTC zones on first login. |
+| 2. Server TZ resolution | ✅ PASS for getters | `getTodayMeals`, `getDayNutritionSummary`, `getWeeklyNutritionInsight`, `getMacroAdjustmentReview`, `getNutritionCoachContext`, `getActivityWeek` all call `resolveUserTimezone` → `getLocalDateISO`. ⚠️ Writers (`logMeal`, `upsertManualRecovery`, `upsertMood`, `logBodyMeasurement`) use the same path but have no client-TZ fallback (issue #1). `logHydration` uses the RPC `increment_hydration`, which hard-codes `(now() AT TIME ZONE 'UTC')::date` — out of scope (hydration), reported only. |
+| 3. Weekly date math | ✅ PASS | `getLocalWeekRange` derives weekday from the ISO string via a UTC anchor; weekday-of-a-calendar-date is TZ-independent, so Mon–Sun is correct in Asia/Dubai, America/New_York, Pacific/Auckland. No UTC shift of `entry_date` strings anywhere in the read path. |
+| 4. Coach day sync | ✅ PASS | `coach.tsx LockedHero` computes `Day X` from `unlockDate` + `getLocalDateISO(tz)`. Same `tz` on desktop/mobile (profile-driven) ⇒ same Day X. Rolls at local midnight. |
+| 5. Streak semantics separation | ✅ PASS | Coach `getActivityWeek` unions meals (non-deleted) + training + manual + workout sets + body measurements + parsed device uploads. Nutrition weekly insight & last-7 strip count non-deleted meals only. Macro review gate uses prior-completed-local-week meals (non-deleted) + weigh-ins. Distinct sources. |
+| 6. Deleted-log exclusion | ✅ PASS | `.eq("deleted", false)` (or `deleted` filter post-query) applied in: `getTodayMeals`, `getDayNutritionSummary`, `getWeeklyNutritionInsight` (logged-days set), `getMacroAdjustmentReview` (review-week + last-7), `getNutritionCoachContext` (recent + week + logged_days_last_7), `getActivityWeek`. |
+| 7. ApexStreakStrip reuse for Macro Review | INFO only | `MacroReviewCard` in `src/routes/nutrition.tsx` (lines 1218–1234) still renders a bespoke `🔥 / ○` row from `review.last7_logged_days: boolean[]`. Safe to swap to `<ApexStreakStrip variant="macro_review" days={…} />` — `ApexStreakDay` shape (`{ date, logged, isToday }`) is trivially constructable from `last7_logged_days` + `addDaysISO(getLocalDateISO(tz), -6+i)`. Not implementing in this pass per scope. |
 
-Client hook (in `src/lib/dates.ts`): `useUserTimezone()` reads profile from Supabase (cached) with browser fallback. Synchronous fallback returns browser TZ.
+### Fixes (minimal, in-scope: TZ race only)
 
-## 3. Server-side timezone resolution
-Add helper `resolveUserTimezone(supabase, userId)` co-located in `src/lib/dates.ts` (server-safe — no DOM). Every server fn that uses `today()` calls this first to compute `today` in the user's TZ:
-- `getTodayMacroSummary`, `getDayNutritionSummary` (alias), `getTodayMeals` (via `getDayMeals`), `getWeeklyNutritionInsight`, `getMacroAdjustmentReview`, `getNutritionCoachContext` in `macros.functions.ts`
-- `upsertManualRecovery`, `upsertMood`, `logHydration`-callers, `getTodayHydration`, `pollLatestDeviceUpload`, `logMeal`, `logBodyMeasurement`, `getActivityWeek` in `shield.functions.ts`
-- `askCoach`/insight cache in `coach.functions.ts`
+Close the first-session race by letting the client pass its resolved IANA timezone as a hint; server prefers stored profile TZ, falls back to the hint, then UTC. No new features.
 
-## 4. Replace scattered today logic
-- `NutritionDateHeader.todayLocalISO` → delegate to shared util with profile TZ.
-- `nutrition.tsx` selectedDate default & isToday checks → use `useUserTimezone()`.
-- `dashboard.tsx` `todayIso`, insight-dismissed key, `today` checks → user TZ.
-- `LogModals.tsx` `todayISO()` → user TZ.
-- `coach.tsx` `LockedHero` builds date strip from user TZ.
+1. **`src/lib/dates.ts`** — add `resolveUserTimezoneWithHint(supabase, userId, hint)` that returns `profile.timezone || sanitizedHint || UTC`. `sanitizedHint` validates against `Intl.supportedValuesOf?.('timeZone')` when available, else a strict `Area/Location` regex; rejects anything else.
+2. **`src/lib/shield.functions.ts`** — extend `inputValidator` of `logMeal`, `upsertManualRecovery`, `upsertMood`, `logBodyMeasurement` with optional `client_timezone: z.string().max(64).optional()`. Replace `userToday(...)` call sites in those four handlers with a local helper that uses `resolveUserTimezoneWithHint`.
+3. **`src/components/LogModals.tsx`** — call `const tz = useUserTimezone()` once at the top of each modal that submits, and include `client_timezone: tz` in the `logMeal` / `upsertManualRecovery` / `upsertMood` / `logBodyMeasurement` payloads.
+4. **`src/routes/_authenticated/onboarding.tsx`** — pass `client_timezone: getBrowserTimezone()` to the `logBodyMeasurement` call (profile row may not exist yet).
 
-## 5. Streak semantics (kept distinct)
-- **Coach 7-day unlock (`getActivityWeek`)**: a day counts when any of: nutrition log (not deleted), training log, manual input, workout set, body measurement, parsed device upload. Compute "today" in user TZ.
-- **Nutrition streak** (used by `MacroReviewCard` lock): non-deleted meal that day.
-- **Macro adjustment unlock**: previous completed local week (Mon–Sun), ≥3 logged nutrition days, ≥3 weigh-ins, no blocking pending/failed meals, valid target. Already enforced; just retarget the date math to user TZ via `getPreviousCompletedLocalWeek`.
+No DB migration. No changes to: hydration RPC, weekly math, Coach gating, streak semantics, ApexStreakStrip, MacroReviewCard, nutrition feature surface, training, calendar, onboarding flow, macro auto-apply.
 
-## 6. Coach locked screen
-- `LockedHero` recomputes `dayOfJourney` from `unlockDate` + user TZ (not `Date.now()` UTC math).
-- "Day X of 7 — personalized coaching unlocking" stays.
-- Below strip: if today logged → "Today counted 🔥". Else → "Log today to keep your unlock streak alive."
-- Caption: "Today counts when you log a meal, recovery, workout, measurement, or device data."
+### Out-of-scope items observed (reported, not fixed)
 
-## 7. `ApexStreakStrip` shared component
-`src/components/ApexStreakStrip.tsx`. Props as spec. Used by Coach locked screen and `MacroReviewCard` lock state (replaces ad-hoc grid).
+- `increment_hydration` RPC computes `entry_date` from `now() AT TIME ZONE 'UTC'`. Will mis-bucket hydration around local midnight for non-UTC users. Excluded by scope.
+- `MacroReviewCard` could share `ApexStreakStrip`. Excluded by scope; safe future swap.
 
-## 8. Out of scope (untouched)
-Nutrition features, training, calendar, hydration/onboarding flow, Coach chat behavior, macro auto-apply, page redesign.
+### Files to be changed
+- `src/lib/dates.ts`
+- `src/lib/shield.functions.ts`
+- `src/components/LogModals.tsx`
+- `src/routes/_authenticated/onboarding.tsx`
 
-## Files
-- migration (timezone nullable)
-- new `src/lib/dates.ts`
-- new `src/components/ApexStreakStrip.tsx`
-- edit `src/components/NutritionDateHeader.tsx`
-- edit `src/lib/macros.functions.ts`
-- edit `src/lib/shield.functions.ts`
-- edit `src/lib/coach.functions.ts`
-- edit `src/routes/coach.tsx`
-- edit `src/routes/nutrition.tsx`
-- edit `src/routes/_authenticated/dashboard.tsx`
-- edit `src/routes/_authenticated/route.tsx` (one-time TZ write)
-- edit `src/components/LogModals.tsx`
+Confirmation: no new features; only a defensive fallback that closes the first-session TZ race for log writes.

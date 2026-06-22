@@ -150,7 +150,7 @@ function ManualRecoveryForm({ onSaved }: { onSaved: () => void }) {
     try {
       const { data: s } = await supabase.auth.getSession();
       if (!s.session) throw new Error("Your session expired. Please sign in again.");
-      await fn({ data: { recovery_self_rating: rating, sleep_hours: sleep, mood_emoji: mood } });
+      await fn({ data: { recovery_self_rating: rating, sleep_hours: sleep, mood_emoji: mood, client_timezone: getBrowserTimezone() } });
       onSaved();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not save. Try again.";
@@ -281,7 +281,7 @@ function DeviceRecoveryForm({ onSaved }: { onSaved: () => void }) {
     setBusy(true); setErr(null);
     try {
       if (hasMood && mood !== alreadyMood) {
-        try { await moodFn({ data: { mood_emoji: mood! } }); } catch { /* best-effort */ }
+        try { await moodFn({ data: { mood_emoji: mood!, client_timezone: getBrowserTimezone() } }); } catch { /* best-effort */ }
       }
       if (hasNewFile) {
         const { data: u } = await supabase.auth.getUser();
@@ -589,6 +589,7 @@ function JourneyCFallback({ onDone, deviceSource }: { onDone: () => void; device
           sleep_hours: sleep,
           // Per-day fallback marker. Does NOT change input_path_preference.
           recovery_source: "device_parse_failed_fallback",
+          client_timezone: getBrowserTimezone(),
         },
       });
       onDone();
@@ -971,6 +972,7 @@ export function MealLogModal({ open, onClose, onSaved, editing = null }: MealPro
           vision_detected_items: vision?.raw,
           vision_provider: vision?.provider,
           vision_confidence: vision?.confidence ?? null,
+          client_timezone: getBrowserTimezone(),
         },
       });
       // Quality scoring (protein_tier/carb_quality/timing). score-nutrition
@@ -1350,6 +1352,7 @@ export function BodyMeasurementModal({ open, onClose, onSaved }: Props) {
           hip_cm: num(toCm(hipDisp)),
           arm_cm: num(toCm(armDisp)),
           thigh_cm: num(toCm(thighDisp)),
+          client_timezone: getBrowserTimezone(),
         },
       });
       onSaved?.();

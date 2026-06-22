@@ -4,6 +4,7 @@ import { ChevronLeft, Check, Trophy, Flame, Dumbbell, Zap, Activity, Sparkles, W
 import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { logBodyMeasurement } from "@/lib/shield.functions";
+import { getBrowserTimezone } from "@/lib/dates";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/onboarding")({
@@ -168,6 +169,7 @@ function ProfileSetup() {
               hip_cm: draft.hip ? Number(draft.hip) : null,
               arm_cm: draft.arm ? Number(draft.arm) : null,
               thigh_cm: draft.thigh ? Number(draft.thigh) : null,
+              client_timezone: getBrowserTimezone(),
             },
           });
         } catch (e) {

@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { resolveUserTimezone, getLocalDateISO, addDaysISO } from "@/lib/dates";
+import { resolveUserTimezone, resolveUserTimezoneWithHint, getLocalDateISO, addDaysISO } from "@/lib/dates";
 
 export const setInputPathPreference = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -40,6 +40,17 @@ async function userToday(
   return getLocalDateISO(tz);
 }
 
+/** Same as userToday, but accepts a client-supplied IANA timezone hint used
+ *  only when profiles.timezone is NULL (first-session race window). */
+async function userTodayWithHint(
+  supabase: { from: (t: string) => any },
+  userId: string,
+  hint?: string | null,
+): Promise<string> {
+  const tz = await resolveUserTimezoneWithHint(supabase, userId, hint);
+  return getLocalDateISO(tz);
+}
+
 export const upsertManualRecovery = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
@@ -53,12 +64,14 @@ export const upsertManualRecovery = createServerFn({ method: "POST" })
       // change profiles.input_path_preference in that case — they remain a
       // device-path user. Default 'manual' for ordinary manual-path entries.
       recovery_source: z.enum(["manual", "device_parse_failed_fallback"]).optional(),
+      // IANA TZ hint used only when profiles.timezone is NULL (first-session race).
+      client_timezone: z.string().max(64).optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
     const payload = {
       user_id: context.userId,
-      entry_date: await userToday(context.supabase, context.userId),
+      entry_date: await userTodayWithHint(context.supabase, context.userId, data.client_timezone),
       recovery_self_rating: data.recovery_self_rating,
       sleep_hours: data.sleep_hours,
       recovery_source: data.recovery_source ?? "manual",
@@ -76,13 +89,16 @@ export const upsertManualRecovery = createServerFn({ method: "POST" })
 export const upsertMood = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ mood_emoji: z.string().min(1).max(8) }).parse(d),
+    z.object({
+      mood_emoji: z.string().min(1).max(8),
+      client_timezone: z.string().max(64).optional(),
+    }).parse(d),
   )
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("shield_manual_inputs")
       .upsert(
-        { user_id: context.userId, entry_date: await userToday(context.supabase, context.userId), mood_emoji: data.mood_emoji },
+        { user_id: context.userId, entry_date: await userTodayWithHint(context.supabase, context.userId, data.client_timezone), mood_emoji: data.mood_emoji },
         { onConflict: "user_id,entry_date" },
       );
     if (error) throw new Error(error.message);
@@ -378,13 +394,14 @@ export const logMeal = createServerFn({ method: "POST" })
       vision_detected_items: z.array(VisionItemSchema).optional(),
       vision_provider: z.string().nullable().optional(),
       vision_confidence: z.number().nullable().optional(),
+      client_timezone: z.string().max(64).optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
     const confirmed = data.confirmed_items;
     const row: Record<string, unknown> = {
       user_id: context.userId,
-      entry_date: await userToday(context.supabase, context.userId),
+      entry_date: await userTodayWithHint(context.supabase, context.userId, data.client_timezone),
       meal_description: data.meal_description ?? null,
       meal_photo_url: data.meal_photo_url ?? null,
       claude_score_status: "pending",
@@ -721,11 +738,13 @@ export const logBodyMeasurement = createServerFn({ method: "POST" })
       hip_cm: z.number().positive().nullable().optional(),
       arm_cm: z.number().positive().nullable().optional(),
       thigh_cm: z.number().positive().nullable().optional(),
+      client_timezone: z.string().max(64).optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase.from("body_measurement_events").insert({
       user_id: context.userId,
+      entry_date: await userTodayWithHint(context.supabase, context.userId, data.client_timezone),
       source: data.source ?? "manual",
       weight_kg: data.weight_kg ?? null,
       body_fat_pct: data.body_fat_pct ?? null,
