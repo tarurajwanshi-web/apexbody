@@ -27,7 +27,7 @@ export const getTodayMacroSummary = createServerFn({ method: "GET" })
       .eq("user_id", context.userId)
       .eq("entry_date", today())
       .eq("deleted", false)
-      .eq("calorie_estimate_status", "estimated");
+      .in("calorie_estimate_status", ["estimated", "manual_edited"]);
 
     const sum = (key: string) =>
       (meals ?? []).reduce((s: number, m: any) => s + Number(m[key] ?? 0), 0);

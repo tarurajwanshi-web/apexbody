@@ -372,6 +372,8 @@ export type MealItem = {
   fat_g: number;
 };
 
+export type CalorieEstimateStatus = "pending" | "estimated" | "failed" | "manual_edited";
+
 export type TodayMeal = {
   id: string;
   meal_description: string | null;
@@ -383,6 +385,8 @@ export type TodayMeal = {
   estimated_carbs_g: number | null;
   estimated_fat_g: number | null;
   estimated_items: MealItem[] | null;
+  calorie_estimate_status: CalorieEstimateStatus | null;
+  user_corrected: boolean;
   created_at: string;
 };
 
@@ -391,7 +395,7 @@ export const getTodayMeals = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<TodayMeal[]> => {
     const { data, error } = await context.supabase
       .from("shield_nutrition_logs")
-      .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, estimated_items, created_at, deleted, entry_date")
+      .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, estimated_items, calorie_estimate_status, user_corrected, created_at, deleted, entry_date")
       .eq("user_id", context.userId)
       .eq("entry_date", today())
       .eq("deleted", false)
@@ -408,6 +412,8 @@ export const getTodayMeals = createServerFn({ method: "GET" })
       estimated_carbs_g: r.estimated_carbs_g,
       estimated_fat_g: r.estimated_fat_g,
       estimated_items: Array.isArray(r.estimated_items) ? r.estimated_items : null,
+      calorie_estimate_status: r.calorie_estimate_status ?? null,
+      user_corrected: !!r.user_corrected,
       created_at: r.created_at,
     }));
   });
@@ -454,7 +460,10 @@ const MealItemSchema = z.object({
   fat_g: z.number().min(0),
 });
 
-/** Edit itemized components (e.g. user adjusts grams). Does NOT re-run scoring. */
+/** Edit itemized components (e.g. user adjusts grams). Does NOT re-run scoring.
+ *  - Marks the row as manual_edited and increments correction_count.
+ *  - On first edit, snapshots the AI baseline into original_estimated_* so the
+ *    pre-correction estimate is never lost. */
 export const updateMealItems = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
@@ -463,16 +472,37 @@ export const updateMealItems = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const sum = (k: "calories"|"protein_g"|"carbs_g"|"fat_g") =>
       Math.round(data.items.reduce((a, b) => a + (b[k] || 0), 0));
+
+    const { data: current, error: fetchErr } = await context.supabase
+      .from("shield_nutrition_logs")
+      .select("estimated_items, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, original_estimated_items, original_estimated_calories, original_estimated_protein_g, original_estimated_carbs_g, original_estimated_fat_g, correction_count")
+      .eq("id", data.id)
+      .eq("user_id", context.userId)
+      .single();
+    if (fetchErr) throw new Error(fetchErr.message);
+
+    const patch: Record<string, unknown> = {
+      estimated_items: data.items,
+      estimated_calories: sum("calories"),
+      estimated_protein_g: sum("protein_g"),
+      estimated_carbs_g: sum("carbs_g"),
+      estimated_fat_g: sum("fat_g"),
+      calorie_estimate_status: "manual_edited",
+      user_corrected: true,
+      correction_count: (Number(current?.correction_count ?? 0) + 1),
+    };
+    // First edit: snapshot the original AI estimate (only if not already set).
+    if (current?.original_estimated_items == null) {
+      patch.original_estimated_items = current?.estimated_items ?? null;
+      patch.original_estimated_calories = current?.estimated_calories ?? null;
+      patch.original_estimated_protein_g = current?.estimated_protein_g ?? null;
+      patch.original_estimated_carbs_g = current?.estimated_carbs_g ?? null;
+      patch.original_estimated_fat_g = current?.estimated_fat_g ?? null;
+    }
+
     const { error } = await context.supabase
       .from("shield_nutrition_logs")
-      .update({
-        estimated_items: data.items,
-        estimated_calories: sum("calories"),
-        estimated_protein_g: sum("protein_g"),
-        estimated_carbs_g: sum("carbs_g"),
-        estimated_fat_g: sum("fat_g"),
-        calorie_estimate_status: "estimated",
-      })
+      .update(patch)
       .eq("id", data.id)
       .eq("user_id", context.userId);
     if (error) throw new Error(error.message);
