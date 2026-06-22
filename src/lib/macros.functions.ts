@@ -184,57 +184,61 @@ export const getTodayMacroSummary = createServerFn({ method: "GET" })
       verdict = "Off target";
     }
 
-    // Main driver — biggest absolute issue, prioritized.
+    // Main driver — prioritized macro diagnosis. Avoids duplicating the
+    // calorie gap line shown directly under the kcal headline; surfaces a
+    // macro lever first when possible.
     let main_driver = "";
+    const tP = target_protein_g ?? 0;
+    const tC = target_carbs_g ?? 0;
+    const tF = target_fat_g ?? 0;
+    const tCal2 = target_calories ?? 0;
+    const ratioP = tP > 0 ? consumed_protein_g / tP : 1;
+    const ratioC = tC > 0 ? consumed_carbs_g / tC : 1;
+    const ratioF = tF > 0 ? consumed_fat_g / tF : 1;
+    const ratioCal = tCal2 > 0 ? consumed_calories / tCal2 : 1;
+
     if (counted.length === 0 && pendingMeals.length === 0 && failedMeals.length === 0) {
       main_driver = "No meals logged for this day.";
     } else if (pendingMeals.length > 0 || failedMeals.length > 0) {
       main_driver = "Some meals are still estimating.";
-    } else if (has_target) {
-      const calDiff = consumed_calories - (target_calories ?? 0);
-      const proteinDiff = (target_protein_g ?? 0) - consumed_protein_g;
-      const fatDiff = consumed_fat_g - (target_fat_g ?? 0);
-      const carbDiff = consumed_carbs_g - (target_carbs_g ?? 0);
-
-      const candidates: Array<{ kind: string; msg: string; priority: number; mag: number }> = [];
-      if (calDiff > 200)
-        candidates.push({ kind: "cal", msg: `Calories were ${calDiff.toLocaleString()} kcal over target.`, priority: 4, mag: calDiff });
-      if (proteinDiff > 15)
-        candidates.push({ kind: "protein", msg: `Protein was ${proteinDiff}g below target.`, priority: 3, mag: proteinDiff * 4 });
-      if (fatDiff > 15)
-        candidates.push({ kind: "fat", msg: `Fat was ${fatDiff}g over target.`, priority: 2, mag: fatDiff * 9 });
-      if (carbDiff > 30)
-        candidates.push({ kind: "carb", msg: `Carbs were ${carbDiff}g over target.`, priority: 1, mag: carbDiff * 4 });
-
-      if (candidates.length === 0) {
-        main_driver = "Macros are aligned with target.";
-      } else {
-        candidates.sort((a, b) => b.priority - a.priority || b.mag - a.mag);
-        main_driver = candidates[0].msg;
-      }
-    } else {
+    } else if (!has_target) {
       main_driver = "No macro target set.";
+    } else if (ratioF > 1.3) {
+      main_driver = `Fat was ${Math.max(0, consumed_fat_g - tF)}g over target.`;
+    } else if (ratioP < 0.9) {
+      main_driver = `Protein was ${Math.max(0, tP - consumed_protein_g)}g below target.`;
+    } else if (ratioC > 1.3) {
+      main_driver = `Carbs were ${Math.max(0, consumed_carbs_g - tC)}g over target.`;
+    } else if (ratioCal > 1.05) {
+      main_driver = `Calories were ${Math.max(0, consumed_calories - tCal2).toLocaleString()} kcal over target.`;
+    } else if (ratioCal < 0.9) {
+      main_driver = `Calories were ${Math.max(0, tCal2 - consumed_calories).toLocaleString()} kcal under target.`;
+    } else {
+      main_driver = "Macros were broadly aligned.";
     }
 
     // Coaching line.
     let coaching_line = "";
-    const proteinLow = has_target && consumed_protein_g < (target_protein_g ?? 0) * 0.8;
-    const calOver = has_target && consumed_calories > (target_calories ?? 0) * 1.05;
-    const fatHigh = has_target && consumed_fat_g > (target_fat_g ?? 0) * 1.15;
-    const carbHigh = has_target && consumed_carbs_g > (target_carbs_g ?? 0) * 1.2;
+    const proteinLow = has_target && ratioP < 0.9;
+    const calOver = has_target && ratioCal > 1.05;
+    const fatHigh = has_target && ratioF > 1.3;
+    const carbHigh = has_target && ratioC > 1.3;
+    const onTrack = has_target && !proteinLow && !calOver && !fatHigh && !carbHigh;
 
     if (isToday) {
-      if (counted.length === 0) coaching_line = "Start with a protein-led meal to anchor the day.";
+      if (counted.length === 0) coaching_line = "Start with 40–50g protein to anchor the day.";
       else if (proteinLow) coaching_line = "Next meal: 40–50g lean protein before adding more carbs or fats.";
+      else if (fatHigh) coaching_line = "Next meal: keep it low-fat and protein-led.";
+      else if (carbHigh) coaching_line = "Next meal: keep it protein-forward and lower-carb.";
       else if (calOver) coaching_line = "Next meal: keep it light and protein-led. Don't compensate aggressively.";
-      else if (fatHigh) coaching_line = "Keep the next meal low-fat and protein-led.";
-      else if (carbHigh) coaching_line = "Keep the next meal protein-forward and lower-carb.";
       else coaching_line = "Stay consistent. Keep the next meal aligned with remaining macros.";
     } else {
       if (counted.length === 0) coaching_line = "No meals logged for this day.";
-      else if (calOver) coaching_line = "Lesson: portion size pushed the day over target.";
-      else if (fatHigh) coaching_line = "Lesson: fat intake was the main pressure point.";
+      else if (onTrack) coaching_line = "Good adherence for this day.";
+      else if (fatHigh) coaching_line = "Lesson: high-fat meals pushed the day over target.";
+      else if (carbHigh) coaching_line = "Lesson: carb-heavy meals drove the overage.";
       else if (proteinLow) coaching_line = "Lesson: protein needed to be front-loaded earlier.";
+      else if (calOver) coaching_line = "Lesson: portion size pushed the day over target.";
       else coaching_line = "Good adherence for this day.";
     }
 
