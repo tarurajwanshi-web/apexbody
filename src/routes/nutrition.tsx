@@ -418,10 +418,11 @@ function BottleFill({ pct, disabled }: { pct: number; disabled?: boolean }) {
 
 /** Chronological "Today" timeline: meals + hydration interleaved by timestamp. */
 function UnifiedTimeline({
-  meals, hydration, onOpenMeal,
+  meals, hydration, selectedDate, onOpenMeal,
 }: {
   meals: TodayMeal[] | null;
   hydration: HydrationEvent[];
+  selectedDate: string;
   onOpenMeal: (m: TodayMeal) => void;
 }) {
   if (meals == null) {
@@ -432,9 +433,16 @@ function UnifiedTimeline({
     );
   }
   if (meals.length === 0 && hydration.length === 0) {
+    const label = formatNutritionDateLabel(selectedDate);
+    const emptyCopy =
+      label === "Today"
+        ? "Nothing logged yet today."
+        : label === "Yesterday"
+          ? "Nothing logged yesterday."
+          : `Nothing logged on ${formatShortDate(selectedDate)}.`;
     return (
       <div className="rounded-2xl bg-bg-2 border border-white/5 p-5">
-        <p className="text-sm text-text-secondary">Nothing logged yet today. Tap the + in the nav below to log a meal, or use Log water above.</p>
+        <p className="text-sm text-text-secondary">{emptyCopy}</p>
       </div>
     );
   }
