@@ -1178,3 +1178,100 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub?:
   );
 }
 
+
+// ---------------------------------------------------------------------------
+// Next target review — locked/unlocked card (review-only; no Apply in this patch)
+// ---------------------------------------------------------------------------
+
+function MacroReviewCard({ review, compact = false }: { review: MacroAdjustmentReview | null; compact?: boolean }) {
+  if (!review) return null;
+  const locked = review.decision === "Insufficient data";
+  const reqDays = review.required_logged_days;
+  const reqWeigh = review.required_weigh_ins;
+  const haveDays = Math.min(review.logged_days, reqDays);
+  const haveWeigh = Math.min(review.weigh_in_count, reqWeigh);
+
+  return (
+    <section className={`${compact ? "" : "mx-5 mt-4"} rounded-3xl bg-bg-2 border border-white/5 p-4`}>
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Next target review</p>
+        <span className="text-[11px] text-text-tertiary">
+          {formatRangeLabel(review.review_week_start, review.review_week_end)}
+        </span>
+      </div>
+
+      {locked ? (
+        <>
+          <p className="mt-2 text-[15px] font-semibold text-white">🔒 Target review locked</p>
+          <p className="mt-1 text-[12px] text-text-secondary leading-snug">
+            Log {reqDays} nutrition days and {reqWeigh} weigh-ins in last week's review window to unlock a reliable adjustment.
+          </p>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <ProgressRow label="Nutrition logs" current={review.logged_days} required={reqDays} />
+            <ProgressRow label="Weigh-ins" current={review.weigh_in_count} required={reqWeigh} />
+          </div>
+
+          {/* 7-day streak — 🔥 = logged that day. */}
+          <div className="mt-4">
+            <p className="text-[10px] uppercase tracking-wider text-text-tertiary mb-2">Last 7 days</p>
+            <div className="flex items-center justify-between">
+              {review.last7_logged_days.map((on, i) => {
+                const isToday = i === review.last7_logged_days.length - 1;
+                return (
+                  <div key={i} className="flex flex-col items-center gap-1 flex-1">
+                    <span className="text-[16px] leading-none">{on ? "🔥" : "○"}</span>
+                    <span className={`text-[10px] ${isToday ? "text-white font-semibold" : "text-text-tertiary"}`}>
+                      {isToday ? "Today" : ""}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <p className="mt-3 text-[11px] text-text-tertiary leading-snug">
+            {haveDays}/{reqDays} logged · {haveWeigh}/{reqWeigh} weigh-ins
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="mt-2 text-[15px] font-semibold text-white">
+            🔥 {review.decision === "Ready to adjust" ? "Review unlocked" : "Target review ready"}
+          </p>
+          <p className="mt-2 text-[13px] text-white">
+            {review.decision === "Ready to adjust"
+              ? `Recommended: ${review.calorie_delta > 0 ? "+" : ""}${review.calorie_delta} kcal`
+              : review.decision}
+          </p>
+          <p className="mt-1 text-[12px] text-text-secondary leading-snug">{review.reason}</p>
+          {review.recommended_target_calories != null && review.calorie_delta !== 0 && (
+            <p className="mt-2 text-[11px] text-text-tertiary tabular-nums">
+              {review.current_target_calories?.toLocaleString() ?? "—"} kcal → {review.recommended_target_calories.toLocaleString()} kcal
+            </p>
+          )}
+          <p className="mt-3 text-[10px] text-text-tertiary">
+            Review only · apply targets manually in Settings for now.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function ProgressRow({ label, current, required }: { label: string; current: number; required: number }) {
+  const done = current >= required;
+  const pct = Math.min(100, Math.round((current / required) * 100));
+  return (
+    <div className="rounded-2xl bg-white/[0.03] border border-white/5 px-3 py-2">
+      <p className="text-[11px] text-text-tertiary">{label}</p>
+      <p className="mt-0.5 text-[14px] font-semibold tabular-nums text-white">
+        {current} <span className="text-text-tertiary text-[12px]">/ {required}</span>
+        {done && <span className="ml-1 text-success">✓</span>}
+      </p>
+      <div className="mt-1.5 h-1 rounded-full bg-white/5 overflow-hidden">
+        <div className="h-full" style={{ width: `${pct}%`, background: done ? "#10B981" : "#3B82F6" }} />
+      </div>
+    </div>
+  );
+}
