@@ -125,10 +125,11 @@ function Nutrition() {
   const cProtein = macros?.consumed_protein_g ?? 0;
   const proteinShort = tProtein != null ? Math.max(0, tProtein - cProtein) : 0;
 
+  const hasHydrationTarget = (hydration?.target_ml ?? 0) > 0;
   return (
     <div
       ref={ptrRef}
-      className="min-h-screen bg-bg-1 pb-32 relative"
+      className="min-h-screen bg-bg-1 pb-44 relative"
       style={{
         transform: ptrDelta ? `translateY(${ptrDelta}px)` : undefined,
         transition: ptrDelta ? "none" : "transform 0.2s ease",
@@ -159,11 +160,11 @@ function Nutrition() {
           : <>Finish onboarding to calculate your personalized daily target.</>}
       </p>
 
-      <section className="mx-5 mt-3 rounded-3xl bg-bg-2 border border-white/5 p-5">
+      <section className="mx-5 mt-3 rounded-3xl bg-bg-2 border border-white/5 p-4">
         {macros?.verdict && (
           <VerdictBadge verdict={macros.verdict} />
         )}
-        <div className="flex items-end justify-between mt-2">
+        <div className="flex items-end justify-between mt-1.5">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-text-tertiary">{dateLabel}</p>
             <div className="mt-1 flex items-end gap-1">
@@ -171,18 +172,20 @@ function Nutrition() {
                 hasMeals ? (
                   <>
                     <span
-                      className={`text-5xl font-extrabold leading-none tabular-nums ${cCal > tCal! ? "" : "gradient-text"}`}
+                      className={`text-4xl font-extrabold leading-none tabular-nums ${cCal > tCal! ? "" : "gradient-text"}`}
                       style={cCal > tCal! ? { color: "#F59E0B" } : undefined}
                     >
                       {cCal.toLocaleString()}
                     </span>
-                    <span className="text-base text-text-tertiary mb-1">/ {tCal!.toLocaleString()} kcal</span>
+                    <span className="text-sm text-text-tertiary mb-0.5">/ {tCal!.toLocaleString()} kcal</span>
                   </>
                 ) : (
                   <div>
-                    <span className="text-5xl font-extrabold leading-none gradient-text tabular-nums">{tCal!.toLocaleString()}</span>
-                    <span className="text-base text-text-tertiary mb-1 ml-1">kcal target</span>
-                    <p className="text-[12px] text-text-tertiary mt-2">Log a meal to see your progress</p>
+                    <span className="text-4xl font-extrabold leading-none gradient-text tabular-nums">{tCal!.toLocaleString()}</span>
+                    <span className="text-sm text-text-tertiary mb-0.5 ml-1">kcal target</span>
+                    {isToday && macros?.coaching_line && (
+                      <p className="text-[12px] text-text-secondary mt-1.5">{macros.coaching_line}</p>
+                    )}
                   </div>
                 )
               ) : (
@@ -193,21 +196,21 @@ function Nutrition() {
               const diff = cCal - tCal!;
               if (diff > 0) {
                 return (
-                  <p className="mt-2 text-[12px]" style={{ color: "#F59E0B" }}>
+                  <p className="mt-1.5 text-[12px]" style={{ color: "#F59E0B" }}>
                     {diff.toLocaleString()} kcal over target
                   </p>
                 );
               }
               if (diff < 0) {
                 return (
-                  <p className="mt-2 text-[12px] text-text-tertiary">
+                  <p className="mt-1.5 text-[12px] text-text-tertiary">
                     {Math.abs(diff).toLocaleString()} kcal {isToday ? "remaining" : "under target"}
                   </p>
                 );
               }
               return null;
             })()}
-            {macros?.main_driver && hasMeals && (
+            {macros?.main_driver && hasMeals && !/^Calories were/.test(macros.main_driver) && (
               <p className="mt-1 text-[12px] text-text-secondary">{macros.main_driver}</p>
             )}
           </div>
@@ -218,7 +221,7 @@ function Nutrition() {
           const barColor = over ? "#F59E0B" : undefined;
           const widthPct = Math.min(100, Math.round(ratio * 100));
           return (
-            <div className="mt-4 h-1.5 rounded-full bg-white/5 overflow-hidden">
+            <div className="mt-3 h-1 rounded-full bg-white/5 overflow-hidden">
               <div
                 className={over ? "h-full" : "h-full gradient-brand"}
                 style={{ width: `${widthPct}%`, background: barColor }}
@@ -226,18 +229,18 @@ function Nutrition() {
             </div>
           );
         })()}
-        <div className="mt-5 grid grid-cols-3 gap-3">
+        <div className="mt-3 grid grid-cols-3 gap-3">
           <Macro label="Protein" v={macros?.consumed_protein_g ?? 0} t={macros?.target_protein_g ?? 0} color="#F59E0B" hasMeals={hasMeals} />
           <Macro label="Carbs"   v={macros?.consumed_carbs_g ?? 0}   t={macros?.target_carbs_g ?? 0}   color="#10B981" hasMeals={hasMeals} />
           <Macro label="Fat"     v={macros?.consumed_fat_g ?? 0}     t={macros?.target_fat_g ?? 0}     color="#3B82F6" hasMeals={hasMeals} />
         </div>
         {macros?.coaching_line && hasMeals && (
-          <div className="mt-4 rounded-full bg-white/5 border border-white/10 px-3 py-1.5 text-[11px] text-text-secondary text-center">
+          <div className="mt-3 rounded-full bg-white/5 border border-white/10 px-3 py-1 text-[11px] text-text-secondary text-center">
             {macros.coaching_line}
           </div>
         )}
         {(macros?.meal_quality_score != null || macros?.macro_adherence_score != null || macros?.nutrition_day_score != null) && (
-          <div className="mt-4 grid grid-cols-3 gap-2 border-t border-white/5 pt-3">
+          <div className="mt-3 grid grid-cols-3 gap-2 border-t border-white/[0.04] pt-2.5">
             <ScorePill label="Meal quality" value={macros?.meal_quality_score ?? null} />
             <ScorePill label="Macro adherence" value={macros?.macro_adherence_score ?? null} />
             <ScorePill label="Nutrition score" value={macros?.nutrition_day_score ?? null} emphasized />
@@ -249,7 +252,7 @@ function Nutrition() {
        *  Scoped to today only: target/quick-add and the score it feeds are
        *  current-day concepts. On past dates, the timeline below still shows
        *  hydration events that were logged on that date. */}
-      {isToday && (
+      {isToday && hasHydrationTarget && (
         <HydrationCard
           hydration={hydration}
           onLog={() => setHydrationOpen(true)}
@@ -264,7 +267,7 @@ function Nutrition() {
         </div>
       )}
 
-      {isToday && <HydrationInsight hydration={hydration} />}
+      {isToday && hasHydrationTarget && <HydrationInsight hydration={hydration} />}
 
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
@@ -281,6 +284,21 @@ function Nutrition() {
         </div>
         <UnifiedTimeline meals={meals} hydration={hydrationEvents} selectedDate={selectedDate} onOpenMeal={setOpenMeal} />
       </section>
+
+      {/* Compact hydration prompt — only when weight is missing so there's no
+       *  target. Lives BELOW meals so it doesn't dominate above the meal list. */}
+      {isToday && !hasHydrationTarget && (
+        <div className="mx-5 mt-4 rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 flex items-center gap-3">
+          <Droplet size={16} className="text-sleep shrink-0" />
+          <p className="text-[12px] text-text-secondary flex-1 min-w-0">
+            Add your weight in Settings to enable a hydration target.
+          </p>
+          <Link to="/settings" className="text-[12px] font-semibold text-text-accent shrink-0">
+            Open →
+          </Link>
+        </div>
+      )}
+
 
 
       <BottomNav onLogged={reload} />
@@ -417,6 +435,40 @@ function BottleFill({ pct, disabled }: { pct: number; disabled?: boolean }) {
 }
 
 /** Chronological "Today" timeline: meals + hydration interleaved by timestamp. */
+/** Deterministic single-tag classifier for a meal's macro shape.
+ *  Rules (priority order):
+ *    1. estimated/manual_edited with macros present, else null
+ *    2. kcal >= 700 → "High calorie"
+ *    3. fat kcal share > 45% → "High fat"
+ *    4. carb kcal share > 55% → "Carb heavy"
+ *    5. protein < 15g AND kcal >= 200 → "Protein light"
+ *    6. else → "Balanced" */
+function mealImpactTag(m: TodayMeal): { label: string; color: string; bg: string; border: string } | null {
+  const status = m.calorie_estimate_status;
+  if (status !== "estimated" && status !== "manual_edited") return null;
+  const kcal = Number(m.estimated_calories ?? 0);
+  const p = Number(m.estimated_protein_g ?? 0);
+  const c = Number(m.estimated_carbs_g ?? 0);
+  const f = Number(m.estimated_fat_g ?? 0);
+  if (kcal <= 0) return null;
+  const fatShare = (f * 9) / kcal;
+  const carbShare = (c * 4) / kcal;
+  let label: string;
+  if (kcal >= 700) label = "High calorie";
+  else if (fatShare > 0.45) label = "High fat";
+  else if (carbShare > 0.55) label = "Carb heavy";
+  else if (p < 15 && kcal >= 200) label = "Protein light";
+  else label = "Balanced";
+  const palette: Record<string, { color: string; bg: string; border: string }> = {
+    "High calorie": { color: "#F59E0B", bg: "rgba(245,158,11,0.10)", border: "rgba(245,158,11,0.30)" },
+    "High fat":     { color: "#3B82F6", bg: "rgba(59,130,246,0.10)", border: "rgba(59,130,246,0.30)" },
+    "Carb heavy":   { color: "#10B981", bg: "rgba(16,185,129,0.10)", border: "rgba(16,185,129,0.30)" },
+    "Protein light":{ color: "#EF4444", bg: "rgba(239,68,68,0.10)",  border: "rgba(239,68,68,0.30)" },
+    "Balanced":     { color: "#9CA3AF", bg: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.10)" },
+  };
+  return { label, ...palette[label] };
+}
+
 function UnifiedTimeline({
   meals, hydration, selectedDate, onOpenMeal,
 }: {
@@ -470,6 +522,18 @@ function UnifiedTimeline({
                   {fmtTime(r.ts)}
                   {r.meal.estimated_calories != null ? ` · ${Math.round(r.meal.estimated_calories)} kcal` : ""}
                 </p>
+                {(() => {
+                  const tag = mealImpactTag(r.meal);
+                  if (!tag) return null;
+                  return (
+                    <span
+                      className="inline-block mt-1 rounded-full px-1.5 py-px text-[10px] font-medium"
+                      style={{ background: tag.bg, color: tag.color, border: `1px solid ${tag.border}` }}
+                    >
+                      {tag.label}
+                    </span>
+                  );
+                })()}
               </div>
               <p className="font-mono text-sm tabular-nums text-text-secondary shrink-0">
                 {r.meal.claude_score_status === "scored" && r.meal.claude_quality_score != null
