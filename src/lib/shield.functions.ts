@@ -40,6 +40,17 @@ async function userToday(
   return getLocalDateISO(tz);
 }
 
+/** Same as userToday, but accepts a client-supplied IANA timezone hint used
+ *  only when profiles.timezone is NULL (first-session race window). */
+async function userTodayWithHint(
+  supabase: { from: (t: string) => any },
+  userId: string,
+  hint?: string | null,
+): Promise<string> {
+  const tz = await resolveUserTimezoneWithHint(supabase, userId, hint);
+  return getLocalDateISO(tz);
+}
+
 export const upsertManualRecovery = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
