@@ -83,7 +83,11 @@ function Nutrition() {
   const dateLabel = formatNutritionDateLabel(selectedDate, userTz);
 
 
-  const reload = async () => {
+  // Shared snapshot reload: refetches every nutrition surface for the
+  // currently selected date. Called after meal save / edit / delete / undo
+  // so Daily Fuel, Weekly Preview, Macro Review, the timeline and the
+  // pending/failed counters all stay in lockstep with the server.
+  const reloadNutritionSnapshot = async () => {
     setRefreshing(true);
     const dateArg = { data: { entryDate: selectedDate } } as any;
     const weeklyArg = { data: { anchorDate: selectedDate } } as any;
@@ -100,24 +104,30 @@ function Nutrition() {
     setLastUpdatedAt(Date.now());
     setRefreshing(false);
   };
+  const reload = reloadNutritionSnapshot;
 
-  // Delete a meal: optimistic UI update + show undo snackbar.
+  // Delete a meal: optimistic UI update + verified soft-delete + immediate
+  // snapshot reload so Daily Fuel / Weekly Preview / Macro Review subtract
+  // the meal right away. Undo snackbar is independent of the reload.
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this meal? This removes it from daily macros and weekly adherence.")) return;
+    const snapshot = meals;
     setMeals((prev) => (prev ? prev.filter((m) => m.id !== id) : prev));
     try {
-      await softDelete({ data: { id } });
+      const res = await softDelete({ data: { id } });
+      if (!res || res.deleted !== true) throw new Error("Delete not confirmed");
     } catch (e) {
       console.error("[meal] delete failed", e);
-      reload();
+      setMeals(snapshot); // roll back optimistic removal
+      alert("Couldn't delete that meal. Please try again.");
       return;
     }
+    // Server confirmed the row is `deleted=true`; refresh every downstream
+    // surface now so calories/macros/weekly subtract immediately.
+    reloadNutritionSnapshot();
     setPendingUndo({ id });
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
-    undoTimerRef.current = window.setTimeout(() => {
-      setPendingUndo(null);
-      reload(); // recompute downstream macros/weekly after the undo window
-    }, 5000);
+    undoTimerRef.current = window.setTimeout(() => setPendingUndo(null), 5000);
   };
 
   const handleUndoDelete = async () => {
@@ -125,8 +135,14 @@ function Nutrition() {
     const id = pendingUndo.id;
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     setPendingUndo(null);
-    try { await restore({ data: { id } }); } catch (e) { console.error("[meal] restore failed", e); }
-    reload();
+    try {
+      const res = await restore({ data: { id } });
+      if (!res || res.deleted !== false) throw new Error("Restore not confirmed");
+    } catch (e) {
+      console.error("[meal] restore failed", e);
+      alert("Couldn't restore that meal. Please try again.");
+    }
+    reloadNutritionSnapshot();
   };
 
 

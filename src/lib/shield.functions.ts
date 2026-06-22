@@ -688,26 +688,54 @@ export const softDeleteMeal = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
+    // `.select()` after `.update()` forces PostgREST to return the affected
+    // rows so we can verify the write actually landed (RLS update qual:
+    // `auth.uid() = user_id`). The SELECT policy hides `deleted=true` rows
+    // from this user, so we read the row back via service-role admin client
+    // to confirm `deleted=true`.
+    const { error: updErr } = await context.supabase
       .from("shield_nutrition_logs")
       .update({ deleted: true })
       .eq("id", data.id)
       .eq("user_id", context.userId);
-    if (error) throw new Error(error.message);
-    return { ok: true };
+    if (updErr) throw new Error(updErr.message);
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row, error: readErr } = await supabaseAdmin
+      .from("shield_nutrition_logs")
+      .select("id, deleted, user_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (readErr) throw new Error(readErr.message);
+    if (!row || row.user_id !== context.userId) throw new Error("Meal not found");
+    if (row.deleted !== true) throw new Error("Delete did not apply");
+    return { id: row.id as string, deleted: true as const };
   });
 
 export const restoreMeal = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
+    // The row is currently `deleted=true` and hidden by the SELECT policy,
+    // but UPDATE qual is just `auth.uid() = user_id` so this still flips it.
+    const { error: updErr } = await context.supabase
       .from("shield_nutrition_logs")
       .update({ deleted: false })
       .eq("id", data.id)
       .eq("user_id", context.userId);
-    if (error) throw new Error(error.message);
-    return { ok: true };
+    if (updErr) throw new Error(updErr.message);
+
+    // Verify via service-role read (works regardless of `deleted` state).
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row, error: readErr } = await supabaseAdmin
+      .from("shield_nutrition_logs")
+      .select("id, deleted, user_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (readErr) throw new Error(readErr.message);
+    if (!row || row.user_id !== context.userId) throw new Error("Meal not found");
+    if (row.deleted !== false) throw new Error("Restore did not apply");
+    return { id: row.id as string, deleted: false as const };
   });
 
 // ---------- Body measurement events ----------
