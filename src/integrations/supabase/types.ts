@@ -804,6 +804,10 @@ export type Database = {
       }
       get_dispatch_secret: { Args: never; Returns: string }
       increment_hydration: { Args: { p_amount_ml: number }; Returns: number }
+      restore_meal: {
+        Args: { p_meal_id: string; p_user_id: string }
+        Returns: undefined
+      }
       shield_dispatch_calculate_score: {
         Args: { _entry_date: string; _user_id: string }
         Returns: undefined
@@ -814,6 +818,10 @@ export type Database = {
       }
       shield_dispatch_score_nutrition: {
         Args: { _id: string }
+        Returns: undefined
+      }
+      soft_delete_meal: {
+        Args: { p_meal_id: string; p_user_id: string }
         Returns: undefined
       }
     }
