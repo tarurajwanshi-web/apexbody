@@ -343,28 +343,173 @@ export const reassignDeviceUploadDate = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+// -- Confirmed item shape (source of truth after the user reviews a meal) --
+const ConfirmedItemSchema = z.object({
+  name: z.string().min(1),
+  quantity_description: z.string().nullable().optional(),
+  estimated_grams: z.number().min(0),
+  gram_range_min: z.number().min(0).nullable().optional(),
+  gram_range_max: z.number().min(0).nullable().optional(),
+  calories: z.number().min(0),
+  protein_g: z.number().min(0),
+  carbs_g: z.number().min(0),
+  fat_g: z.number().min(0),
+  confidence: z.enum(["high", "medium", "low"]).nullable().optional(),
+  source: z.string().nullable().optional(),
+  uncertainty_note: z.string().nullable().optional(),
+});
+export type ConfirmedMealItem = z.infer<typeof ConfirmedItemSchema>;
+
+const VisionItemSchema = ConfirmedItemSchema.partial({
+  estimated_grams: true, calories: true, protein_g: true, carbs_g: true, fat_g: true,
+}).extend({ name: z.string().min(1) });
+
 export const logMeal = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z.object({
       meal_description: z.string().nullable().optional(),
       meal_photo_url: z.string().nullable().optional(),
+      // Review-loop payload. When confirmed_items is present we persist the
+      // user-reviewed macros directly and mark calorie_estimate_status as
+      // 'manual_edited' so score-nutrition treats macros as locked.
+      confirmed_items: z.array(ConfirmedItemSchema).optional(),
+      vision_detected_items: z.array(VisionItemSchema).optional(),
+      vision_provider: z.string().nullable().optional(),
+      vision_confidence: z.number().nullable().optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: row, error } = await context.supabase
+    const confirmed = data.confirmed_items;
+    const row: Record<string, unknown> = {
+      user_id: context.userId,
+      entry_date: today(),
+      meal_description: data.meal_description ?? null,
+      meal_photo_url: data.meal_photo_url ?? null,
+      claude_score_status: "pending",
+    };
+    if (data.vision_detected_items) row.vision_detected_items = data.vision_detected_items;
+    if (data.vision_provider) row.vision_provider = data.vision_provider;
+    if (data.vision_confidence != null) row.vision_confidence = data.vision_confidence;
+    if (confirmed && confirmed.length > 0) {
+      const sum = (k: "calories" | "protein_g" | "carbs_g" | "fat_g") =>
+        Math.round(confirmed.reduce((a, it) => a + Number(it[k] ?? 0), 0));
+      row.confirmed_items = confirmed;
+      row.user_confirmed_vision = true;
+      row.estimated_items = confirmed.map((it) => ({
+        name: it.name,
+        grams: it.estimated_grams,
+        calories: it.calories,
+        protein_g: it.protein_g,
+        carbs_g: it.carbs_g,
+        fat_g: it.fat_g,
+      }));
+      row.estimated_calories = sum("calories");
+      row.estimated_protein_g = sum("protein_g");
+      row.estimated_carbs_g = sum("carbs_g");
+      row.estimated_fat_g = sum("fat_g");
+      row.calorie_estimate_status = "manual_edited";
+    }
+    const { data: ins, error } = await context.supabase
       .from("shield_nutrition_logs")
-      .insert({
-        user_id: context.userId,
-        entry_date: today(),
-        meal_description: data.meal_description ?? null,
-        meal_photo_url: data.meal_photo_url ?? null,
-        claude_score_status: "pending",
-      })
+      .insert(row as any)
       .select("id")
       .single();
     if (error) throw new Error(error.message);
-    return { id: row.id };
+    return { id: ins.id };
+  });
+
+// Anti-hallucination meal detection. Runs a vision+text Claude pass and
+// returns structured items the user reviews before save. Never persists.
+export const detectMealItems = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      base64Image: z.string().optional(),
+      mediaType: z.string().optional(),
+      note: z.string().optional(),
+    }).parse(d),
+  )
+  .handler(async ({ data }): Promise<{ items: ConfirmedMealItem[]; provider: string; confidence: number | null }> => {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return { items: [], provider: "none", confidence: null };
+    const noteClean = (data.note ?? "").trim();
+    const sys = [
+      "You analyze a meal photo and/or a short user note and return STRICT JSON.",
+      "ANTI-HALLUCINATION RULES (critical):",
+      "- Do not invent foods, sauces, drinks, sides, meats, or exact counts not clearly visible or mentioned by the user.",
+      "- Use generic names when cut/preparation is uncertain (e.g. 'chicken pieces' not 'chicken breast').",
+      "- If quantity is uncertain, mark confidence 'medium' or 'low' and add an uncertainty_note.",
+      "- Each item must record 'source' as one of: 'photo' | 'your note' | 'photo + note'.",
+      "- Always provide gram_range_min and gram_range_max around estimated_grams.",
+      "Return ONLY JSON of the form: {\"items\":[{name, quantity_description, estimated_grams, gram_range_min, gram_range_max, calories, protein_g, carbs_g, fat_g, confidence, source, uncertainty_note}], \"overall_confidence\": 0..1}",
+    ].join("\n");
+    const userContent: any[] = [];
+    if (data.base64Image) {
+      let b64 = data.base64Image;
+      let mt = data.mediaType || "image/jpeg";
+      if (b64.startsWith("data:")) {
+        const m = b64.match(/^data:([^;]+);base64,(.+)$/);
+        if (m) { mt = m[1]; b64 = m[2]; }
+      }
+      userContent.push({ type: "image", source: { type: "base64", media_type: mt, data: b64 } });
+    }
+    userContent.push({
+      type: "text",
+      text: noteClean
+        ? `User note (treat as authoritative for items not visible): "${noteClean}". Return the JSON only.`
+        : "Return the JSON only.",
+    });
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 1200,
+          system: sys,
+          messages: [{ role: "user", content: userContent }],
+        }),
+      });
+      if (!res.ok) return { items: [], provider: "anthropic", confidence: null };
+      const json = await res.json();
+      let txt = (json?.content?.[0]?.text as string) ?? "";
+      txt = txt.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+      const parsed = JSON.parse(txt);
+      const rawItems: any[] = Array.isArray(parsed?.items) ? parsed.items : [];
+      const items: ConfirmedMealItem[] = rawItems
+        .map((it: any) => {
+          try {
+            return ConfirmedItemSchema.parse({
+              name: String(it.name ?? "").trim() || "item",
+              quantity_description: it.quantity_description ?? null,
+              estimated_grams: Number(it.estimated_grams ?? 0),
+              gram_range_min: it.gram_range_min != null ? Number(it.gram_range_min) : null,
+              gram_range_max: it.gram_range_max != null ? Number(it.gram_range_max) : null,
+              calories: Number(it.calories ?? 0),
+              protein_g: Number(it.protein_g ?? 0),
+              carbs_g: Number(it.carbs_g ?? 0),
+              fat_g: Number(it.fat_g ?? 0),
+              confidence: ["high", "medium", "low"].includes(it.confidence) ? it.confidence : "medium",
+              source: typeof it.source === "string"
+                ? it.source
+                : data.base64Image && noteClean ? "photo + note" : data.base64Image ? "photo" : "your note",
+              uncertainty_note: it.uncertainty_note ?? null,
+            });
+          } catch {
+            return null;
+          }
+        })
+        .filter((x): x is ConfirmedMealItem => x !== null);
+      const conf = typeof parsed?.overall_confidence === "number" ? parsed.overall_confidence : null;
+      return { items, provider: "claude-sonnet-4-6", confidence: conf };
+    } catch {
+      return { items: [], provider: "anthropic", confidence: null };
+    }
   });
 
 export type MealItem = {
@@ -389,6 +534,8 @@ export type TodayMeal = {
   estimated_carbs_g: number | null;
   estimated_fat_g: number | null;
   estimated_items: MealItem[] | null;
+  confirmed_items: ConfirmedMealItem[] | null;
+  user_confirmed_vision: boolean;
   calorie_estimate_status: CalorieEstimateStatus | null;
   user_corrected: boolean;
   created_at: string;
@@ -403,7 +550,7 @@ export const getTodayMeals = createServerFn({ method: "GET" })
     const entryDate = data?.entryDate ?? today();
     const { data: rows, error } = await context.supabase
       .from("shield_nutrition_logs")
-      .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, estimated_items, calorie_estimate_status, user_corrected, created_at, deleted, entry_date")
+      .select("id, meal_description, meal_photo_url, claude_score_status, claude_quality_score, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, estimated_items, calorie_estimate_status, user_corrected, created_at, deleted, entry_date, confirmed_items, user_confirmed_vision")
       .eq("user_id", context.userId)
       .eq("entry_date", entryDate)
       .eq("deleted", false)
@@ -420,6 +567,8 @@ export const getTodayMeals = createServerFn({ method: "GET" })
       estimated_carbs_g: r.estimated_carbs_g,
       estimated_fat_g: r.estimated_fat_g,
       estimated_items: Array.isArray(r.estimated_items) ? r.estimated_items : null,
+      confirmed_items: Array.isArray(r.confirmed_items) ? r.confirmed_items : null,
+      user_confirmed_vision: !!r.user_confirmed_vision,
       calorie_estimate_status: r.calorie_estimate_status ?? null,
       user_corrected: !!r.user_corrected,
       created_at: r.created_at,
@@ -524,6 +673,19 @@ export const softDeleteMeal = createServerFn({ method: "POST" })
     const { error } = await context.supabase
       .from("shield_nutrition_logs")
       .update({ deleted: true })
+      .eq("id", data.id)
+      .eq("user_id", context.userId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const restoreMeal = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("shield_nutrition_logs")
+      .update({ deleted: false })
       .eq("id", data.id)
       .eq("user_id", context.userId);
     if (error) throw new Error(error.message);

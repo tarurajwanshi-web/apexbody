@@ -555,6 +555,7 @@ export type Database = {
           carb_quality_score: number | null
           claude_quality_score: number | null
           claude_score_status: string
+          confirmed_items: Json | null
           correction_count: number
           created_at: string
           deleted: boolean
@@ -575,14 +576,19 @@ export type Database = {
           protein_tier: number | null
           timing_score: number | null
           updated_at: string
+          user_confirmed_vision: boolean
           user_corrected: boolean
           user_id: string
+          vision_confidence: number | null
+          vision_detected_items: Json | null
+          vision_provider: string | null
         }
         Insert: {
           calorie_estimate_status?: string
           carb_quality_score?: number | null
           claude_quality_score?: number | null
           claude_score_status?: string
+          confirmed_items?: Json | null
           correction_count?: number
           created_at?: string
           deleted?: boolean
@@ -603,14 +609,19 @@ export type Database = {
           protein_tier?: number | null
           timing_score?: number | null
           updated_at?: string
+          user_confirmed_vision?: boolean
           user_corrected?: boolean
           user_id: string
+          vision_confidence?: number | null
+          vision_detected_items?: Json | null
+          vision_provider?: string | null
         }
         Update: {
           calorie_estimate_status?: string
           carb_quality_score?: number | null
           claude_quality_score?: number | null
           claude_score_status?: string
+          confirmed_items?: Json | null
           correction_count?: number
           created_at?: string
           deleted?: boolean
@@ -631,8 +642,12 @@ export type Database = {
           protein_tier?: number | null
           timing_score?: number | null
           updated_at?: string
+          user_confirmed_vision?: boolean
           user_corrected?: boolean
           user_id?: string
+          vision_confidence?: number | null
+          vision_detected_items?: Json | null
+          vision_provider?: string | null
         }
         Relationships: []
       }
