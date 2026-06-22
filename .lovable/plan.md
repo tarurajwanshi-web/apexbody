@@ -1,135 +1,55 @@
-## Meal logging flow — technical audit (read-only)
+## Phase 1.5 — Diff Plan
 
-No code changes proposed. This is an audit + a list of file-level changes that *would* be needed if/when we proceed.
+Verified in code:
+- `MealLogModal` already invokes `score-nutrition` on **both** create and edit (same awaited path at LogModals.tsx:888). No duplicate needed.
+- `MealHistoryList` already auto-retries pending rows + manual retry. Keep.
+- `score-nutrition` currently runs macro estimation **only when `meal_photo_url` is set** (index.ts:180). Text-only path missing.
+- `updateMeal` clears macros + sets status `pending`, then client awaits `score-nutrition` — fine.
+- `updateMealItems` overwrites `estimated_items` and sets status to `estimated` — needs to switch to `manual_edited` and preserve originals.
+- `getTodayMacroSummary` filters `eq("calorie_estimate_status","estimated")` — must include `manual_edited`.
 
----
+### Migrations
+1. `extend_meal_estimate_status_and_originals.sql`
+   - Drop/recreate CHECK on `shield_nutrition_logs.calorie_estimate_status` to allow `manual_edited`.
+   - Add columns: `original_estimated_items jsonb`, `original_estimated_calories numeric`, `original_estimated_protein_g numeric`, `original_estimated_carbs_g numeric`, `original_estimated_fat_g numeric`, `user_corrected boolean default false`, `correction_count integer default 0`.
 
-### 1. End-to-end flow: photo / text → saved nutrition log
+2. `shield_dispatch_score_nutrition_trigger.sql`
+   - `public.shield_dispatch_score_nutrition(_id uuid)` SECURITY DEFINER → `net.http_post` to `score-nutrition` with `x-internal-secret`.
+   - Trigger `shield_nutrition_logs_score_dispatch` AFTER INSERT: dispatch when `claude_score_status='pending'`. Idempotency: the edge fn already short-circuits if the row is no longer pending (we'll add an explicit guard — see edge function change). Client fast-path stays; trigger is the safety net.
+   - Revoke EXECUTE on the new dispatch fn from `PUBLIC`/`sandbox_exec`; grant to `postgres`/`service_role`.
 
-```text
-User taps "+" (BottomNav)
-        │
-        ▼
-MealLogModal  (src/components/LogModals.tsx, line ~809)
-  step "capture":
-    • file picker (camera/library) → File
-    • optional textarea description
-    • on "Next: confirm" →
-        - supabase.storage.from("shield-uploads").upload(uid/meals/ts.ext)
-        - createSignedUrl(30d)   ← stored as meal_photo_url
-        - runVisionDraft(file)   → analyzePhoto() (Claude Sonnet, src/lib/coach.functions.ts:155)
-                                    seeds desc with a short food description
-  step "confirm":
-    • user edits desc → submit
-        ▼
-logMeal()  (src/lib/shield.functions.ts:342)  — createServerFn, RLS-scoped
-  INSERT shield_nutrition_logs {
-    user_id, entry_date, meal_description, meal_photo_url,
-    claude_score_status: "pending"
-  }  → returns { id }
-        ▼
-supabase.functions.invoke("score-nutrition", { nutrition_log_id: id })
-  (awaited so the request isn't aborted on modal unmount)
-        ▼
-score-nutrition edge fn  (supabase/functions/score-nutrition/index.ts)
-  - authorizeCaller(req, supabase, row.user_id)   (audit #3 ownership)
-  - fetch training row for same entry_date
-  - Claude Haiku call #1 (scoring): protein_tier, carb_quality_score, timing_score
-      → UPDATE shield_nutrition_logs SET protein_tier/carb_quality_score/timing_score,
-        claude_score_status='scored'
-      (claude_quality_score is a generated column = 0.4P + 0.35C + 0.25T)
-  - Claude Haiku call #2 (macro estimation, only if meal_photo_url present):
-      itemized {name, grams, calories, protein_g, carbs_g, fat_g}[]
-      → UPDATE shield_nutrition_logs SET
-        estimated_items, estimated_calories/protein_g/carbs_g/fat_g,
-        calorie_estimate_status='estimated' | 'failed'
-        ▼
-MealHistoryList  (src/components/MealHistoryList.tsx)
-  - getTodayMeals() reload every 5s while any row is pending
-  - auto-retry rows stuck "pending" >60s once (silent)
-  - manual retry button when claude_score_status='failed'
-```
+### Edge function: `supabase/functions/score-nutrition/index.ts`
+- **Idempotency guard** at start of handler: re-fetch row, if `claude_score_status='scored'` AND `calorie_estimate_status IN ('estimated','manual_edited')`, return 200 `{ skipped:true }` without calling Anthropic. Prevents trigger+client race double-scoring.
+- **Text-only estimation**: lift the macro-estimation block out of the `if (row.meal_photo_url)` gate. Priority handled by prompt + presence of image part:
+  - photo+description → both image + description text
+  - description only → text-only call with description
+  - photo only → existing image path
+  - neither → skip estimate.
+- **Preserve originals**: when writing `estimated_*`, also write `original_estimated_*` **only if currently NULL** (first AI estimate). On re-score after edit (status reset), do NOT overwrite originals.
 
-Webhooks: `shield_nutrition_logs_webhook` (DB trigger) also fires `shield_dispatch_calculate_score(user_id, entry_date)` → calculate-score edge fn. That's the readiness re-roll, parallel to scoring.
+### Client server functions: `src/lib/shield.functions.ts`
+- `updateMealItems`:
+  - Fetch current row's `original_estimated_*`; if null, copy current `estimated_*` into them (first edit captures pre-edit baseline).
+  - Set `calorie_estimate_status = 'manual_edited'`, `user_corrected = true`, `correction_count = correction_count + 1` (via single update with subquery or fetch+update).
+- `updateMeal` (description/photo edit): unchanged — still clears macros & status pending; the rescore will write new originals only if they were cleared too. Decision: do NOT clear `original_estimated_*` on photo/description edit so the very first AI baseline persists across re-scores. Add `original_estimated_*` to NOT in the cleared set.
+- Add `CalorieEstimateStatus` union type export.
+- Update `TodayMeal` type to include `calorie_estimate_status`, `user_corrected`.
 
-### 2. Where `score-nutrition` is invoked
+### Macro summary: `src/lib/macros.functions.ts`
+- Change filter from `.eq("calorie_estimate_status","estimated")` to `.in("calorie_estimate_status",["estimated","manual_edited"])`. No other change.
 
-| Site | File | Purpose |
-| --- | --- | --- |
-| Post-create | `LogModals.tsx:888` | After `logMeal` returns the new id (awaited) |
-| Manual retry | `MealHistoryList.tsx:61` | Failed-state tap |
-| Auto retry | `MealHistoryList.tsx:48` (calls `retryScore` silent) | Rows still pending >60 s |
+### UI: `src/components/MealHistoryList.tsx`
+- After successful item save, show small "Adjusted by you." line beneath the macro row when `m.calorie_estimate_status === 'manual_edited'` or `m.user_corrected`. No layout/styling changes beyond a single muted text line.
+- Update pending detection to also treat `manual_edited` as done.
 
-No DB trigger / cron currently dispatches score-nutrition — it's only called from the client.
+### Readiness recalc
+- Gram edits do NOT change `claude_quality_score` (Shield readiness input), so no `calculate-score` re-dispatch is needed from `updateMealItems`. Score re-dispatch already fires via `shield_nutrition_logs_webhook` whenever the row is updated through the existing path — confirmed sufficient. No new dispatch.
 
-### 3. Where estimated kcal/P/C/F render
+### Files touched
+- new: 2 migrations
+- edited: `supabase/functions/score-nutrition/index.ts`
+- edited: `src/lib/shield.functions.ts` (updateMeal, updateMealItems, types)
+- edited: `src/lib/macros.functions.ts`
+- edited: `src/components/MealHistoryList.tsx`
 
-| Surface | File | Notes |
-| --- | --- | --- |
-| Meal row inline (history) | `MealHistoryList.tsx:147–151` | `{cal} kcal · {P}P · {C}C · {F}F` next to score |
-| Meal detail sheet | `MealDetailModal.tsx:47–52` | 4-stat grid (kcal / protein / carbs / fat) |
-| Per-item breakdown (collapsible) | `MealDetailModal.tsx:69–82`, `MealHistoryList.tsx:226–292` (`ItemBreakdown`) | `name`, `grams`, item-level kcal/P/C/F |
-| Day totals + macro rings | `src/routes/nutrition.tsx` + `dashboard.tsx` via `getTodayMacroSummary` (`src/lib/macros.functions.ts`) | Sums only rows with `calorie_estimate_status='estimated'` |
-
-Targets (target_calories etc.) come from `daily_macro_targets` via the active effective-dated row (macros.functions.ts:40–49).
-
-### 4. Where itemized estimates are edited
-
-One place: `ItemBreakdown` inside `MealHistoryList.tsx` (lines 226–303).
-- Per-item grams text input
-- Linear rescale of kcal/P/C/F by `newGrams / origGrams`
-- "Save adjusted portions" → `updateMealItems()` (`src/lib/shield.functions.ts:458`) — sums items, writes `estimated_items` + recomputes totals, sets `calorie_estimate_status='estimated'`. Does NOT re-run scoring.
-
-`MealDetailModal` shows the breakdown read-only (no edits).
-
-There is currently **no** UI to: add an item, remove an item, rename an item, or edit per-item macros independent of grams.
-
-### 5. Where Shield readiness consumes meal quality
-
-`supabase/functions/calculate-score/index.ts`:
-- Pulls rows: `select entry_date, claude_quality_score, deleted` (line 350)
-- For each day: averages non-null `claude_quality_score` across that day's meals → `mealQuality` (lines 207–210)
-- Nutrition pillar composition (path-dependent, downstream of `scoreDay`):
-  - manual-path users: 70% meal quality / 30% hydration
-  - device-path users: meal quality only (HRV/RHR carry hydration signal)
-- Estimated macros (kcal/P/C/F) are **not** read by calculate-score — they only feed the macro summary / rings.
-
-### 6. Missing types / tables / RPCs / edge fns to make this stable
-
-Already present:
-- Table `shield_nutrition_logs` (estimated_*, estimated_items jsonb, calorie_estimate_status, claude_*, deleted)
-- Table `daily_macro_targets`, RPC `apply_onboarding_macros`, `apply_weekly_macro_review`
-- Edge fns: `score-nutrition`, `calculate-score`, `calculate-macros`, `calculate-macros-weekly`, `parse-device-upload`
-- Server fns: `logMeal`, `updateMeal`, `updateMealItems`, `softDeleteMeal`, `getTodayMeals`, `getTodayMacroSummary`
-- DB trigger → `shield_dispatch_calculate_score` (internal-secret dispatch)
-
-Gaps / risks (no fixes yet — listed for the next plan):
-
-1. **No server-side dispatch of `score-nutrition`** — invocation lives only in the client. If the user closes the app between `logMeal` and the awaited `invoke`, the row stays `claude_score_status='pending'` until they reopen MealHistoryList. **Proposed**: DB trigger on `shield_nutrition_logs` AFTER INSERT that fires a new `public.shield_dispatch_score_nutrition(_id, _user_id)` (mirror of existing dispatchers), gated by the same internal-secret. Would require:
-   - new RPC `public.shield_dispatch_score_nutrition`
-   - extend `score-nutrition` to accept `{nutrition_log_id}` from internal caller (already does), keep ownership check
-   - keep client-side invoke as redundant fast-path
-
-2. **No item-level editing primitives beyond grams** — `MealItem` type and `updateMealItems` accept arbitrary arrays, but UI only rescales by grams. No type/RPC changes needed; presentational-only fix in `MealHistoryList.ItemBreakdown` (add/remove/rename row, free-edit macros without grams rescale).
-
-3. **`calorie_estimate_status` has no `manual` value** — when a user edits items, status is force-set to `estimated`, indistinguishable from AI estimate. **Proposed**: add `'manual_edited'` (or similar) to the status enum/check constraint so downstream consumers can tell user-corrected rows from AI-only rows; requires a small migration and an updated value in `updateMealItems`.
-
-4. **`updateMeal` clears macros but does not re-invoke `score-nutrition`** — after an edit the row sits `pending` until something else triggers a retry. Today MealHistoryList's auto-retry loop catches it after 60 s. **Proposed**: have the edit path explicitly invoke `score-nutrition` like the create path does (no new tables; one-line addition in `LogModals.tsx` submit handler).
-
-5. **No type export for `calorie_estimate_status` values** — both client and edge fn use string literals (`"pending"`, `"estimated"`, `"failed"`). Low risk, but a shared union type in `src/lib/shield.functions.ts` would prevent drift.
-
-6. **No persistent meal-edit audit** — re-edits overwrite `estimated_items`; the prior AI estimate is lost. Not required for the current UX, but worth flagging.
-
-7. **`MealDetailModal` is mounted on `nutrition.tsx` only** — `MealHistoryList` does not open it (rows expand inline). If we want one canonical detail view, either drop the modal or wire it from the history list. No backend changes needed.
-
----
-
-### Proposed file-level changes (when approved, not now)
-
-- `supabase/migrations/<ts>_dispatch_score_nutrition.sql` — new SQL function + AFTER INSERT trigger on `shield_nutrition_logs` (mirrors `shield_dispatch_calculate_score`).
-- `supabase/functions/score-nutrition/index.ts` — no shape change; verify it accepts internal-secret dispatch with just `nutrition_log_id`.
-- `supabase/migrations/<ts>_calorie_status_manual_edited.sql` — extend allowed values for `calorie_estimate_status`.
-- `src/lib/shield.functions.ts` — export `CalorieEstimateStatus` union; in `updateMealItems` set status to `'manual_edited'`.
-- `src/components/LogModals.tsx` — in edit branch of meal submit, also `invoke("score-nutrition", ...)`.
-- `src/components/MealHistoryList.tsx` — (optional, presentational) richer item editor: add/remove/rename, edit macros without grams rescale.
-- No new pages. No visual restyling. No removed functionality.
+No new pages, no UI redesign, no chart additions. Cron remains untouched.
