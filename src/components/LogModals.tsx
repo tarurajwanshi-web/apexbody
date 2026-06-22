@@ -589,6 +589,7 @@ function JourneyCFallback({ onDone, deviceSource }: { onDone: () => void; device
           sleep_hours: sleep,
           // Per-day fallback marker. Does NOT change input_path_preference.
           recovery_source: "device_parse_failed_fallback",
+          client_timezone: getBrowserTimezone(),
         },
       });
       onDone();
