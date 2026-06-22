@@ -160,7 +160,10 @@ function Nutrition() {
       </p>
 
       <section className="mx-5 mt-3 rounded-3xl bg-bg-2 border border-white/5 p-5">
-        <div className="flex items-end justify-between">
+        {macros?.verdict && (
+          <VerdictBadge verdict={macros.verdict} />
+        )}
+        <div className="flex items-end justify-between mt-2">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-text-tertiary">{dateLabel}</p>
             <div className="mt-1 flex items-end gap-1">
@@ -186,20 +189,32 @@ function Nutrition() {
                 <span className="text-sm text-text-tertiary">No target yet.</span>
               )}
             </div>
-            {/* Informational over-target line — keep tone calm and factual,
-                consistent with other nutrition copy in the app. */}
-            {hasTarget && hasMeals && cCal > tCal! && (
-              <p className="mt-2 text-[12px]" style={{ color: "#F59E0B" }}>
-                {(cCal - tCal!).toLocaleString()} kcal over today's target
-              </p>
+            {hasTarget && hasMeals && (() => {
+              const diff = cCal - tCal!;
+              if (diff > 0) {
+                return (
+                  <p className="mt-2 text-[12px]" style={{ color: "#F59E0B" }}>
+                    {diff.toLocaleString()} kcal over target
+                  </p>
+                );
+              }
+              if (diff < 0) {
+                return (
+                  <p className="mt-2 text-[12px] text-text-tertiary">
+                    {Math.abs(diff).toLocaleString()} kcal {isToday ? "remaining" : "under target"}
+                  </p>
+                );
+              }
+              return null;
+            })()}
+            {macros?.main_driver && hasMeals && (
+              <p className="mt-1 text-[12px] text-text-secondary">{macros.main_driver}</p>
             )}
           </div>
         </div>
         {hasTarget && (() => {
           const ratio = tCal! > 0 ? cCal / tCal! : 0;
           const over = ratio > 1;
-          // Bar fills to 100% at target, then shifts to amber to flag the overage
-          // without becoming alarming. No red — copy elsewhere stays informational.
           const barColor = over ? "#F59E0B" : undefined;
           const widthPct = Math.min(100, Math.round(ratio * 100));
           return (
@@ -216,6 +231,18 @@ function Nutrition() {
           <Macro label="Carbs"   v={macros?.consumed_carbs_g ?? 0}   t={macros?.target_carbs_g ?? 0}   color="#10B981" hasMeals={hasMeals} />
           <Macro label="Fat"     v={macros?.consumed_fat_g ?? 0}     t={macros?.target_fat_g ?? 0}     color="#3B82F6" hasMeals={hasMeals} />
         </div>
+        {macros?.coaching_line && hasMeals && (
+          <div className="mt-4 rounded-full bg-white/5 border border-white/10 px-3 py-1.5 text-[11px] text-text-secondary text-center">
+            {macros.coaching_line}
+          </div>
+        )}
+        {(macros?.meal_quality_score != null || macros?.macro_adherence_score != null || macros?.nutrition_day_score != null) && (
+          <div className="mt-4 grid grid-cols-3 gap-2 border-t border-white/5 pt-3">
+            <ScorePill label="Meal quality" value={macros?.meal_quality_score ?? null} />
+            <ScorePill label="Macro adherence" value={macros?.macro_adherence_score ?? null} />
+            <ScorePill label="Nutrition score" value={macros?.nutrition_day_score ?? null} emphasized />
+          </div>
+        )}
       </section>
 
       {/* Hydration card — ACSM-aligned target, with quick-add launcher.
