@@ -383,27 +383,27 @@ export const getWeeklyNutritionInsight = createServerFn({ method: "GET" })
     const tz = await resolveUserTimezone(context.supabase, context.userId);
     const anchorISO = data?.anchorDate ?? getLocalDateISO(tz);
     const todayISO = getLocalDateISO(tz);
-    const anchor = parseISO(anchorISO);
-    const weekStart = mondayOf(anchor);
-    const weekEnd = addDays(weekStart, 6);
-    const weekStartISO = toISO(weekStart);
-    const weekEndISO = toISO(weekEnd);
+    // BUG FIX (N-3): use user-local Mon-Sun via getLocalWeekRange instead of
+    // the internal UTC mondayOf, which shifted the week boundary in non-UTC
+    // timezones and could exclude a Sunday meal logged late local time.
+    const { start: weekStartISO, end: weekEndISO } = getLocalWeekRange(anchorISO);
 
     // Cap evaluation at min(today, weekEnd) — never include future days, but
     // do include the full week when the user is viewing a past week.
-    // NOTE: anchorISO is intentionally NOT in this min — for a past-week
-    // anchor (Mon 15 Jun), including it would collapse the cap to a single
-    // day and starve the weekly query.
     const cap = todayISO < weekEndISO ? todayISO : weekEndISO;
-    const capDate = parseISO(cap);
-    const days_elapsed = Math.max(
-      1,
-      Math.round((capDate.getTime() - weekStart.getTime()) / 86400000) + 1,
-    );
+    // days_elapsed = number of dates from weekStart..cap inclusive
+    const dayDiff = (a: string, b: string) => {
+      const toMs = (s: string) => {
+        const [y, m, d] = s.split("-").map(Number);
+        return Date.UTC(y, m - 1, d);
+      };
+      return Math.round((toMs(b) - toMs(a)) / 86400000);
+    };
+    const days_elapsed = Math.max(1, dayDiff(weekStartISO, cap) + 1);
 
     // Build list of evaluated dates.
     const dates: string[] = [];
-    for (let i = 0; i < days_elapsed; i++) dates.push(toISO(addDays(weekStart, i)));
+    for (let i = 0; i < days_elapsed; i++) dates.push(addDaysISO(weekStartISO, i));
 
     // Fetch all meals in the evaluated window in one query.
     const { data: rawMeals } = await context.supabase
@@ -670,8 +670,7 @@ export const getWeeklyNutritionInsight = createServerFn({ method: "GET" })
     const WEEKDAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const days: WeeklyDay[] = [];
     for (let i = 0; i < 7; i++) {
-      const d = addDays(weekStart, i);
-      const dateISO = toISO(d);
+      const dateISO = addDaysISO(weekStartISO, i);
       const inFuture = dateISO > todayISO;
       const dayMeals = meals.filter((m) => m.entry_date === dateISO);
       const counted = dayMeals.filter((m) =>
