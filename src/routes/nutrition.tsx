@@ -160,7 +160,7 @@ function Nutrition() {
           : <>Finish onboarding to calculate your personalized daily target.</>}
       </p>
 
-      <section className="mx-5 mt-3 rounded-3xl bg-bg-2 border border-white/5 p-5">
+      <section className="mx-5 mt-3 rounded-3xl bg-bg-2 border border-white/5 p-4">
         {macros?.verdict && (
           <VerdictBadge verdict={macros.verdict} />
         )}
