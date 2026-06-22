@@ -858,8 +858,27 @@ function WeeklyGraphContent({ data }: { data: WeeklyNutritionInsight }) {
   const tgt = avg_target_calories ?? 0;
   const yMax = Math.max(maxConsumed * 1.05, tgt * 1.15, 800);
 
+  // Detect target variance across logged days.
+  const uniqTargets = new Set(
+    days
+      .filter((d) => d.target_calories != null)
+      .map((d) => d.target_calories as number),
+  );
+  const targetsVary = uniqTargets.size > 1;
+  const targetLabel = targetsVary ? "Avg target" : "Target";
+
+  const hasAnyLoggedMeals = days.some((d) => d.has_logged_meals && d.consumed_calories > 0);
+
   return (
     <div className="space-y-5">
+      {/* Chart header */}
+      <div>
+        <p className="text-[13px] font-semibold text-white">Macro calories by day</p>
+        <p className="mt-0.5 text-[11px] text-text-tertiary leading-snug">
+          Protein, carbs, and fat stacked against your calorie target.
+        </p>
+      </div>
+
       {/* Legend */}
       <div className="flex items-center justify-center gap-4 text-[11px] text-text-secondary">
         <LegendDot color="#F59E0B" label="Protein" />
@@ -868,7 +887,13 @@ function WeeklyGraphContent({ data }: { data: WeeklyNutritionInsight }) {
       </div>
 
       {/* Chart */}
-      <StackedBarChart days={days} yMax={yMax} target={avg_target_calories} />
+      <StackedBarChart
+        days={days}
+        yMax={yMax}
+        target={avg_target_calories}
+        targetLabel={targetLabel}
+        empty={!hasAnyLoggedMeals}
+      />
 
       {/* Summary metrics */}
       <div className="grid grid-cols-2 gap-2">
@@ -878,19 +903,19 @@ function WeeklyGraphContent({ data }: { data: WeeklyNutritionInsight }) {
           sub={avg_target_calories != null ? `of ${avg_target_calories.toLocaleString()} target` : "no target set"}
         />
         <MetricCard
-          label="On-target days"
+          label="Target days"
           value={logged_days > 0 ? `${calorie_on_target_days} of ${logged_days}` : "—"}
-          sub="calories within range"
+          sub="days within range"
         />
         <MetricCard
-          label="Protein hit"
+          label="Protein"
           value={logged_days > 0 ? `${protein_hit_days} of ${logged_days}` : "—"}
-          sub="days at protein target"
+          sub="days hit"
         />
         <MetricCard
           label="Confidence"
           value={confidence_label === "low" ? "Low" : "OK"}
-          sub={confidence_label === "low" ? "Log 3+ days" : `${logged_days} days logged`}
+          sub={confidence_label === "low" ? "until 3 logged days" : `${logged_days} days logged`}
         />
       </div>
 
