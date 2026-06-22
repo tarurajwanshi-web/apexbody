@@ -12,6 +12,10 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 
+declare const __APP_BUILD_TIMESTAMP__: string;
+const APP_BUILD_TIMESTAMP =
+  typeof __APP_BUILD_TIMESTAMP__ !== "undefined" ? __APP_BUILD_TIMESTAMP__ : "unknown";
+
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-bg-1 px-4">
