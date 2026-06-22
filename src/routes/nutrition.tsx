@@ -235,12 +235,12 @@ function Nutrition() {
           <Macro label="Fat"     v={macros?.consumed_fat_g ?? 0}     t={macros?.target_fat_g ?? 0}     color="#3B82F6" hasMeals={hasMeals} />
         </div>
         {macros?.coaching_line && hasMeals && (
-          <div className="mt-4 rounded-full bg-white/5 border border-white/10 px-3 py-1.5 text-[11px] text-text-secondary text-center">
+          <div className="mt-3 rounded-full bg-white/5 border border-white/10 px-3 py-1 text-[11px] text-text-secondary text-center">
             {macros.coaching_line}
           </div>
         )}
         {(macros?.meal_quality_score != null || macros?.macro_adherence_score != null || macros?.nutrition_day_score != null) && (
-          <div className="mt-4 grid grid-cols-3 gap-2 border-t border-white/5 pt-3">
+          <div className="mt-3 grid grid-cols-3 gap-2 border-t border-white/[0.04] pt-2.5">
             <ScorePill label="Meal quality" value={macros?.meal_quality_score ?? null} />
             <ScorePill label="Macro adherence" value={macros?.macro_adherence_score ?? null} />
             <ScorePill label="Nutrition score" value={macros?.nutrition_day_score ?? null} emphasized />
