@@ -738,11 +738,13 @@ export const logBodyMeasurement = createServerFn({ method: "POST" })
       hip_cm: z.number().positive().nullable().optional(),
       arm_cm: z.number().positive().nullable().optional(),
       thigh_cm: z.number().positive().nullable().optional(),
+      client_timezone: z.string().max(64).optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase.from("body_measurement_events").insert({
       user_id: context.userId,
+      entry_date: await userTodayWithHint(context.supabase, context.userId, data.client_timezone),
       source: data.source ?? "manual",
       weight_kg: data.weight_kg ?? null,
       body_fat_pct: data.body_fat_pct ?? null,
