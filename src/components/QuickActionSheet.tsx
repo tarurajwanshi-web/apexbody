@@ -1,6 +1,6 @@
-import { Camera, Heart, Ruler } from "lucide-react";
+import { Camera, Heart, Ruler, Scale } from "lucide-react";
 
-export type QuickAction = "meal" | "recovery" | "body";
+export type QuickAction = "meal" | "recovery" | "body" | "weight";
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -8,14 +8,16 @@ type Props = {
 };
 
 /**
- * Center-nav quick-action launcher. Three direct-access logging shortcuts:
- * Recovery, Meal, Body measurement. Each routes straight to its flow.
+ * Center-nav quick-action launcher. Four direct-access logging shortcuts:
+ * Recovery, Meal, Body measurement, Quick weigh-in. Each routes straight
+ * to its flow.
  */
 export function QuickActionSheet({ open, onClose, onPick }: Props) {
   if (!open) return null;
   const items: Array<{ key: QuickAction; icon: typeof Camera; label: string; sub: string; tint: string }> = [
     { key: "recovery", icon: Heart,  label: "Log recovery",       sub: "How you feel, sleep, mood",                tint: "rgba(139,92,246,0.45)" },
     { key: "meal",     icon: Camera, label: "Log a meal",         sub: "Snap a photo — itemized macros",           tint: "rgba(16,185,129,0.45)" },
+    { key: "weight",   icon: Scale,  label: "Quick weigh-in",     sub: "Just today's weight",                      tint: "rgba(245,158,11,0.45)" },
     { key: "body",     icon: Ruler,  label: "Body measurement",   sub: "Weight, body fat, waist / hip / arms / thigh", tint: "rgba(59,130,246,0.45)" },
   ];
   return (

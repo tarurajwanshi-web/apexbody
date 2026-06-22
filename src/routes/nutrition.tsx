@@ -76,6 +76,10 @@ function Nutrition() {
   const [ptrDelta, setPtrDelta] = useState(0);
   // Undo snackbar state — populated when a meal is soft-deleted.
   const [pendingUndo, setPendingUndo] = useState<{ id: string } | null>(null);
+  // Inline delete-confirm state — replaces window.confirm() which is blocked
+  // in iOS PWAs and inconsistent across browsers. Tapping the trash icon
+  // shows inline Delete / Cancel buttons in the timeline row.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const undoTimerRef = useRef<number | null>(null);
   const ptrRef = useRef<HTMLDivElement>(null);
   const ptrStart = useRef<number | null>(null);
@@ -96,17 +100,19 @@ function Nutrition() {
 
 
   // Shared snapshot reload: refetches every nutrition surface for the
-  // currently selected date. Called after meal save / edit / delete / undo
-  // so Daily Fuel, Weekly Preview, Macro Review, the timeline and the
-  // pending/failed counters all stay in lockstep with the server.
+  // currently selected date. Captures `selectedDate` at call time so a
+  // stale closure from an earlier render can't reload the wrong day.
   const reloadNutritionSnapshot = async () => {
+    const date = selectedDate;
+    const todayLocal = getLocalDateISO(userTz);
+    const isTodayLocal = date === todayLocal;
     setRefreshing(true);
-    const dateArg = { data: { entryDate: selectedDate } } as any;
-    const weeklyArg = { data: { anchorDate: selectedDate } } as any;
+    const dateArg = { data: { entryDate: date } } as any;
+    const weeklyArg = { data: { anchorDate: date } } as any;
     await Promise.allSettled([
       fetchMacros(dateArg).then(setMacros),
       fetchMeals(dateArg).then(setMeals).catch(() => setMeals([])),
-      isToday
+      isTodayLocal
         ? fetchHydration().then(setHydration).catch(() => {})
         : Promise.resolve(setHydration(null)),
       fetchHydrationEvents(dateArg).then(setHydrationEvents).catch(() => setHydrationEvents([])),
@@ -120,14 +126,12 @@ function Nutrition() {
 
   // Delete a meal: optimistic UI update + verified soft-delete + immediate
   // snapshot reload so Daily Fuel / Weekly Preview / Macro Review subtract
-  // the meal right away. Undo snackbar is independent of the reload.
+  // the meal right away. Confirmation is now handled inline (no window.confirm).
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this meal? This removes it from daily macros and weekly adherence.")) return;
+    setConfirmDeleteId(null);
     const snapshot = meals;
-    const beforeCount = snapshot?.length ?? 0;
-    const beforeKcal = macros?.consumed_calories ?? 0;
     if (import.meta.env.DEV) {
-      console.log("[meal-delete] start", { id, beforeCount, beforeKcal, selectedDate });
+      console.log("[meal-delete] start", { id, beforeCount: snapshot?.length ?? 0, selectedDate });
     }
     setMeals((prev) => (prev ? prev.filter((m) => m.id !== id) : prev));
     try {
@@ -140,19 +144,11 @@ function Nutrition() {
       alert("Couldn't delete that meal. Please try again.");
       return;
     }
-    // Server confirmed the row is `deleted=true`; refresh every downstream
-    // surface now so calories/macros/weekly subtract immediately.
     await reloadNutritionSnapshot();
-    if (import.meta.env.DEV || (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("diag") === "1")) {
-      const stillThere = (meals ?? []).some((m) => m.id === id);
+    if (import.meta.env.DEV) {
       try {
         const dbTruth = await debugReadMeal({ data: { id } } as any);
-        console.log("[meal-delete] post-reload", {
-          id,
-          stillPresentInList: stillThere,
-          kcalAfter: macros?.consumed_calories ?? 0,
-          dbTruth,
-        });
+        console.log("[meal-delete] post-reload", { id, dbTruth });
       } catch (e) {
         console.log("[meal-delete] post-reload (debug read failed)", e);
       }
@@ -494,7 +490,10 @@ function Nutrition() {
           hydration={hydrationEvents}
           selectedDate={selectedDate}
           onOpenMeal={setOpenMeal}
-          onDeleteMeal={handleDelete}
+          confirmDeleteId={confirmDeleteId}
+          onRequestDelete={(id) => setConfirmDeleteId(id)}
+          onConfirmDelete={handleDelete}
+          onCancelDelete={() => setConfirmDeleteId(null)}
         />
       </section>
 
@@ -703,13 +702,17 @@ function mealImpactTag(m: TodayMeal): { label: string; color: string; bg: string
 }
 
 function UnifiedTimeline({
-  meals, hydration, selectedDate, onOpenMeal, onDeleteMeal,
+  meals, hydration, selectedDate, onOpenMeal,
+  confirmDeleteId, onRequestDelete, onConfirmDelete, onCancelDelete,
 }: {
   meals: TodayMeal[] | null;
   hydration: HydrationEvent[];
   selectedDate: string;
   onOpenMeal: (m: TodayMeal) => void;
-  onDeleteMeal?: (id: string) => void;
+  confirmDeleteId?: string | null;
+  onRequestDelete?: (id: string) => void;
+  onConfirmDelete?: (id: string) => void;
+  onCancelDelete?: () => void;
 }) {
   if (meals == null) {
     return (
@@ -744,8 +747,6 @@ function UnifiedTimeline({
     <div className="space-y-2">
       {rows.map((r) =>
         r.kind === "meal" ? (
-          // div + role=button so we can render a real inner <button> for delete
-          // without nesting interactive controls.
           <div
             key={`m-${r.meal.id}`}
             role="button"
@@ -780,11 +781,11 @@ function UnifiedTimeline({
                     ? `${r.meal.claude_quality_score}/100`
                     : "scoring…"}
                 </p>
-                {onDeleteMeal && (
+                {onRequestDelete && confirmDeleteId !== r.meal.id && (
                   <button
                     type="button"
                     aria-label="Delete meal"
-                    onClick={(e) => { e.stopPropagation(); onDeleteMeal(r.meal.id); }}
+                    onClick={(e) => { e.stopPropagation(); onRequestDelete(r.meal.id); }}
                     className="h-7 w-7 rounded-full flex items-center justify-center text-text-tertiary active:scale-95 transition hover:bg-white/5"
                   >
                     <Trash2 size={14} />
@@ -792,6 +793,25 @@ function UnifiedTimeline({
                 )}
               </div>
             </div>
+            {confirmDeleteId === r.meal.id && (
+              <div className="mt-3 flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onCancelDelete?.(); }}
+                  className="rounded-xl px-3 py-1.5 text-[12px] text-text-secondary border border-white/10"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onConfirmDelete?.(r.meal.id); }}
+                  className="rounded-xl px-3 py-1.5 text-[12px] font-semibold text-white"
+                  style={{ background: "rgba(239,68,68,0.85)" }}
+                >
+                  Delete
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div
@@ -1356,7 +1376,7 @@ function MacroReviewCard({ review, compact = false }: { review: MacroAdjustmentR
 
       {locked ? (
         <>
-          <p className="mt-2 text-[15px] font-semibold text-white">🔒 Target review locked</p>
+          <p className="mt-2 text-[15px] font-semibold text-white">🔒 Macro adjustment locked</p>
           <p className="mt-1 text-[12px] text-text-secondary leading-snug">
             Log {reqDays} nutrition days and {reqWeigh} weigh-ins in last week's review window to unlock a reliable adjustment.
           </p>
