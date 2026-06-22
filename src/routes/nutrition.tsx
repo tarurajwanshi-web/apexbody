@@ -229,7 +229,7 @@ function Nutrition() {
             </div>
           );
         })()}
-        <div className="mt-5 grid grid-cols-3 gap-3">
+        <div className="mt-3 grid grid-cols-3 gap-3">
           <Macro label="Protein" v={macros?.consumed_protein_g ?? 0} t={macros?.target_protein_g ?? 0} color="#F59E0B" hasMeals={hasMeals} />
           <Macro label="Carbs"   v={macros?.consumed_carbs_g ?? 0}   t={macros?.target_carbs_g ?? 0}   color="#10B981" hasMeals={hasMeals} />
           <Macro label="Fat"     v={macros?.consumed_fat_g ?? 0}     t={macros?.target_fat_g ?? 0}     color="#3B82F6" hasMeals={hasMeals} />
