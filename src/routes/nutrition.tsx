@@ -300,7 +300,7 @@ function Nutrition() {
         </div>
       )}
 
-
+      <WeeklyInsightCard weekly={weekly} />
 
       <BottomNav onLogged={reload} />
       <HydrationLogModal open={hydrationOpen} onClose={() => setHydrationOpen(false)} onSaved={reload} />
