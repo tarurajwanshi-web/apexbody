@@ -65,16 +65,15 @@ function Nutrition() {
   const reload = async () => {
     setRefreshing(true);
     const dateArg = { data: { entryDate: selectedDate } } as any;
+    const weeklyArg = { data: { anchorDate: selectedDate } } as any;
     await Promise.allSettled([
       fetchMacros(dateArg).then(setMacros),
       fetchMeals(dateArg).then(setMeals).catch(() => setMeals([])),
-      // Hydration card stays scoped to today (target / quick-add are today-only);
-      // skip the fetch on past dates so we don't show today's bottle as if it
-      // belonged to the selected past day.
       isToday
         ? fetchHydration().then(setHydration).catch(() => {})
         : Promise.resolve(setHydration(null)),
       fetchHydrationEvents(dateArg).then(setHydrationEvents).catch(() => setHydrationEvents([])),
+      fetchWeekly(weeklyArg).then(setWeekly).catch(() => setWeekly(null)),
     ]);
     setLastUpdatedAt(Date.now());
     setRefreshing(false);
