@@ -502,7 +502,7 @@ export const updateMealItems = createServerFn({ method: "POST" })
 
     const { error } = await context.supabase
       .from("shield_nutrition_logs")
-      .update(patch)
+      .update(patch as any)
       .eq("id", data.id)
       .eq("user_id", context.userId);
     if (error) throw new Error(error.message);
