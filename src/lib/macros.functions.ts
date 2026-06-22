@@ -280,3 +280,347 @@ export const getTodayMacroSummary = createServerFn({ method: "GET" })
 
 /** Alias: Phase 3A consumers prefer this name. Same shape, same handler. */
 export const getDayNutritionSummary = getTodayMacroSummary;
+
+// ============================================================================
+// Phase 3B — Weekly Nutrition Insight (compact, deterministic, no LLM)
+// ============================================================================
+
+export type WeeklyNutritionInsight = {
+  week_start_date: string;
+  week_end_date: string;
+  anchor_date: string;
+  days_elapsed: number;
+  logged_days: number;
+
+  avg_calories: number;
+  avg_protein_g: number;
+  avg_carbs_g: number;
+  avg_fat_g: number;
+
+  avg_target_calories: number | null;
+  avg_target_protein_g: number | null;
+  avg_target_carbs_g: number | null;
+  avg_target_fat_g: number | null;
+
+  calorie_on_target_days: number;
+  protein_hit_days: number;
+  carb_on_target_days: number;
+  fat_on_target_days: number;
+
+  avg_meal_quality_score: number | null;
+  avg_macro_adherence_score: number | null;
+  weekly_nutrition_score: number | null;
+
+  main_weekly_driver: string;
+  weekly_diagnosis: string;
+  coach_note: string;
+
+  pending_meal_count: number;
+  failed_meal_count: number;
+};
+
+/** Parse YYYY-MM-DD as a UTC date (no TZ drift). */
+function parseISO(d: string): Date {
+  const [y, m, day] = d.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, day));
+}
+function toISO(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+function addDays(d: Date, n: number): Date {
+  const r = new Date(d);
+  r.setUTCDate(r.getUTCDate() + n);
+  return r;
+}
+/** Monday of the week containing anchor (UTC). */
+function mondayOf(anchor: Date): Date {
+  const dow = anchor.getUTCDay(); // 0=Sun..6=Sat
+  const delta = dow === 0 ? -6 : 1 - dow;
+  return addDays(anchor, delta);
+}
+
+const weeklyInput = z
+  .object({ anchorDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() })
+  .optional();
+
+export const getWeeklyNutritionInsight = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => weeklyInput.parse(d))
+  .handler(async ({ data, context }): Promise<WeeklyNutritionInsight> => {
+    const anchorISO = data?.anchorDate ?? today();
+    const todayISO = today();
+    const anchor = parseISO(anchorISO);
+    const weekStart = mondayOf(anchor);
+    const weekEnd = addDays(weekStart, 6);
+    const weekStartISO = toISO(weekStart);
+    const weekEndISO = toISO(weekEnd);
+
+    // Cap evaluation at min(anchor, today, weekEnd).
+    const cap = [anchorISO, todayISO, weekEndISO].sort()[0];
+    const capDate = parseISO(cap);
+    const days_elapsed = Math.max(
+      1,
+      Math.round((capDate.getTime() - weekStart.getTime()) / 86400000) + 1,
+    );
+
+    // Build list of evaluated dates.
+    const dates: string[] = [];
+    for (let i = 0; i < days_elapsed; i++) dates.push(toISO(addDays(weekStart, i)));
+
+    // Fetch all meals in the evaluated window in one query.
+    const { data: rawMeals } = await context.supabase
+      .from("shield_nutrition_logs")
+      .select(
+        "entry_date, estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, calorie_estimate_status, claude_quality_score, claude_score_status, deleted",
+      )
+      .eq("user_id", context.userId)
+      .gte("entry_date", weekStartISO)
+      .lte("entry_date", cap)
+      .eq("deleted", false);
+
+    // Fetch all target rows that could overlap the window.
+    const { data: rawTargets } = await context.supabase
+      .from("daily_macro_targets")
+      .select("target_calories, target_protein_g, target_carbs_g, target_fat_g, effective_start_date, effective_end_date")
+      .eq("user_id", context.userId)
+      .lte("effective_start_date", cap)
+      .or(`effective_end_date.is.null,effective_end_date.gt.${weekStartISO}`)
+      .order("effective_start_date", { ascending: false });
+
+    const meals = (rawMeals ?? []) as Array<any>;
+    const targets = (rawTargets ?? []) as Array<any>;
+
+    function targetFor(dateISO: string) {
+      return targets.find(
+        (t) =>
+          t.effective_start_date <= dateISO &&
+          (t.effective_end_date == null || t.effective_end_date > dateISO),
+      );
+    }
+
+    let logged_days = 0;
+    let calorie_on_target_days = 0;
+    let protein_hit_days = 0;
+    let carb_on_target_days = 0;
+    let fat_on_target_days = 0;
+    let cal_over_days = 0;
+    let fat_over_days = 0;
+    let carb_over_days = 0;
+
+    let sumCal = 0, sumP = 0, sumC = 0, sumF = 0;
+    let sumTCal = 0, sumTP = 0, sumTC = 0, sumTF = 0;
+    let tgtDays = 0;
+
+    let sumQ = 0, qDays = 0;
+    let sumAdh = 0, adhDays = 0;
+    let sumDayScore = 0, dayScoreDays = 0;
+
+    let pending_meal_count = 0;
+    let failed_meal_count = 0;
+
+    for (const dateISO of dates) {
+      const dayMeals = meals.filter((m) => m.entry_date === dateISO);
+      if (dayMeals.length === 0) continue;
+      const counted = dayMeals.filter((m) =>
+        ["estimated", "manual_edited"].includes(m.calorie_estimate_status),
+      );
+      pending_meal_count += dayMeals.filter((m) => m.calorie_estimate_status === "pending").length;
+      failed_meal_count += dayMeals.filter((m) => m.calorie_estimate_status === "failed").length;
+
+      logged_days++;
+
+      const cal = counted.reduce((s, m) => s + Number(m.estimated_calories ?? 0), 0);
+      const p = counted.reduce((s, m) => s + Number(m.estimated_protein_g ?? 0), 0);
+      const c = counted.reduce((s, m) => s + Number(m.estimated_carbs_g ?? 0), 0);
+      const f = counted.reduce((s, m) => s + Number(m.estimated_fat_g ?? 0), 0);
+
+      sumCal += cal; sumP += p; sumC += c; sumF += f;
+
+      const t = targetFor(dateISO);
+      const tCal = t?.target_calories != null ? Number(t.target_calories) : 0;
+      const tP = t?.target_protein_g != null ? Number(t.target_protein_g) : 0;
+      const tC = t?.target_carbs_g != null ? Number(t.target_carbs_g) : 0;
+      const tF = t?.target_fat_g != null ? Number(t.target_fat_g) : 0;
+
+      if (tCal > 0) {
+        sumTCal += tCal; sumTP += tP; sumTC += tC; sumTF += tF; tgtDays++;
+        const rCal = cal / tCal;
+        const rP = tP > 0 ? p / tP : 0;
+        const rC = tC > 0 ? c / tC : 0;
+        const rF = tF > 0 ? f / tF : 0;
+        if (rCal >= 0.9 && rCal <= 1.05) calorie_on_target_days++;
+        if (rCal > 1.05) cal_over_days++;
+        if (rP >= 0.95) protein_hit_days++;
+        if (rC >= 0.8 && rC <= 1.2) carb_on_target_days++;
+        if (rC > 1.2) carb_over_days++;
+        if (rF >= 0.8 && rF <= 1.15) fat_on_target_days++;
+        if (rF > 1.15) fat_over_days++;
+
+        if (counted.length > 0) {
+          const sP = scoreProtein(p, tP);
+          const sCal = scoreCalories(cal, tCal);
+          const sC = scoreCarbs(c, tC);
+          const sF = scoreFat(f, tF);
+          const adh = sP * 0.4 + sCal * 0.35 + sC * 0.15 + sF * 0.1;
+          sumAdh += adh; adhDays++;
+        }
+      }
+
+      const scored = dayMeals.filter(
+        (m) => m.claude_score_status === "scored" && m.claude_quality_score != null,
+      );
+      let q: number | null = null;
+      if (scored.length) {
+        q = scored.reduce((s, m) => s + Number(m.claude_quality_score), 0) / scored.length;
+        sumQ += q; qDays++;
+      }
+
+      // Day score: average of quality + adherence when both exist, else either.
+      const dayAdh = adhDays > 0 ? sumAdh / adhDays : null; // not per-day; recompute below
+    }
+
+    // Recompute per-day day_score average more cleanly:
+    sumDayScore = 0; dayScoreDays = 0;
+    for (const dateISO of dates) {
+      const dayMeals = meals.filter((m) => m.entry_date === dateISO);
+      if (dayMeals.length === 0) continue;
+      const counted = dayMeals.filter((m) =>
+        ["estimated", "manual_edited"].includes(m.calorie_estimate_status),
+      );
+      const t = targetFor(dateISO);
+      const tCal = t?.target_calories != null ? Number(t.target_calories) : 0;
+      let adh: number | null = null;
+      if (tCal > 0 && counted.length > 0) {
+        const p = counted.reduce((s, m) => s + Number(m.estimated_protein_g ?? 0), 0);
+        const c = counted.reduce((s, m) => s + Number(m.estimated_carbs_g ?? 0), 0);
+        const f = counted.reduce((s, m) => s + Number(m.estimated_fat_g ?? 0), 0);
+        const cal = counted.reduce((s, m) => s + Number(m.estimated_calories ?? 0), 0);
+        const tP = Number(t.target_protein_g ?? 0);
+        const tC = Number(t.target_carbs_g ?? 0);
+        const tF = Number(t.target_fat_g ?? 0);
+        adh = scoreProtein(p, tP) * 0.4 + scoreCalories(cal, tCal) * 0.35 +
+              scoreCarbs(c, tC) * 0.15 + scoreFat(f, tF) * 0.1;
+      }
+      const scored = dayMeals.filter(
+        (m) => m.claude_score_status === "scored" && m.claude_quality_score != null,
+      );
+      const q = scored.length
+        ? scored.reduce((s, m) => s + Number(m.claude_quality_score), 0) / scored.length
+        : null;
+      let ds: number | null = null;
+      if (adh != null && q != null) ds = (adh + q) / 2;
+      else if (adh != null) ds = adh;
+      else if (q != null) ds = q;
+      if (ds != null) { sumDayScore += ds; dayScoreDays++; }
+    }
+
+    const avg = (s: number, n: number) => (n > 0 ? Math.round(s / n) : 0);
+    const avgN = (s: number, n: number) => (n > 0 ? Math.round(s / n) : null);
+
+    const avg_calories = avg(sumCal, logged_days);
+    const avg_protein_g = avg(sumP, logged_days);
+    const avg_carbs_g = avg(sumC, logged_days);
+    const avg_fat_g = avg(sumF, logged_days);
+    const avg_target_calories = avgN(sumTCal, tgtDays);
+    const avg_target_protein_g = avgN(sumTP, tgtDays);
+    const avg_target_carbs_g = avgN(sumTC, tgtDays);
+    const avg_target_fat_g = avgN(sumTF, tgtDays);
+    const avg_meal_quality_score = avgN(sumQ, qDays);
+    const avg_macro_adherence_score = avgN(sumAdh, adhDays);
+    const weekly_nutrition_score = avgN(sumDayScore, dayScoreDays);
+
+    // Main weekly driver — priority order.
+    let main_weekly_driver: string;
+    if (logged_days < 3) {
+      main_weekly_driver = "Not enough logged days yet.";
+    } else if (cal_over_days >= 3) {
+      main_weekly_driver = "Calories are repeatedly over target.";
+    } else if (protein_hit_days < logged_days / 2) {
+      main_weekly_driver = "Protein consistency is the main gap.";
+    } else if (fat_over_days >= 3) {
+      main_weekly_driver = "Fat intake is repeatedly high.";
+    } else if (carb_over_days >= 3) {
+      main_weekly_driver = "Carbs are repeatedly high.";
+    } else {
+      main_weekly_driver = "Weekly pattern is broadly aligned.";
+    }
+
+    // Weekly diagnosis (one short sentence).
+    let weekly_diagnosis: string;
+    if (logged_days === 0) {
+      weekly_diagnosis = "No meals logged this week yet.";
+    } else if (logged_days < 3) {
+      weekly_diagnosis = `You logged ${logged_days} of ${days_elapsed} elapsed day${days_elapsed === 1 ? "" : "s"}. Keep logging before reading the pattern.`;
+    } else if (cal_over_days >= 3) {
+      weekly_diagnosis = `Calories are above target on ${cal_over_days} day${cal_over_days === 1 ? "" : "s"} this week.`;
+    } else if (protein_hit_days < logged_days / 2) {
+      weekly_diagnosis = `Protein was hit on only ${protein_hit_days} of ${logged_days} logged day${logged_days === 1 ? "" : "s"}.`;
+    } else if (fat_over_days >= 3) {
+      weekly_diagnosis = "Fat is the main pressure point this week.";
+    } else if (carb_over_days >= 3) {
+      weekly_diagnosis = "Carbs are running high across the week.";
+    } else {
+      weekly_diagnosis = "Good consistency so far this week.";
+    }
+
+    // Coach note (one actionable line).
+    let coach_note: string;
+    if (logged_days < 3) {
+      coach_note = "Log at least 3 days before reading the weekly pattern.";
+    } else if (pending_meal_count > 0 || failed_meal_count > 0) {
+      coach_note = "Some meals are incomplete, so the weekly view may update.";
+    } else if (protein_hit_days < logged_days / 2) {
+      coach_note = "Fix protein consistency before changing calories.";
+    } else if (
+      calorie_on_target_days < logged_days / 2 &&
+      avg_target_calories != null &&
+      avg_calories > avg_target_calories
+    ) {
+      coach_note = "Portion control is the main lever this week.";
+    } else if (
+      fat_on_target_days < logged_days / 2 &&
+      avg_target_fat_g != null &&
+      avg_fat_g > avg_target_fat_g
+    ) {
+      coach_note = "Keep meals leaner before changing targets.";
+    } else if (weekly_nutrition_score != null && weekly_nutrition_score >= 80) {
+      coach_note = "Good adherence. Stay consistent.";
+    } else {
+      coach_note = "Tighten the main driver before adjusting macros.";
+    }
+
+    return {
+      week_start_date: weekStartISO,
+      week_end_date: weekEndISO,
+      anchor_date: anchorISO,
+      days_elapsed,
+      logged_days,
+
+      avg_calories,
+      avg_protein_g,
+      avg_carbs_g,
+      avg_fat_g,
+
+      avg_target_calories,
+      avg_target_protein_g,
+      avg_target_carbs_g,
+      avg_target_fat_g,
+
+      calorie_on_target_days,
+      protein_hit_days,
+      carb_on_target_days,
+      fat_on_target_days,
+
+      avg_meal_quality_score,
+      avg_macro_adherence_score,
+      weekly_nutrition_score,
+
+      main_weekly_driver,
+      weekly_diagnosis,
+      coach_note,
+
+      pending_meal_count,
+      failed_meal_count,
+    };
+  });
+
