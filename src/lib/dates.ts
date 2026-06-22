@@ -167,3 +167,39 @@ export async function resolveUserTimezone(
     return UTC;
   }
 }
+
+/** Strict IANA validator: must parse via Intl and match a sane shape. */
+const TZ_REGEX = /^[A-Za-z_]+(?:\/[A-Za-z0-9_+\-]+){0,2}$/;
+function isValidIanaTimezone(tz: string): boolean {
+  if (!tz || tz.length > 64) return false;
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+    return TZ_REGEX.test(tz);
+  } catch {
+    return false;
+  }
+}
+
+/** Same as resolveUserTimezone, but falls back to a client-supplied IANA hint
+ *  when profiles.timezone is NULL. Closes the first-session write race where
+ *  the browser TZ persist from useUserTimezone() hasn't committed yet. */
+export async function resolveUserTimezoneWithHint(
+  supabaseClient: { from: (t: string) => any },
+  userId: string,
+  hint?: string | null,
+): Promise<string> {
+  try {
+    const { data } = await supabaseClient
+      .from("profiles")
+      .select("timezone")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const stored = (data?.timezone as string | null) || null;
+    if (stored) return stored;
+    if (hint && isValidIanaTimezone(hint)) return hint;
+    return UTC;
+  } catch {
+    if (hint && isValidIanaTimezone(hint)) return hint;
+    return UTC;
+  }
+}
