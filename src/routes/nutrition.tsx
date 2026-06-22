@@ -142,7 +142,7 @@ function Nutrition() {
     if (import.meta.env.DEV || (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("diag") === "1")) {
       const stillThere = (meals ?? []).some((m) => m.id === id);
       try {
-        const dbTruth = await (debugReadMealById as any)({ data: { id } });
+        const dbTruth = await debugReadMeal({ data: { id } } as any);
         console.log("[meal-delete] post-reload", {
           id,
           stillPresentInList: stillThere,
