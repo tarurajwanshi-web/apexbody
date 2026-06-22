@@ -285,6 +285,30 @@ export const getDayNutritionSummary = getTodayMacroSummary;
 // Phase 3B — Weekly Nutrition Insight (compact, deterministic, no LLM)
 // ============================================================================
 
+export type WeeklyDay = {
+  entry_date: string;
+  weekday_label: string;
+  in_future: boolean;
+  has_logged_meals: boolean;
+  pending_meal_count: number;
+  failed_meal_count: number;
+
+  consumed_calories: number;
+  consumed_protein_g: number;
+  consumed_carbs_g: number;
+  consumed_fat_g: number;
+
+  protein_calories: number;
+  carb_calories: number;
+  fat_calories: number;
+  macro_total_calories: number;
+
+  target_calories: number | null;
+  target_protein_g: number | null;
+  target_carbs_g: number | null;
+  target_fat_g: number | null;
+};
+
 export type WeeklyNutritionInsight = {
   week_start_date: string;
   week_end_date: string;
@@ -311,12 +335,17 @@ export type WeeklyNutritionInsight = {
   avg_macro_adherence_score: number | null;
   weekly_nutrition_score: number | null;
 
+  confidence_label: "low" | "ok";
   main_weekly_driver: string;
   weekly_diagnosis: string;
   coach_note: string;
+  decision_insight: string;
+  early_signal: string;
 
   pending_meal_count: number;
   failed_meal_count: number;
+
+  days: WeeklyDay[];
 };
 
 /** Parse YYYY-MM-DD as a UTC date (no TZ drift). */
