@@ -181,9 +181,11 @@ function Nutrition() {
                   </>
                 ) : (
                   <div>
-                    <span className="text-5xl font-extrabold leading-none gradient-text tabular-nums">{tCal!.toLocaleString()}</span>
-                    <span className="text-base text-text-tertiary mb-1 ml-1">kcal target</span>
-                    <p className="text-[12px] text-text-tertiary mt-2">Log a meal to see your progress</p>
+                    <span className="text-4xl font-extrabold leading-none gradient-text tabular-nums">{tCal!.toLocaleString()}</span>
+                    <span className="text-sm text-text-tertiary mb-0.5 ml-1">kcal target</span>
+                    {isToday && macros?.coaching_line && (
+                      <p className="text-[12px] text-text-secondary mt-1.5">{macros.coaching_line}</p>
+                    )}
                   </div>
                 )
               ) : (
