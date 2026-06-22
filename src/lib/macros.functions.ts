@@ -1,9 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+const dateInput = z
+  .object({ entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() })
+  .optional();
 
 export type MacroSummary = {
   consumed_calories: number;
@@ -20,12 +25,14 @@ export type MacroSummary = {
 
 export const getTodayMacroSummary = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<MacroSummary> => {
+  .inputValidator((d: unknown) => dateInput.parse(d))
+  .handler(async ({ data, context }): Promise<MacroSummary> => {
+    const entryDate = data?.entryDate ?? today();
     const { data: meals } = await context.supabase
       .from("shield_nutrition_logs")
       .select("estimated_calories, estimated_protein_g, estimated_carbs_g, estimated_fat_g, calorie_estimate_status, deleted, entry_date")
       .eq("user_id", context.userId)
-      .eq("entry_date", today())
+      .eq("entry_date", entryDate)
       .eq("deleted", false)
       .in("calorie_estimate_status", ["estimated", "manual_edited"]);
 
