@@ -137,14 +137,21 @@ function Nutrition() {
     // Server confirmed the row is `deleted=true`; refresh every downstream
     // surface now so calories/macros/weekly subtract immediately.
     await reloadNutritionSnapshot();
-    if (import.meta.env.DEV) {
+    if (import.meta.env.DEV || (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("diag") === "1")) {
       const stillThere = (meals ?? []).some((m) => m.id === id);
-      console.log("[meal-delete] post-reload", {
-        id,
-        stillPresentInList: stillThere,
-        kcalAfter: macros?.consumed_calories ?? 0,
-      });
+      try {
+        const dbTruth = await (debugReadMealById as any)({ data: { id } });
+        console.log("[meal-delete] post-reload", {
+          id,
+          stillPresentInList: stillThere,
+          kcalAfter: macros?.consumed_calories ?? 0,
+          dbTruth,
+        });
+      } catch (e) {
+        console.log("[meal-delete] post-reload (debug read failed)", e);
+      }
     }
+
     setPendingUndo({ id });
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     undoTimerRef.current = window.setTimeout(() => setPendingUndo(null), 5000);
