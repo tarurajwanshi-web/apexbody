@@ -70,16 +70,28 @@ function Coach() {
     return () => { cancelled = true; };
   }, [fetchActivity]);
 
+  // Locked + days-until-unlock computed entirely from user-local dates so
+  // desktop and mobile in the same profile timezone agree on "Day X".
+  const localToday = getLocalDateISO(userTz);
   const isLocked = (() => {
     if (!unlockLoaded) return true;
     if (!unlockDate) return true;
-    return new Date(unlockDate).getTime() > Date.now();
+    // unlockDate is a YYYY-MM-DD string; compare lexicographically.
+    return unlockDate.slice(0, 10) > localToday;
   })();
 
   const daysUntilUnlock = (() => {
     if (!unlockDate) return null;
-    const ms = new Date(unlockDate).getTime() - Date.now();
-    return Math.max(0, Math.ceil(ms / 86400000));
+    const target = unlockDate.slice(0, 10);
+    // Count days from localToday to target by walking ISO dates (safe across DST).
+    if (target <= localToday) return 0;
+    let n = 0;
+    let cur = localToday;
+    while (cur < target && n < 365) {
+      cur = addDaysISO(cur, 1);
+      n++;
+    }
+    return n;
   })();
 
   useEffect(() => {
