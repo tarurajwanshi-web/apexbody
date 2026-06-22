@@ -4,6 +4,7 @@ import { ChevronLeft, Check, Trophy, Flame, Dumbbell, Zap, Activity, Sparkles, W
 import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { logBodyMeasurement } from "@/lib/shield.functions";
+import { getBrowserTimezone } from "@/lib/dates";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/onboarding")({
