@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Sparkles, Flame, Heart, BookOpen, RefreshCw, Dumbbell, Droplet } from "lucide-react";
+import { Sparkles, Flame, Heart, BookOpen, RefreshCw, Dumbbell, Droplet, Lock } from "lucide-react";
 import { useProfile } from "@/lib/store";
 import { getOrCreateDailyInsight } from "@/lib/coach.functions";
 import { getTodayReadiness, getActivityWeek, getTodayHydration, type TodayReadiness, type ActivityWeek, type HydrationSummary } from "@/lib/shield.functions";
@@ -602,7 +602,10 @@ function Dashboard() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-[14px] font-semibold text-white">Guides & resources</p>
-            <p className="text-[12px] text-text-secondary mt-0.5">Coming soon — recipe books, training guides & references</p>
+            <div className="flex items-center gap-2 opacity-40 mt-0.5">
+              <Lock size={12} className="text-text-tertiary" />
+              <span className="text-[12px] text-text-tertiary">Available soon</span>
+            </div>
           </div>
           <span className="text-text-tertiary">›</span>
         </button>

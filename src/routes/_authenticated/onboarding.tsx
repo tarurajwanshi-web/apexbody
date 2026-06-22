@@ -708,19 +708,36 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
+const APEX_FACTS = [
+  "BMR calculated via Mifflin-St Jeor — the most validated formula for non-obese adults.",
+  "Protein set at 1.8g/kg. During a cut APEX raises this to 2.2g/kg to protect lean mass.",
+  "TDEE uses your training days as a PAL multiplier — not a generic activity level.",
+  "APEX Shield scores 5 pillars: Recovery, Sleep, Nutrition, Training Load, and Mood.",
+  "The adaptive macro engine adjusts targets weekly from real weight trend vs intake.",
+  "Engine B coaching unlocks Day 7 — grounded in your actual data, not generic advice.",
+  "Fat floor: 0.4g/kg or 25% of calories, whichever is higher — for hormonal health.",
+  "Weekly macro review unlocks after 3 logged nutrition days and 3 weigh-ins.",
+];
+
 function BuildingPlanScreen() {
-  const MESSAGES = [
-    "Building your training split…",
-    "Calculating your macro targets…",
-    "Tailoring exercises to your equipment…",
-    "Setting your weekly volume…",
-    "Almost ready…",
-  ];
   const [idx, setIdx] = useState(0);
+  const [progress, setProgress] = useState(0);
+
   useEffect(() => {
-    const id = setInterval(() => setIdx((i) => (i + 1) % MESSAGES.length), 1800);
+    const id = setInterval(() => setIdx((i) => (i + 1) % APEX_FACTS.length), 3000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    const start = Date.now();
+    const id = setInterval(() => {
+      const pct = Math.min(90, ((Date.now() - start) / 20000) * 90);
+      setProgress(pct);
+      if (pct >= 90) clearInterval(id);
+    }, 100);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ backgroundColor: "#06080F" }}>
       <div className="flex items-center justify-center rounded-full"
@@ -728,15 +745,37 @@ function BuildingPlanScreen() {
         <Sparkles size={28} color="#fff" strokeWidth={2.5} />
       </div>
       <h1 className="mt-8 text-2xl font-semibold text-white text-center">Generating your plan</h1>
-      <p key={idx} className="mt-3 text-[14px] text-text-secondary text-center animate-fade-up min-h-[20px]">{MESSAGES[idx]}</p>
-      <div className="mt-8 flex gap-1.5">
-        <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite" }} />
-        <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "150ms" }} />
-        <span className="h-2 w-2 rounded-full bg-ai" style={{ animation: "typing-dot 1.2s ease-in-out infinite", animationDelay: "300ms" }} />
+      <div className="mt-4 max-w-sm w-full min-h-[60px] flex items-center justify-center">
+        <p
+          key={idx}
+          className="text-[14px] text-text-secondary text-center px-2"
+          style={{ animation: "fact-fade 3s ease-in-out" }}
+        >
+          {APEX_FACTS[idx]}
+        </p>
+      </div>
+      <div className="mt-6 flex gap-1.5">
+        {APEX_FACTS.map((_, i) => (
+          <span
+            key={i}
+            className="h-1.5 w-1.5 rounded-full transition-colors"
+            style={{ background: i === idx ? "white" : "rgba(255,255,255,0.2)" }}
+          />
+        ))}
+      </div>
+      <div className="mt-8 w-full max-w-sm h-[3px] rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
+        <div
+          className="h-full rounded-full"
+          style={{
+            width: `${progress}%`,
+            backgroundImage: "linear-gradient(90deg, #7C3AED 0%, #3B82F6 100%)",
+            transition: "width 200ms linear",
+          }}
+        />
       </div>
       <style>{`
         @keyframes coach-breathe { 0%,100% { transform: scale(0.97); } 50% { transform: scale(1.04); } }
-        @keyframes typing-dot { 0%,60%,100% { opacity: 0.3; transform: scale(0.85); } 30% { opacity: 1; transform: scale(1); } }
+        @keyframes fact-fade { 0% { opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0.6; } }
       `}</style>
     </div>
   );
