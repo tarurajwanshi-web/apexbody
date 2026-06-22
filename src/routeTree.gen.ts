@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkoutsRouteImport } from './routes/workouts'
+import { Route as TrustRouteImport } from './routes/trust'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ResourcesRouteImport } from './routes/resources'
@@ -28,6 +29,11 @@ import { Route as AuthenticatedDashboardRouteImport } from './routes/_authentica
 const WorkoutsRoute = WorkoutsRouteImport.update({
   id: '/workouts',
   path: '/workouts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TrustRoute = TrustRouteImport.update({
+  id: '/trust',
+  path: '/trust',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TermsRoute = TermsRouteImport.update({
@@ -112,6 +118,7 @@ export interface FileRoutesByFullPath {
   '/resources': typeof ResourcesRoute
   '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
+  '/trust': typeof TrustRoute
   '/workouts': typeof WorkoutsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
@@ -128,6 +135,7 @@ export interface FileRoutesByTo {
   '/resources': typeof ResourcesRoute
   '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
+  '/trust': typeof TrustRoute
   '/workouts': typeof WorkoutsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
@@ -146,6 +154,7 @@ export interface FileRoutesById {
   '/resources': typeof ResourcesRoute
   '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
+  '/trust': typeof TrustRoute
   '/workouts': typeof WorkoutsRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/onboarding': typeof AuthenticatedOnboardingRoute
@@ -164,6 +173,7 @@ export interface FileRouteTypes {
     | '/resources'
     | '/settings'
     | '/terms'
+    | '/trust'
     | '/workouts'
     | '/dashboard'
     | '/onboarding'
@@ -180,6 +190,7 @@ export interface FileRouteTypes {
     | '/resources'
     | '/settings'
     | '/terms'
+    | '/trust'
     | '/workouts'
     | '/dashboard'
     | '/onboarding'
@@ -197,6 +208,7 @@ export interface FileRouteTypes {
     | '/resources'
     | '/settings'
     | '/terms'
+    | '/trust'
     | '/workouts'
     | '/_authenticated/dashboard'
     | '/_authenticated/onboarding'
@@ -215,6 +227,7 @@ export interface RootRouteChildren {
   ResourcesRoute: typeof ResourcesRoute
   SettingsRoute: typeof SettingsRoute
   TermsRoute: typeof TermsRoute
+  TrustRoute: typeof TrustRoute
   WorkoutsRoute: typeof WorkoutsRoute
 }
 
@@ -225,6 +238,13 @@ declare module '@tanstack/react-router' {
       path: '/workouts'
       fullPath: '/workouts'
       preLoaderRoute: typeof WorkoutsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/trust': {
+      id: '/trust'
+      path: '/trust'
+      fullPath: '/trust'
+      preLoaderRoute: typeof TrustRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/terms': {
@@ -354,6 +374,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResourcesRoute: ResourcesRoute,
   SettingsRoute: SettingsRoute,
   TermsRoute: TermsRoute,
+  TrustRoute: TrustRoute,
   WorkoutsRoute: WorkoutsRoute,
 }
 export const routeTree = rootRouteImport
