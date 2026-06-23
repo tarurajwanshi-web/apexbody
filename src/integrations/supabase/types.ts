@@ -110,6 +110,33 @@ export type Database = {
         }
         Relationships: []
       }
+      daily_coaching_cards: {
+        Row: {
+          card_date: string
+          card_type: string
+          content: string
+          created_at: string | null
+          id: string
+          user_id: string
+        }
+        Insert: {
+          card_date: string
+          card_type: string
+          content: string
+          created_at?: string | null
+          id?: string
+          user_id: string
+        }
+        Update: {
+          card_date?: string
+          card_type?: string
+          content?: string
+          created_at?: string | null
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       daily_macro_targets: {
         Row: {
           bmr: number
@@ -232,6 +259,120 @@ export type Database = {
         }
         Relationships: []
       }
+      nutrition_daily_summaries: {
+        Row: {
+          compliance_pct: number | null
+          meal_count: number | null
+          summary_date: string
+          total_carbs: number | null
+          total_fat: number | null
+          total_fiber: number | null
+          total_protein: number | null
+          total_sodium: number | null
+          user_id: string
+        }
+        Insert: {
+          compliance_pct?: number | null
+          meal_count?: number | null
+          summary_date: string
+          total_carbs?: number | null
+          total_fat?: number | null
+          total_fiber?: number | null
+          total_protein?: number | null
+          total_sodium?: number | null
+          user_id: string
+        }
+        Update: {
+          compliance_pct?: number | null
+          meal_count?: number | null
+          summary_date?: string
+          total_carbs?: number | null
+          total_fat?: number | null
+          total_fiber?: number | null
+          total_protein?: number | null
+          total_sodium?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      nutrition_meal_full_analysis: {
+        Row: {
+          body_response: string | null
+          carbs_g: number | null
+          coach_insight: string | null
+          created_at: string | null
+          digestion_profile: string | null
+          entry_date: string
+          fat_g: number | null
+          fiber_g: number | null
+          flags: string[] | null
+          food_sources: string[] | null
+          full_haiku_output: Json | null
+          id: string
+          meal_id: string | null
+          meal_time: string | null
+          micronutrients: Json | null
+          potassium_mg: number | null
+          protein_g: number | null
+          quality_assessment: string | null
+          satiety_factors: string | null
+          sodium_mg: number | null
+          sugar_g: number | null
+          timing_implications: string | null
+          user_id: string
+        }
+        Insert: {
+          body_response?: string | null
+          carbs_g?: number | null
+          coach_insight?: string | null
+          created_at?: string | null
+          digestion_profile?: string | null
+          entry_date: string
+          fat_g?: number | null
+          fiber_g?: number | null
+          flags?: string[] | null
+          food_sources?: string[] | null
+          full_haiku_output?: Json | null
+          id?: string
+          meal_id?: string | null
+          meal_time?: string | null
+          micronutrients?: Json | null
+          potassium_mg?: number | null
+          protein_g?: number | null
+          quality_assessment?: string | null
+          satiety_factors?: string | null
+          sodium_mg?: number | null
+          sugar_g?: number | null
+          timing_implications?: string | null
+          user_id: string
+        }
+        Update: {
+          body_response?: string | null
+          carbs_g?: number | null
+          coach_insight?: string | null
+          created_at?: string | null
+          digestion_profile?: string | null
+          entry_date?: string
+          fat_g?: number | null
+          fiber_g?: number | null
+          flags?: string[] | null
+          food_sources?: string[] | null
+          full_haiku_output?: Json | null
+          id?: string
+          meal_id?: string | null
+          meal_time?: string | null
+          micronutrients?: Json | null
+          potassium_mg?: number | null
+          protein_g?: number | null
+          quality_assessment?: string | null
+          satiety_factors?: string | null
+          sodium_mg?: number | null
+          sugar_g?: number | null
+          timing_implications?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       nutrition_weekly_reviews: {
         Row: {
           abnormal_week: boolean
@@ -239,6 +380,7 @@ export type Database = {
           adjustment_kcal: number
           applied_at: string | null
           applied_target_id: string | null
+          avg_strain_value: number | null
           blended_tdee: number | null
           confidence_tier: string | null
           created_at: string
@@ -253,9 +395,11 @@ export type Database = {
           old_target_calories: number | null
           raw_target_calories: number | null
           timezone_used: string
+          training_load_index: number | null
           user_id: string
           week_end_date: string
           week_start_date: string
+          weekly_sets_avg: number | null
           weigh_in_count: number
         }
         Insert: {
@@ -264,6 +408,7 @@ export type Database = {
           adjustment_kcal?: number
           applied_at?: string | null
           applied_target_id?: string | null
+          avg_strain_value?: number | null
           blended_tdee?: number | null
           confidence_tier?: string | null
           created_at?: string
@@ -278,9 +423,11 @@ export type Database = {
           old_target_calories?: number | null
           raw_target_calories?: number | null
           timezone_used: string
+          training_load_index?: number | null
           user_id: string
           week_end_date: string
           week_start_date: string
+          weekly_sets_avg?: number | null
           weigh_in_count?: number
         }
         Update: {
@@ -289,6 +436,7 @@ export type Database = {
           adjustment_kcal?: number
           applied_at?: string | null
           applied_target_id?: string | null
+          avg_strain_value?: number | null
           blended_tdee?: number | null
           confidence_tier?: string | null
           created_at?: string
@@ -303,9 +451,11 @@ export type Database = {
           old_target_calories?: number | null
           raw_target_calories?: number | null
           timezone_used?: string
+          training_load_index?: number | null
           user_id?: string
           week_end_date?: string
           week_start_date?: string
+          weekly_sets_avg?: number | null
           weigh_in_count?: number
         }
         Relationships: [
@@ -347,6 +497,7 @@ export type Database = {
           age: number | null
           biological_sex: string | null
           body_data_type: string | null
+          coaching_time: string | null
           created_at: string
           dexa_body_fat_pct: number | null
           dexa_lean_mass_kg: number | null
@@ -374,6 +525,7 @@ export type Database = {
           age?: number | null
           biological_sex?: string | null
           body_data_type?: string | null
+          coaching_time?: string | null
           created_at?: string
           dexa_body_fat_pct?: number | null
           dexa_lean_mass_kg?: number | null
@@ -401,6 +553,7 @@ export type Database = {
           age?: number | null
           biological_sex?: string | null
           body_data_type?: string | null
+          coaching_time?: string | null
           created_at?: string
           dexa_body_fat_pct?: number | null
           dexa_lean_mass_kg?: number | null
