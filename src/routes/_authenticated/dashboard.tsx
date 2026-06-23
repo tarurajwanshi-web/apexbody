@@ -17,6 +17,7 @@ import { WhatApexKnows } from "@/components/dashboard/WhatApexKnows";
 import { ThisWeek } from "@/components/dashboard/ThisWeek";
 import { QuickActions } from "@/components/dashboard/QuickActions";
 import { BottomSheet } from "@/components/dashboard/BottomSheet";
+import { cleanCardText } from "@/components/dashboard/text";
 
 import { loadDashboardData, type DashboardData } from "@/lib/dashboard-data";
 import {
