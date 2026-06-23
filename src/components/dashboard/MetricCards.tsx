@@ -72,7 +72,7 @@ export function MetricCards({
 }) {
   // Weight
   let weightVal = "—";
-  let weightCol = T.disabled;
+  let weightCol: string = T.disabled;
   if (weight.deltaKg != null) {
     const d = weight.deltaKg;
     weightVal = `${d > 0 ? "+" : ""}${d.toFixed(1)}kg`;
