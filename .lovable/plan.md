@@ -1,13 +1,13 @@
-Create `supabase/functions/generate-weekly-pattern/index.ts` with the full file body as pasted (model `claude-sonnet-4-6`, Friday 8 PM local-time gate, 7-day meal/training/weight aggregation, idempotent `weekly_pattern` card in `daily_coaching_cards`, low-data fallback, `force` param).
+Create `supabase/functions/generate-training-sync/index.ts` with the full file body as pasted (Thursday 6 PM local-time gate, reads next week's `weekly_plans`, current `daily_macro_targets`, last 7 days `readiness_scores`; Sonnet `claude-sonnet-4-6`; idempotent `training_sync` card in `daily_coaching_cards`; no-plan fallback; `force` param).
 
-Then register the cron via `supabase--insert`:
+Register cron via `supabase--insert`:
 
 ```sql
 SELECT cron.schedule(
-  'generate-weekly-pattern',
+  'generate-training-sync',
   '*/5 * * * *',
   $$SELECT net.http_post(
-    url := 'https://toixlzfmxtmtypmupcuc.supabase.co/functions/v1/generate-weekly-pattern',
+    url := 'https://toixlzfmxtmtypmupcuc.supabase.co/functions/v1/generate-training-sync',
     headers := jsonb_build_object(
       'Content-Type','application/json',
       'x-internal-secret', (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name='dispatch_secret' LIMIT 1)
@@ -19,4 +19,4 @@ SELECT cron.schedule(
 
 No other functions, RLS, schema, or frontend changes.
 
-Note: `claude-sonnet-4-6` isn't a standard Anthropic model id format. Using it verbatim per your instruction; if the API returns 404 on first run, swap to the correct dated Sonnet id.
+Note: `claude-sonnet-4-6` isn't a standard dated Anthropic model id. Using verbatim per your instruction; if the API returns 404, we swap to the correct dated Sonnet id.
