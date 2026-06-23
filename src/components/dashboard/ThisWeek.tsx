@@ -3,6 +3,7 @@ import { ChevronRight, BarChart3, Dumbbell } from "lucide-react";
 import { T } from "./tokens";
 import { BottomSheet } from "./BottomSheet";
 import type { DashboardCard } from "@/lib/dashboard-data";
+import { cleanCardText } from "./text";
 
 export function ThisWeek({ cards }: { cards: DashboardCard[] }) {
   const weekly = cards.find((c) => c.card_type === "weekly_pattern");
@@ -39,7 +40,7 @@ export function ThisWeek({ cards }: { cards: DashboardCard[] }) {
             iconBg="#0D0A28"
             icon={<BarChart3 size={14} color={T.primary} />}
             title="Week in Review"
-            sub={truncate(weekly.content, 40)}
+            sub={truncate(cleanCardText(weekly.content), 40)}
             onClick={() => setOpen(weekly)}
           />
         )}
@@ -57,7 +58,7 @@ export function ThisWeek({ cards }: { cards: DashboardCard[] }) {
             iconBg="#071E14"
             icon={<Dumbbell size={14} color={T.green} />}
             title="Next Week's Plan"
-            sub={truncate(sync.content, 40)}
+            sub={truncate(cleanCardText(sync.content), 40)}
             onClick={() => setOpen(sync)}
           />
         )}
@@ -86,7 +87,7 @@ export function ThisWeek({ cards }: { cards: DashboardCard[] }) {
                 whiteSpace: "pre-wrap",
               }}
             >
-              {open.content}
+              {cleanCardText(open.content)}
             </p>
           </>
         )}

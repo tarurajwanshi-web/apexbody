@@ -186,7 +186,7 @@ function Dashboard() {
                   whiteSpace: "pre-wrap",
                 }}
               >
-                {c.content}
+                {cleanCardText(c.content)}
               </p>
             </div>
           ))}

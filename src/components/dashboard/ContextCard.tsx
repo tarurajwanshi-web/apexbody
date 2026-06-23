@@ -4,6 +4,7 @@ import { T } from "./tokens";
 import type { ContextPriority } from "@/lib/dashboard-state";
 import { topFoodSources, minutesSince, pctOf } from "@/lib/dashboard-state";
 import type { DashboardData } from "@/lib/dashboard-data";
+import { cleanCardText, firstSentence } from "./text";
 
 type Props = {
   priority: ContextPriority;
@@ -234,8 +235,12 @@ function RecoveryWindow({ d, onLogMeal }: { d: DashboardData; onLogMeal: () => v
 /* ---------------- P2 ---------------- */
 function ApexSays({ d, onViewBreakdown }: { d: DashboardData; onViewBreakdown: () => void }) {
   const note = d.cards.find((c) => c.card_type === "daily_note");
-  const content = note?.content ?? "";
-  const headline = content.length > 60 ? `${content.slice(0, 60)}...` : content;
+  const raw = note?.content ?? "";
+  const content = cleanCardText(raw);
+  const headline = firstSentence(raw);
+  const body = headline && content.startsWith(headline)
+    ? content.slice(headline.length).replace(/^[.!?\s]+/, "")
+    : content;
   const orange = "#FF8C42";
   const compliance = d.macros?.compliance_pct ?? null;
   return (
@@ -252,17 +257,19 @@ function ApexSays({ d, onViewBreakdown }: { d: DashboardData; onViewBreakdown: (
       <p style={{ fontSize: 15, fontWeight: 500, color: T.text1, marginTop: 8 }}>
         {headline}
       </p>
-      <p
-        style={{
-          fontSize: 13,
-          color: T.text2,
-          marginTop: 8,
-          lineHeight: 1.6,
-          whiteSpace: "pre-wrap",
-        }}
-      >
-        {content}
-      </p>
+      {body && (
+        <p
+          style={{
+            fontSize: 13,
+            color: T.text2,
+            marginTop: 8,
+            lineHeight: 1.6,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {body}
+        </p>
+      )}
       <div className="flex items-center justify-between mt-3">
         {compliance != null ? (
           <span
