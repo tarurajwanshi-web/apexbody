@@ -502,6 +502,7 @@ export type Database = {
           dexa_body_fat_pct: number | null
           dexa_lean_mass_kg: number | null
           disclaimer_accepted_at: string | null
+          eating_pattern: string | null
           equipment_access: string | null
           goal: string | null
           id: string
@@ -530,6 +531,7 @@ export type Database = {
           dexa_body_fat_pct?: number | null
           dexa_lean_mass_kg?: number | null
           disclaimer_accepted_at?: string | null
+          eating_pattern?: string | null
           equipment_access?: string | null
           goal?: string | null
           id?: string
@@ -558,6 +560,7 @@ export type Database = {
           dexa_body_fat_pct?: number | null
           dexa_lean_mass_kg?: number | null
           disclaimer_accepted_at?: string | null
+          eating_pattern?: string | null
           equipment_access?: string | null
           goal?: string | null
           id?: string
