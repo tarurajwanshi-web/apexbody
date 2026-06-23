@@ -1,94 +1,57 @@
+# Dashboard Display Fixes (frontend-only)
 
-# Dashboard Visual Overhaul — Plan
+Scope: only files under `src/components/dashboard/` and `src/lib/dashboard-state.ts` / `src/lib/dashboard-data.ts` if needed for headline derivation. No edge functions, DB, other pages, navigation, or score logic touched.
 
-## Scope confirmation
+## 1. Shared text utilities
 
-1. ✅ Only `src/routes/_authenticated/dashboard.tsx` is modified (plus new sibling components).
-2. ✅ Zero backend changes — no Edge Functions, no migrations, no RLS, no schema edits.
-3. ✅ No other page touched (Fuel, Training, Recovery, Settings, Profile, BottomNav all untouched).
-4. ✅ State detection logic is 100% frontend — derived in React from existing Supabase tables already accessible via RLS.
-5. ✅ Bottom sheet is a new frontend-only component (`useState` open/close, no library, tap-outside + swipe-down to close).
+Add two pure helpers (co-located in `src/components/dashboard/tokens.ts` or a new `src/components/dashboard/text.ts` — single small file, no new deps):
 
-## Files
+- `stripMarkdown(input: string): string`
+  - Remove `**` and `*` markers (bold/italic), keep inner text.
+  - Remove leading `#`, `##`, `###` header markers at line starts.
+  - Collapse `\r\n` → `\n`. Preserve `\n\n` as paragraph breaks.
+  - Trim trailing whitespace per line; trim outer whitespace.
+- `stripEmojis(input: string): string`
+  - Remove emoji ranges via regex (covers ❌ ✅ ⚠️ 🕐 📊 and general Unicode emoji blocks).
+  - Collapse leftover double spaces.
+- `cleanCardText(input)` = `stripEmojis(stripMarkdown(input))`.
+- `firstSentence(input: string): string`
+  - Run `cleanCardText` first.
+  - Cut at first `.`, `!`, `?`, or `\n` (whichever comes first). Return trimmed substring without the terminator-trailing whitespace. If none found, return the whole cleaned string.
 
-**New files**
-- `src/components/dashboard/TopBar.tsx` — greeting + streak badge (all streak states)
-- `src/components/dashboard/MomentumBar.tsx` — 3 metric cards (weight / training / compliance)
-- `src/components/dashboard/ApexScoreCard.tsx` — score + status + pillar pills
-- `src/components/dashboard/StreakNotification.tsx` — conditional banner (resting / rest day / milestone / ghost return)
-- `src/components/dashboard/ContextCard.tsx` — priority router (P0–P7) + 8 sub-renderers
-- `src/components/dashboard/WhatApexKnows.tsx` — 3-row signal/confidence panel
-- `src/components/dashboard/ThisWeek.tsx` — Week in Review + Next Week's Plan rows (with dotted separator)
-- `src/components/dashboard/QuickActions.tsx` — 4-button row
-- `src/components/dashboard/BottomSheet.tsx` — reusable slide-up sheet
-- `src/lib/dashboard-state.ts` — pure functions: `detectContextState()`, `detectStreakState()`, `computeMomentum()`, time helpers (user-local hour via profile timezone)
-- `src/lib/dashboard-data.functions.ts` — single server function `getDashboardData()` that batch-fetches all needed rows for the authed user
+## 2. Apply to all card renderers
 
-**Edited file**
-- `src/routes/_authenticated/dashboard.tsx` — replace current visual layout with the 8-section stack. Keeps the route registration, auth gate, and existing data-load entrypoints; removes the old visual blocks (APEX score card, recovery/sleep/mood, macros, CoachingFeed insertion) and replaces with the new components. Existing `CoachingFeed` stays in the codebase but is no longer rendered on the dashboard (per spec — "This Week" rows replace it).
+In `src/components/dashboard/ContextCard.tsx`, `ThisWeek.tsx`, `BottomSheet.tsx`, and any place coaching card `content` is rendered:
 
-**Not touched**
-- All edge functions, all other routes, `BottomNav`, `client.ts`, `types.ts`, `styles.css` design tokens stay as-is (new tokens applied inline within dashboard components to avoid global side effects).
+- Pipe every card `content` field through `cleanCardText` before render.
+- Card types covered: `daily_note`, `daily_scorecard`, `weekly_pattern`, `training_sync`, `permission_slip`.
+- For multi-paragraph rendering, split on `\n\n` and map to `<p>` blocks (paragraph spacing via existing styles).
 
-## Design tokens
+## 3. Scorecard: color-only status
 
-All `--apex-*` colors, typography rules, card rules, and dotted separators applied via inline `style` props inside dashboard components only. No edits to `src/styles.css` (keeps global theme untouched and isolates the redesign).
+In whichever component renders scorecard rows (ContextCard scorecard branch / BottomSheet):
 
-## Data flow
+- After `cleanCardText`, no emoji remains.
+- Keep value color (red/amber/green/etc.) as the sole status signal — no replacement glyph inserted. Existing color logic untouched.
 
-One server function `getDashboardData()` calls (with the authed `supabase` client from `requireSupabaseAuth` middleware):
+## 4. Week in Review / Next Week's Plan subtitles
 
-```text
-profiles                          → name, goal, eating_pattern, coaching_time, timezone
-readiness_scores (today)          → score + pillars
-nutrition_daily_summaries (today) → totals + compliance_pct
-nutrition_daily_summaries (7d)    → compliance avg
-daily_macro_targets (active)      → protein/carbs/fat targets
-workout_set_logs (today)          → sets count + most recent entry_time
-workout_set_logs (this+last week) → momentum sets delta
-daily_coaching_cards (today)      → by card_type
-weekly_plans                      → today's planned session (next week for sync row)
-body_measurement_events (last 2)  → weight delta
-nutrition_meal_full_analysis      → today's meal count, last log date, frequent food_sources
-```
+In `ThisWeek.tsx`, strip emojis from row subtitle strings (whether sourced from card content or hardcoded). Apply `cleanCardText` to dynamic subtitles; for any hardcoded literal containing an emoji, remove the emoji character directly.
 
-Returned as a single typed `DashboardData` object. Component computes derived state via `dashboard-state.ts` pure helpers — no extra round-trips.
+## 5. APEX Says headline truncation
 
-## Context card priority resolver
+In ContextCard's `daily_note` / "APEX Says" branch:
 
-Pure function in `dashboard-state.ts`, returns `{ priority: 'P0'…'P7', props }`. Evaluated in spec order; first match wins. All thresholds (≥90% protein, ≥85% carbs, ≤115% fat, 70% carbs gate, 90-min recovery window, 20:00 / 18:00 / 12:00 hour gates, 2-day ghost) match spec verbatim. Time uses user's `profiles.timezone` (fallback browser tz).
+- Replace current `slice(0, 60)` (or similar char-count truncation) with `firstSentence(content)`.
+- Body below headline continues to render full `cleanCardText(content)` split into paragraphs.
 
-## Streak resolver
+## Verification
 
-Pure function returns one of: `active | silent-miss-1 | resting-miss-2 | protected-rest | milestone-7|14|30|60|100 | reset`. Drives both `TopBar` badge variant and conditional `StreakNotification` render.
+- Visually confirm on `/dashboard`:
+  - No `*`, `**`, `#` characters visible in any card.
+  - No emojis in scorecard, coaching cards, week/next-week rows, or bottom sheet.
+  - APEX Says headline ends on a sentence boundary, never mid-word.
 
-## Layout order (top → bottom)
+## Out of scope
 
-```text
-TopBar
-MomentumBar (3 cards)
-ApexScoreCard
-StreakNotification          ← conditional
-ContextCard                 ← P0–P7 routed
-WhatApexKnows
-ThisWeek                    ← hidden if both rows empty
-QuickActions
-```
-
-`BottomNav` continues to render via the `_authenticated` layout — untouched.
-
-## Bottom sheet
-
-`<BottomSheet open onClose>` portal-free, fixed-position overlay (`role="dialog"`, `aria-modal`). Backdrop click + swipe-down (pointer events Δy > 60px) closes. Used by `ThisWeek` rows to display full `weekly_pattern` / `training_sync` card content with preserved line breaks.
-
-## Quick Actions wiring
-
-Buttons navigate via TanStack `Link` to existing routes where available (`/nutrition` for meal/weigh-in, `/workouts` for sets). Recovery button opens existing recovery flow if present, otherwise no-ops with `aria-disabled` — no new pages.
-
-## Out of scope (explicit)
-
-- No changes to Shield score calculation, RLS, schema, edge functions, or any other route.
-- No new dependencies. Pure React + Tailwind + inline styles for tokens.
-- `CoachingFeed.tsx` file is left in place (unrendered) to avoid touching unrelated code; can be deleted in a follow-up if desired.
-
-Approve to switch to build mode.
+Edge functions, DB content, score calc, other routes, nav, modals outside the dashboard surface.
