@@ -1,22 +1,14 @@
-Create `supabase/functions/generate-training-sync/index.ts` with the full file body as pasted (Thursday 6 PM local-time gate, reads next week's `weekly_plans`, current `daily_macro_targets`, last 7 days `readiness_scores`; Sonnet `claude-sonnet-4-6`; idempotent `training_sync` card in `daily_coaching_cards`; no-plan fallback; `force` param).
+Create `supabase/functions/check-permission-slip/index.ts` with the file body as pasted.
 
-Register cron via `supabase--insert`:
+- Event-based: requires `user_id` in body (returns 400 if missing).
+- Deterministic rule: `readiness > 75` AND `training_load_index > 1.05` AND `carbs < 85% of target` — all three must be true to fire.
+- Idempotent: one `permission_slip` card per user per local day in `daily_coaching_cards`.
+- Calls Haiku `claude-haiku-4-5-20251001`; safe fallback string on error.
+- `force=true` bypasses both the rule and idempotency for testing.
+- Returns debug payload (readiness, training load, carbs %) when conditions not met.
 
-```sql
-SELECT cron.schedule(
-  'generate-training-sync',
-  '*/5 * * * *',
-  $$SELECT net.http_post(
-    url := 'https://toixlzfmxtmtypmupcuc.supabase.co/functions/v1/generate-training-sync',
-    headers := jsonb_build_object(
-      'Content-Type','application/json',
-      'x-internal-secret', (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name='dispatch_secret' LIMIT 1)
-    ),
-    body := '{}'::jsonb
-  )$$
-);
-```
+Schema verified: `nutrition_weekly_reviews.training_load_index` and `.weekly_sets_avg` exist; `readiness_scores.overall_score` exists; other tables already in use.
 
-No other functions, RLS, schema, or frontend changes.
+**No cron** — event-based. Frontend POSTs `{user_id}` with `x-internal-secret` header on readiness updates.
 
-Note: `claude-sonnet-4-6` isn't a standard dated Anthropic model id. Using verbatim per your instruction; if the API returns 404, we swap to the correct dated Sonnet id.
+No changes to other functions, RLS, schema, or frontend.
