@@ -8,6 +8,7 @@ import { getTodayReadiness, getActivityWeek, getTodayHydration, type TodayReadin
 import { RecoveryLogModal, MealLogModal } from "@/components/LogModals";
 import { getTodayMacroSummary, type MacroSummary } from "@/lib/macros.functions";
 import { BottomNav } from "@/components/BottomNav";
+import { CoachingFeed } from "@/components/CoachingFeed";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { supabase } from "@/integrations/supabase/client";
