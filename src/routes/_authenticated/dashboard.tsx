@@ -12,6 +12,7 @@ import { StateCard } from "@/components/dashboard/StateCard";
 import { MetricCards } from "@/components/dashboard/MetricCards";
 import { Insights } from "@/components/dashboard/Insights";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
+import { DecisionPanel, type DecisionAction } from "@/components/DecisionPanel";
 
 import { loadDashboardData, type DashboardData } from "@/lib/dashboard-data";
 import { detectStreak } from "@/lib/dashboard-state";
