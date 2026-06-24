@@ -292,7 +292,7 @@ function Nutrition() {
       }}
     >
       {(ptrDelta > 0 || refreshing) && (
-        <div className="absolute left-1/2 -translate-x-1/2 top-2 z-50 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium text-text-secondary"
+        <div className="absolute left-1/2 -translate-x-1/2 top-2 z-50 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium text-text-secondary"
           style={{ background: "rgba(15,21,36,0.85)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(8px)" }}>
           <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
           <span>{refreshing ? "Refreshing…" : ptrDelta >= 60 ? "Release to refresh" : "Pull to refresh"}</span>
@@ -300,7 +300,7 @@ function Nutrition() {
       )}
       <header className="flex items-center justify-between px-5 pt-6">
         <Link to="/dashboard" className="text-text-secondary"><ChevronLeft size={24} /></Link>
-        <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Nutrition</span>
+        <span className="text-[12px] uppercase tracking-wider text-text-tertiary">Nutrition</span>
         <span className="w-6" />
       </header>
       <div className="px-5 mt-2">
@@ -363,24 +363,24 @@ function Nutrition() {
                 hasMeals ? (
                   <>
                     <span
-                      className={`text-4xl font-medium leading-none tabular-nums ${cCal > tCal! ? "" : "gradient-text"}`}
+                      className={`text-[20px] font-medium leading-none tabular-nums ${cCal > tCal! ? "" : "gradient-text"}`}
                       style={cCal > tCal! ? { color: "#F59E0B" } : undefined}
                     >
                       {cCal.toLocaleString()}
                     </span>
-                    <span className="text-sm text-text-tertiary mb-0.5">/ {tCal!.toLocaleString()} kcal</span>
+                    <span className="text-[14px] text-text-tertiary mb-0.5">/ {tCal!.toLocaleString()} kcal</span>
                   </>
                 ) : (
                   <div>
-                    <span className="text-4xl font-medium leading-none gradient-text tabular-nums">{tCal!.toLocaleString()}</span>
-                    <span className="text-sm text-text-tertiary mb-0.5 ml-1">kcal target</span>
+                    <span className="text-[20px] font-medium leading-none gradient-text tabular-nums">{tCal!.toLocaleString()}</span>
+                    <span className="text-[14px] text-text-tertiary mb-0.5 ml-1">kcal target</span>
                     {isToday && macros?.coaching_line && (
                       <p className="text-[12px] text-text-secondary mt-1.5">{macros.coaching_line}</p>
                     )}
                   </div>
                 )
               ) : (
-                <span className="text-sm text-text-tertiary">No target yet.</span>
+                <span className="text-[14px] text-text-tertiary">No target yet.</span>
               )}
             </div>
             {hasTarget && hasMeals && (() => {
@@ -426,7 +426,7 @@ function Nutrition() {
           <Macro label="Fat"     v={macros?.consumed_fat_g ?? 0}     t={macros?.target_fat_g ?? 0}     color="#3B82F6" hasMeals={hasMeals} />
         </div>
         {macros?.coaching_line && hasMeals && (
-          <div className="mt-3 rounded-full bg-white/5 border border-white/10 px-3 py-1 text-[11px] text-text-secondary text-center">
+          <div className="mt-3 rounded-full bg-white/5 border border-white/10 px-3 py-1 text-[12px] text-text-secondary text-center">
             {macros.coaching_line}
           </div>
         )}
@@ -466,14 +466,14 @@ function Nutrition() {
 
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
-          <p className="text-xs uppercase tracking-wider text-text-tertiary">
+          <p className="text-[12px] uppercase tracking-wider text-text-tertiary">
             {isToday
               ? "Today's meals"
               : dateLabel === "Yesterday"
                 ? "Yesterday's meals"
                 : `Meals on ${formatShortDate(selectedDate)}`}
           </p>
-          <p className="text-[11px] text-text-accent">
+          <p className="text-[12px] text-text-accent">
             {isToday ? "Tap + below to log a meal" : "Viewing this day. New meals log to today only."}
           </p>
         </div>
@@ -509,13 +509,13 @@ function Nutrition() {
 
       {/* Undo snackbar — sits above bottom nav, 5s timeout. */}
       {pendingUndo && (
-        <div className="fixed left-1/2 -translate-x-1/2 bottom-28 z-[90] flex items-center gap-3 rounded-full px-4 py-2.5 text-[13px] text-white shadow-lg"
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-28 z-[90] flex items-center gap-3 rounded-full px-4 py-2.5 text-[12px] text-white shadow-lg"
           style={{ background: "rgba(15,21,36,0.95)", border: "1px solid rgba(255,255,255,0.10)" }}>
           <span>Meal deleted</span>
           <button
             type="button"
             onClick={handleUndoDelete}
-            className="text-[13px] font-medium text-text-accent active:scale-95"
+            className="text-[12px] font-medium text-text-accent active:scale-95"
           >
             Undo
           </button>
@@ -548,7 +548,7 @@ function Macro({ label, v, t, color: _color, hasMeals }: { label: string; v: num
   return (
     <div className="flex flex-col items-center gap-1">
       <RingChart size={56} stroke={5} rings={[{ value: pct, color: ringColor }]} centerLabel={hasMeals ? `${rawPct}%` : "—"} />
-      <p className="text-[11px] font-medium mt-1">{label}</p>
+      <p className="text-[12px] font-medium mt-1">{label}</p>
       <p className={`text-[10px] ${over ? "" : "text-text-tertiary"}`} style={{ color: over ? "#F59E0B" : undefined }}>
         {hasMeals ? `${v}/${t || "—"}g${over ? ` · +${v - t}g` : ""}` : `${t || "—"}g target`}
       </p>
@@ -576,14 +576,14 @@ function HydrationCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <Droplet size={14} className="text-sleep" />
-            <p className="text-[15px] font-medium text-white">Hydration</p>
+            <p className="text-[14px] font-medium text-white">Hydration</p>
           </div>
           {target ? (
             <>
               <p className="mt-1 text-[20px] font-medium tabular-nums">
-                {liters(consumed)}<span className="text-text-tertiary text-sm font-normal"> / {liters(target)}L</span>
+                {liters(consumed)}<span className="text-text-tertiary text-[14px] font-normal"> / {liters(target)}L</span>
               </p>
-              <p className="text-[11px] text-text-tertiary">
+              <p className="text-[12px] text-text-tertiary">
                 {pct}% of today's target
                 {hydration?.had_training_today ? " · training day (+10 ml/kg)" : ""}
               </p>
@@ -656,7 +656,7 @@ function BottleFill({ pct, disabled }: { pct: number; disabled?: boolean }) {
         </linearGradient>
       </svg>
       {!disabled && (
-        <p className="absolute inset-0 flex items-center justify-center text-[11px] font-medium text-white drop-shadow">{pct}%</p>
+        <p className="absolute inset-0 flex items-center justify-center text-[12px] font-medium text-white drop-shadow">{pct}%</p>
       )}
     </div>
   );
@@ -732,7 +732,7 @@ function UnifiedTimeline({
           : `Nothing logged on ${formatShortDate(selectedDate)}.`;
     return (
       <div className="rounded-2xl bg-bg-2 border border-white/5 p-5">
-        <p className="text-sm text-text-secondary">{emptyCopy}</p>
+        <p className="text-[14px] text-text-secondary">{emptyCopy}</p>
       </div>
     );
   }
@@ -758,8 +758,8 @@ function UnifiedTimeline({
           >
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium truncate">{r.meal.meal_description || "Photo meal"}</p>
-                <p className="text-[11px] text-text-tertiary">
+                <p className="text-[14px] font-medium truncate">{r.meal.meal_description || "Photo meal"}</p>
+                <p className="text-[12px] text-text-tertiary">
                   {fmtTime(r.ts)}
                   {r.meal.estimated_calories != null ? ` · ${Math.round(r.meal.estimated_calories)} kcal` : ""}
                 </p>
@@ -777,7 +777,7 @@ function UnifiedTimeline({
                 })()}
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <p className="font-mono text-sm tabular-nums text-text-secondary">
+                <p className="font-mono text-[14px] tabular-nums text-text-secondary">
                   {r.meal.claude_score_status === "scored" && r.meal.claude_quality_score != null
                     ? `${r.meal.claude_quality_score}/100`
                     : "scoring…"}
@@ -825,8 +825,8 @@ function UnifiedTimeline({
                 <Droplet size={14} className="text-sleep" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-white">Water — {r.ev.amount_ml} ml</p>
-                <p className="text-[11px] text-text-tertiary">{fmtTime(r.ts)}</p>
+                <p className="text-[14px] font-medium text-white">Water — {r.ev.amount_ml} ml</p>
+                <p className="text-[12px] text-text-tertiary">{fmtTime(r.ts)}</p>
               </div>
               {onRequestDeleteWater && confirmDeleteWaterId !== r.ev.id && (
                 <button
@@ -934,7 +934,7 @@ function ScorePill({
     <div className="flex flex-col items-center">
       <p className="text-[10px] text-text-tertiary uppercase tracking-wider text-center">{label}</p>
       <p
-        className={`mt-1 tabular-nums ${emphasized ? "text-lg font-medium" : "text-base font-medium"}`}
+        className={`mt-1 tabular-nums ${emphasized ? "text-[18px] font-medium" : "text-[16px] font-medium"}`}
         style={{ color }}
       >
         {value == null ? "—" : value}
@@ -961,7 +961,7 @@ function WeeklyPreviewCard({
   return (
     <section className="mx-5 mt-4 rounded-2xl bg-bg-2 border border-white/5 p-4">
       <div className="flex items-baseline justify-between">
-        <p className="text-[15px] font-medium text-white">This week so far</p>
+        <p className="text-[14px] font-medium text-white">This week so far</p>
         {weekly_nutrition_score != null && !lowConfidence && (
           <span
             className="text-[12px] font-medium tabular-nums"
@@ -973,7 +973,7 @@ function WeeklyPreviewCard({
       </div>
 
       <div className="mt-1 flex items-baseline gap-2">
-        <span className="text-2xl font-medium tabular-nums text-white leading-none">
+        <span className="text-[20px] font-medium tabular-nums text-white leading-none">
           {logged_days}
         </span>
         <span className="text-[12px] text-text-tertiary">
@@ -1094,7 +1094,7 @@ function WeeklyGraphSheet({
         </div>
         <div className="px-5 pt-3 pb-2 flex items-start justify-between">
           <div className="min-w-0">
-            <p className="text-[17px] font-medium text-white tracking-tight">Weekly adherence</p>
+            <p className="text-[16px] font-medium text-white tracking-tight">Weekly adherence</p>
             <p className="mt-0.5 text-[12px] text-text-tertiary">{rangeLabel || "Loading…"}</p>
           </div>
           <button
@@ -1115,7 +1115,7 @@ function WeeklyGraphSheet({
           >
             <ChevronLeft size={18} />
           </button>
-          <span className="text-[13px] font-medium text-white">
+          <span className="text-[12px] font-medium text-white">
             {isThisWeek ? "This week" : rangeLabel}
           </span>
           <button
@@ -1133,7 +1133,7 @@ function WeeklyGraphSheet({
           {data && data.logged_days < 3 && data.logged_days > 0 && (
             <div className="mb-4 rounded-2xl px-4 py-3 text-[12px] text-text-secondary"
               style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.20)" }}>
-              <span className="text-[13px]">🧊 Early signal</span>
+              <span className="text-[12px]">🧊 Early signal</span>
               <span className="ml-2">Log {Math.max(1, 3 - data.logged_days)} more day{3 - data.logged_days === 1 ? "" : "s"} to unlock a reliable weekly pattern.</span>
             </div>
           )}
@@ -1185,14 +1185,14 @@ function WeeklyGraphContent({ data }: { data: WeeklyNutritionInsight }) {
     <div className="space-y-5">
       {/* Chart header */}
       <div>
-        <p className="text-[13px] font-medium text-white">Macro calories by day</p>
-        <p className="mt-0.5 text-[11px] text-text-tertiary leading-snug">
+        <p className="text-[12px] font-medium text-white">Macro calories by day</p>
+        <p className="mt-0.5 text-[12px] text-text-tertiary leading-snug">
           Protein, carbs, and fat stacked against your calorie target.
         </p>
       </div>
 
       {/* Legend */}
-      <div className="flex items-center justify-center gap-4 text-[11px] text-text-secondary">
+      <div className="flex items-center justify-center gap-4 text-[12px] text-text-secondary">
         <LegendDot color="#F59E0B" label="Protein" />
         <LegendDot color="#10B981" label="Carbs" />
         <LegendDot color="#3B82F6" label="Fat" />
@@ -1233,8 +1233,8 @@ function WeeklyGraphContent({ data }: { data: WeeklyNutritionInsight }) {
 
       {/* Diagnosis */}
       <div className="rounded-2xl bg-white/[0.03] border border-white/5 px-4 py-3">
-        <p className="text-[11px] uppercase tracking-wider text-text-tertiary">Insight</p>
-        <p className="mt-1 text-[13px] text-text-secondary leading-snug">{decision_insight}</p>
+        <p className="text-[12px] uppercase tracking-wider text-text-tertiary">Insight</p>
+        <p className="mt-1 text-[12px] text-text-secondary leading-snug">{decision_insight}</p>
       </div>
     </div>
   );
@@ -1366,7 +1366,7 @@ function StackedBarChart({
       </svg>
       {empty && (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 pointer-events-none">
-          <p className="text-[13px] font-medium text-white">No meals logged this week yet.</p>
+          <p className="text-[12px] font-medium text-white">No meals logged this week yet.</p>
           <p className="mt-1 text-[12px] text-text-tertiary">Log meals to see your weekly pattern.</p>
         </div>
       )}
@@ -1377,9 +1377,9 @@ function StackedBarChart({
 function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="rounded-2xl bg-white/[0.03] border border-white/5 px-3 py-2.5">
-      <p className="text-[11px] text-text-tertiary">{label}</p>
+      <p className="text-[12px] text-text-tertiary">{label}</p>
       <p className="mt-0.5 text-[16px] font-medium tabular-nums text-white leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-text-tertiary leading-tight mt-0.5">{sub}</p>}
+      {sub && <p className="text-[12px] text-text-tertiary leading-tight mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -1401,14 +1401,14 @@ function MacroReviewCard({ review, compact = false }: { review: MacroAdjustmentR
     <section className={`${compact ? "" : "mx-5 mt-4"} rounded-2xl bg-bg-2 border border-white/5 p-4`}>
       <div className="flex items-center justify-between">
         <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Next target review</p>
-        <span className="text-[11px] text-text-tertiary">
+        <span className="text-[12px] text-text-tertiary">
           {formatRangeLabel(review.review_week_start, review.review_week_end)}
         </span>
       </div>
 
       {locked ? (
         <>
-          <p className="mt-2 text-[15px] font-medium text-white">🔒 Macro adjustment locked</p>
+          <p className="mt-2 text-[14px] font-medium text-white">🔒 Macro adjustment locked</p>
           <p className="mt-1 text-[12px] text-text-secondary leading-snug">
             Log {reqDays} nutrition days and {reqWeigh} weigh-ins in last week's review window to unlock a reliable adjustment.
           </p>
@@ -1436,23 +1436,23 @@ function MacroReviewCard({ review, compact = false }: { review: MacroAdjustmentR
             </div>
           </div>
 
-          <p className="mt-3 text-[11px] text-text-tertiary leading-snug">
+          <p className="mt-3 text-[12px] text-text-tertiary leading-snug">
             {haveDays}/{reqDays} logged · {haveWeigh}/{reqWeigh} weigh-ins
           </p>
         </>
       ) : (
         <>
-          <p className="mt-2 text-[15px] font-medium text-white">
+          <p className="mt-2 text-[14px] font-medium text-white">
             🔥 {review.decision === "Ready to adjust" ? "Review unlocked" : "Target review ready"}
           </p>
-          <p className="mt-2 text-[13px] text-white">
+          <p className="mt-2 text-[12px] text-white">
             {review.decision === "Ready to adjust"
               ? `Recommended: ${review.calorie_delta > 0 ? "+" : ""}${review.calorie_delta} kcal`
               : review.decision}
           </p>
           <p className="mt-1 text-[12px] text-text-secondary leading-snug">{review.reason}</p>
           {review.recommended_target_calories != null && review.calorie_delta !== 0 && (
-            <p className="mt-2 text-[11px] text-text-tertiary tabular-nums">
+            <p className="mt-2 text-[12px] text-text-tertiary tabular-nums">
               {review.current_target_calories?.toLocaleString() ?? "—"} kcal → {review.recommended_target_calories.toLocaleString()} kcal
             </p>
           )}
@@ -1470,7 +1470,7 @@ function ProgressRow({ label, current, required }: { label: string; current: num
   const pct = Math.min(100, Math.round((current / required) * 100));
   return (
     <div className="rounded-2xl bg-white/[0.03] border border-white/5 px-3 py-2">
-      <p className="text-[11px] text-text-tertiary">{label}</p>
+      <p className="text-[12px] text-text-tertiary">{label}</p>
       <p className="mt-0.5 text-[14px] font-medium tabular-nums text-white">
         {current} <span className="text-text-tertiary text-[12px]">/ {required}</span>
         {done && <span className="ml-1 text-success">✓</span>}

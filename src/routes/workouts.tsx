@@ -174,7 +174,7 @@ function WorkoutsPage() {
       }}
     >
       {(ptrDelta > 0 || refreshing) && (
-        <div className="absolute left-1/2 -translate-x-1/2 top-2 z-50 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium text-text-secondary"
+        <div className="absolute left-1/2 -translate-x-1/2 top-2 z-50 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium text-text-secondary"
           style={{ background: "rgba(15,21,36,0.85)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(8px)" }}>
           <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
           <span>{refreshing ? "Refreshing…" : ptrDelta >= 60 ? "Release to refresh" : "Pull to refresh"}</span>
@@ -182,20 +182,20 @@ function WorkoutsPage() {
       )}
       <header className="flex items-center justify-between px-5 pt-6">
         <Link to="/dashboard" className="text-text-secondary"><ChevronLeft size={24} /></Link>
-        <span className="text-[11px] uppercase tracking-wider text-text-tertiary">This week</span>
+        <span className="text-[12px] uppercase tracking-wider text-text-tertiary">This week</span>
         <span className="w-6" />
       </header>
 
       <div className="px-5 mt-3 flex items-center justify-between">
-        <h1 className="text-3xl font-medium">Your Week</h1>
+        <h1 className="text-[20px] font-medium">Your Week</h1>
         <RefreshStamp refreshing={refreshing} lastUpdatedAt={lastUpdatedAt} />
       </div>
 
-      {loading && <p className="px-5 mt-10 text-sm text-text-tertiary">Loading…</p>}
+      {loading && <p className="px-5 mt-10 text-[14px] text-text-tertiary">Loading…</p>}
 
       {!loading && !plan && (
         <div className="mx-5 mt-8 rounded-2xl bg-bg-2 border border-white/5 p-5">
-          <p className="text-sm text-text-secondary">No plan yet. Finish onboarding to generate your weekly plan.</p>
+          <p className="text-[14px] text-text-secondary">No plan yet. Finish onboarding to generate your weekly plan.</p>
         </div>
       )}
 
@@ -322,7 +322,7 @@ function CueSheet({ exercise, onClose }: { exercise: Exercise; onClose: () => vo
               <Zap size={12} className="text-ai" fill="currentColor" />
               <p className="text-[10px] uppercase tracking-wider text-ai font-medium">Exercise cue</p>
             </div>
-            <h3 className="mt-1 text-xl font-medium">{exercise.name}</h3>
+            <h3 className="mt-1 text-[20px] font-medium">{exercise.name}</h3>
             <p className="text-[12px] text-text-tertiary mt-0.5">{exercise.sets}×{exercise.reps} · {exercise.rest_seconds}s rest</p>
           </div>
           <button onClick={onClose} className="text-text-tertiary p-1"><X size={18} /></button>
@@ -333,7 +333,7 @@ function CueSheet({ exercise, onClose }: { exercise: Exercise; onClose: () => vo
         <div className="mt-4 rounded-xl p-4" style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.10), rgba(59,130,246,0.08))", border: "1px solid rgba(124,58,237,0.25)" }}>
           <div className="flex items-start gap-2">
             <Sparkles size={14} className="text-ai shrink-0 mt-0.5" />
-            <p className="text-[13px] leading-relaxed">
+            <p className="text-[12px] leading-relaxed">
               {exercise.cue && exercise.cue.trim().length > 0
                 ? exercise.cue
                 : "Guidance is being generated for this plan. Check back in a moment."}
@@ -391,7 +391,7 @@ function LockBanner({ plan }: { plan: WeeklyPlan }) {
       style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.10), rgba(59,130,246,0.08))", border: "1px solid rgba(124,58,237,0.25)" }}>
       <Lock size={16} className="text-ai shrink-0 mt-0.5" />
       <div>
-        <p className="text-sm font-medium">Week 1 — Your baseline program</p>
+        <p className="text-[14px] font-medium">Week 1 — Your baseline program</p>
         <p className="mt-0.5 text-[12px] text-text-secondary">
           Adapts starting {plan.unlock_date} based on your performance.
         </p>
@@ -420,9 +420,9 @@ function DayCard({
           {label}{isToday && " · Today"}
         </p>
         {expanded ? (
-          <p className="mt-1 font-medium text-[15px] truncate">{titleText}</p>
+          <p className="mt-1 font-medium text-[14px] truncate">{titleText}</p>
         ) : (
-          <p className="mt-1 text-[13px] text-text-secondary truncate">{collapsedHint}</p>
+          <p className="mt-1 text-[12px] text-text-secondary truncate">{collapsedHint}</p>
         )}
       </div>
       {onToggle && (
@@ -448,7 +448,7 @@ function DayCard({
               <button
                 type="button"
                 onClick={() => onShowCue(ex)}
-                className="w-full text-[13px] text-text-secondary flex justify-between items-center py-1 active:opacity-70"
+                className="w-full text-[12px] text-text-secondary flex justify-between items-center py-1 active:opacity-70"
               >
                 <span className="flex items-center gap-2 text-left">
                   <span
@@ -497,9 +497,9 @@ function ExerciseLogger({
       >
         <div className="flex items-center gap-2">
           <Dumbbell size={14} className="text-text-tertiary" />
-          <span className="text-[13px] font-medium">{exercise.name}</span>
+          <span className="text-[12px] font-medium">{exercise.name}</span>
         </div>
-        <span className={`text-[11px] tabular-nums ${doneCount === exercise.sets ? "text-success" : "text-text-tertiary"}`}>
+        <span className={`text-[12px] tabular-nums ${doneCount === exercise.sets ? "text-success" : "text-text-tertiary"}`}>
           {doneCount}/{exercise.sets}
         </span>
       </button>
@@ -563,17 +563,17 @@ function SetRow({
 
   return (
     <div className={`flex items-center gap-2 rounded-lg px-2 py-1.5 ${done ? "bg-success/10" : "bg-bg-3/30"}`}>
-      <span className="w-6 text-[11px] text-text-tertiary tabular-nums">#{setNumber}</span>
+      <span className="w-6 text-[12px] text-text-tertiary tabular-nums">#{setNumber}</span>
       <input
         type="number" inputMode="decimal" placeholder={exercise.reps.split("-")[0]}
         value={reps} onChange={(e) => setReps(e.target.value)}
-        className="w-14 bg-transparent text-sm text-right focus:outline-none"
+        className="w-14 bg-transparent text-[14px] text-right focus:outline-none"
       />
       <span className="text-[10px] text-text-tertiary">reps</span>
       <input
         type="number" inputMode="decimal" placeholder="kg"
         value={weight} onChange={(e) => setWeight(e.target.value)}
-        className="w-16 bg-transparent text-sm text-right focus:outline-none"
+        className="w-16 bg-transparent text-[14px] text-right focus:outline-none"
       />
       <span className="text-[10px] text-text-tertiary">kg</span>
       <button
@@ -677,7 +677,7 @@ function PreWorkoutCheckSheet({ onClose, onSaved }: { onClose: () => void; onSav
       >
         <div className="h-1 w-12 rounded-full bg-white/20 mx-auto mb-4" />
         <p className="text-[10px] uppercase tracking-wider text-text-tertiary text-center">Quick check</p>
-        <h3 className="mt-1 text-xl font-medium text-center">How do you feel right now?</h3>
+        <h3 className="mt-1 text-[20px] font-medium text-center">How do you feel right now?</h3>
         <p className="mt-1 text-[12px] text-text-tertiary text-center">Helps me read today's session honestly.</p>
         <div className="mt-6 grid grid-cols-5 gap-2">
           {READINESS_OPTIONS.map((opt) => (
@@ -687,7 +687,7 @@ function PreWorkoutCheckSheet({ onClose, onSaved }: { onClose: () => void; onSav
               onClick={() => save(opt.value)}
               className="rounded-2xl bg-bg-3/50 border border-white/5 py-3 flex flex-col items-center gap-1 active:scale-95 disabled:opacity-40 transition"
             >
-              <span className="text-2xl">{opt.emoji}</span>
+              <span className="text-[20px]">{opt.emoji}</span>
               <span className="text-[10px] text-text-tertiary">{opt.label}</span>
             </button>
           ))}
@@ -762,7 +762,7 @@ function BodyScanSection() {
         <button
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
-          className="flex items-center gap-1 text-[11px] text-text-accent font-medium disabled:opacity-50"
+          className="flex items-center gap-1 text-[12px] text-text-accent font-medium disabled:opacity-50"
         >
           {uploading ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} />}
           {uploading ? "Uploading…" : "Add photo"}
@@ -903,8 +903,8 @@ function RestDaySwapCard({
       className="mx-5 mt-4 rounded-2xl p-4"
       style={{ background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.25)" }}
     >
-      <p className="text-[13px] text-text-primary">Today is a scheduled rest day.</p>
-      <p className="text-[11px] text-text-tertiary mt-1">
+      <p className="text-[12px] text-text-primary">Today is a scheduled rest day.</p>
+      <p className="text-[12px] text-text-tertiary mt-1">
         You told us you train {daysPerWeek} {daysPerWeek === 1 ? "day" : "days"}/week, and today isn't one of them.
         Want to move one of this week's sessions here instead? The day it came from becomes your new rest day.
       </p>
@@ -919,10 +919,10 @@ function RestDaySwapCard({
               style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
             >
               <div className="min-w-0">
-                <p className="text-[13px] font-medium text-text-primary truncate">
+                <p className="text-[12px] font-medium text-text-primary truncate">
                   {day.session_name ?? "Session"}
                 </p>
-                <p className="text-[11px] text-text-tertiary">
+                <p className="text-[12px] text-text-tertiary">
                   Originally {day.day_name ?? DAY_NAMES[idx]} · {(day.exercises?.length ?? 0)} exercises
                 </p>
               </div>
