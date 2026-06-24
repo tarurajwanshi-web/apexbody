@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { AICard } from "@/components/AIOrb";
 import { RingChart } from "@/components/RingChart";
 import { scoreColor } from "@/lib/score-color";
-import { BottomNav } from "@/components/BottomNav";
+import { DashboardNav } from "@/components/dashboard/DashboardNav";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { HydrationLogModal } from "@/components/LogModals";
 import { MealDetailModal } from "@/components/MealDetailModal";
@@ -310,7 +310,7 @@ function Nutrition() {
       {diagOpen && (
         <div className="mx-5 mt-2 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3 text-[10px] leading-tight text-text-secondary">
           <div className="flex items-center justify-between mb-1 gap-2">
-            <span className="font-semibold text-amber-300">DIAG · Fuel</span>
+            <span className="font-medium text-amber-300">DIAG · Fuel</span>
             <div className="flex items-center gap-3">
               <button onClick={refreshDiag} className="text-amber-300 underline">refresh</button>
               <button
@@ -347,11 +347,11 @@ function Nutrition() {
       {/* Goal-based framing line */}
       <p className="mx-5 mt-5 text-[12px] text-text-secondary leading-snug">
         {goalText
-          ? <>Based on your <span className="text-text-primary font-semibold">{goalText}</span> goal and your stats, here's your daily target.</>
+          ? <>Based on your <span className="text-text-primary font-medium">{goalText}</span> goal and your stats, here's your daily target.</>
           : <>Finish onboarding to calculate your personalized daily target.</>}
       </p>
 
-      <section className="mx-5 mt-3 rounded-3xl bg-bg-2 border border-white/5 p-4">
+      <section className="mx-5 mt-3 rounded-2xl bg-bg-2 border border-white/5 p-4">
         {macros?.verdict && (
           <VerdictBadge verdict={macros.verdict} />
         )}
@@ -363,7 +363,7 @@ function Nutrition() {
                 hasMeals ? (
                   <>
                     <span
-                      className={`text-4xl font-extrabold leading-none tabular-nums ${cCal > tCal! ? "" : "gradient-text"}`}
+                      className={`text-4xl font-medium leading-none tabular-nums ${cCal > tCal! ? "" : "gradient-text"}`}
                       style={cCal > tCal! ? { color: "#F59E0B" } : undefined}
                     >
                       {cCal.toLocaleString()}
@@ -372,7 +372,7 @@ function Nutrition() {
                   </>
                 ) : (
                   <div>
-                    <span className="text-4xl font-extrabold leading-none gradient-text tabular-nums">{tCal!.toLocaleString()}</span>
+                    <span className="text-4xl font-medium leading-none gradient-text tabular-nums">{tCal!.toLocaleString()}</span>
                     <span className="text-sm text-text-tertiary mb-0.5 ml-1">kcal target</span>
                     {isToday && macros?.coaching_line && (
                       <p className="text-[12px] text-text-secondary mt-1.5">{macros.coaching_line}</p>
@@ -453,7 +453,7 @@ function Nutrition() {
       {isToday && hasTarget && hasMeals && proteinShort >= 20 && (
         <div className="mx-5 mt-4">
           <AICard>
-            You're <span className="text-text-primary font-semibold">{proteinShort}g short on protein</span>. Add a high-protein snack before 8pm to hit your{goalText ? ` ${goalText}` : ""} target.
+            You're <span className="text-text-primary font-medium">{proteinShort}g short on protein</span>. Add a high-protein snack before 8pm to hit your{goalText ? ` ${goalText}` : ""} target.
           </AICard>
         </div>
       )}
@@ -501,7 +501,7 @@ function Nutrition() {
           <p className="text-[12px] text-text-secondary flex-1 min-w-0">
             Add your weight in Settings to enable a hydration target.
           </p>
-          <Link to="/settings" className="text-[12px] font-semibold text-text-accent shrink-0">
+          <Link to="/settings" className="text-[12px] font-medium text-text-accent shrink-0">
             Open →
           </Link>
         </div>
@@ -515,14 +515,14 @@ function Nutrition() {
           <button
             type="button"
             onClick={handleUndoDelete}
-            className="text-[13px] font-semibold text-text-accent active:scale-95"
+            className="text-[13px] font-medium text-text-accent active:scale-95"
           >
             Undo
           </button>
         </div>
       )}
 
-      <BottomNav onLogged={reload} />
+      <DashboardNav onLogged={reload} />
       <HydrationLogModal open={hydrationOpen} onClose={() => setHydrationOpen(false)} onSaved={reload} />
       <MealDetailModal meal={openMeal} onClose={() => setOpenMeal(null)} />
       <WeeklyGraphSheet
@@ -548,7 +548,7 @@ function Macro({ label, v, t, color: _color, hasMeals }: { label: string; v: num
   return (
     <div className="flex flex-col items-center gap-1">
       <RingChart size={56} stroke={5} rings={[{ value: pct, color: ringColor }]} centerLabel={hasMeals ? `${rawPct}%` : "—"} />
-      <p className="text-[11px] font-semibold mt-1">{label}</p>
+      <p className="text-[11px] font-medium mt-1">{label}</p>
       <p className={`text-[10px] ${over ? "" : "text-text-tertiary"}`} style={{ color: over ? "#F59E0B" : undefined }}>
         {hasMeals ? `${v}/${t || "—"}g${over ? ` · +${v - t}g` : ""}` : `${t || "—"}g target`}
       </p>
@@ -569,18 +569,18 @@ function HydrationCard({
   const liters = (ml: number) => (ml / 1000).toFixed(ml >= 1000 ? 1 : 2);
 
   return (
-    <section className="mx-5 mt-4 rounded-3xl bg-bg-2 border border-white/5 p-5">
+    <section className="mx-5 mt-4 rounded-2xl bg-bg-2 border border-white/5 p-5">
       <div className="flex items-center gap-4">
         {/* Bottle-shaped fill indicator, sized to match the macro rings above. */}
         <BottleFill pct={pct} disabled={!target} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <Droplet size={14} className="text-sleep" />
-            <p className="text-[15px] font-semibold text-white">Hydration</p>
+            <p className="text-[15px] font-medium text-white">Hydration</p>
           </div>
           {target ? (
             <>
-              <p className="mt-1 text-[20px] font-bold tabular-nums">
+              <p className="mt-1 text-[20px] font-medium tabular-nums">
                 {liters(consumed)}<span className="text-text-tertiary text-sm font-normal"> / {liters(target)}L</span>
               </p>
               <p className="text-[11px] text-text-tertiary">
@@ -599,7 +599,7 @@ function HydrationCard({
               </p>
               <Link
                 to="/settings"
-                className="mt-2 inline-block text-[12px] font-semibold text-text-accent"
+                className="mt-2 inline-block text-[12px] font-medium text-text-accent"
               >
                 Open Settings →
               </Link>
@@ -610,7 +610,7 @@ function HydrationCard({
           <button
             onClick={onLog}
             aria-label="Log water"
-            className="rounded-full px-3 py-1.5 text-[12px] font-semibold text-white active:scale-95 transition shrink-0"
+            className="rounded-full px-3 py-1.5 text-[12px] font-medium text-white active:scale-95 transition shrink-0"
             style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.85), rgba(6,182,212,0.85))" }}
           >+ Log</button>
         ) : null}
@@ -656,7 +656,7 @@ function BottleFill({ pct, disabled }: { pct: number; disabled?: boolean }) {
         </linearGradient>
       </svg>
       {!disabled && (
-        <p className="absolute inset-0 flex items-center justify-center text-[11px] font-semibold text-white drop-shadow">{pct}%</p>
+        <p className="absolute inset-0 flex items-center justify-center text-[11px] font-medium text-white drop-shadow">{pct}%</p>
       )}
     </div>
   );
@@ -758,7 +758,7 @@ function UnifiedTimeline({
           >
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-semibold truncate">{r.meal.meal_description || "Photo meal"}</p>
+                <p className="text-sm font-medium truncate">{r.meal.meal_description || "Photo meal"}</p>
                 <p className="text-[11px] text-text-tertiary">
                   {fmtTime(r.ts)}
                   {r.meal.estimated_calories != null ? ` · ${Math.round(r.meal.estimated_calories)} kcal` : ""}
@@ -806,7 +806,7 @@ function UnifiedTimeline({
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onConfirmDelete?.(r.meal.id); }}
-                  className="rounded-xl px-3 py-1.5 text-[12px] font-semibold text-white"
+                  className="rounded-xl px-3 py-1.5 text-[12px] font-medium text-white"
                   style={{ background: "rgba(239,68,68,0.85)" }}
                 >
                   Delete
@@ -825,7 +825,7 @@ function UnifiedTimeline({
                 <Droplet size={14} className="text-sleep" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-white">Water — {r.ev.amount_ml} ml</p>
+                <p className="text-sm font-medium text-white">Water — {r.ev.amount_ml} ml</p>
                 <p className="text-[11px] text-text-tertiary">{fmtTime(r.ts)}</p>
               </div>
               {onRequestDeleteWater && confirmDeleteWaterId !== r.ev.id && (
@@ -851,7 +851,7 @@ function UnifiedTimeline({
                 <button
                   type="button"
                   onClick={() => onDeleteWater?.(r.ev.id)}
-                  className="rounded-xl px-3 py-1.5 text-[12px] font-semibold text-white"
+                  className="rounded-xl px-3 py-1.5 text-[12px] font-medium text-white"
                   style={{ background: "rgba(239,68,68,0.85)" }}
                 >
                   Delete
@@ -886,7 +886,7 @@ function HydrationInsight({ hydration }: { hydration: HydrationSummary | null })
       return (
         <div className="mx-5 mt-4">
           <AICard>
-            Your recovery dipped about <span className="text-text-primary font-semibold">{drop} pts</span> below your recent baseline today — you're also under your water target, which is a likely contributor. Informational guidance, not medical advice.
+            Your recovery dipped about <span className="text-text-primary font-medium">{drop} pts</span> below your recent baseline today — you're also under your water target, which is a likely contributor. Informational guidance, not medical advice.
           </AICard>
         </div>
       );
@@ -899,7 +899,7 @@ function HydrationInsight({ hydration }: { hydration: HydrationSummary | null })
   return (
     <div className="mx-5 mt-4">
       <AICard>
-        You're <span className="text-text-primary font-semibold">{(shortMl / 1000).toFixed(1)}L behind</span> on water today. Staying ahead now tends to support tomorrow's recovery score — informational guidance, not medical advice.
+        You're <span className="text-text-primary font-medium">{(shortMl / 1000).toFixed(1)}L behind</span> on water today. Staying ahead now tends to support tomorrow's recovery score — informational guidance, not medical advice.
       </AICard>
     </div>
   );
@@ -917,7 +917,7 @@ function VerdictBadge({ verdict }: { verdict: string }) {
           : { bg: "rgba(255,255,255,0.05)", border: "rgba(255,255,255,0.10)", color: "#9CA3AF" };
   return (
     <span
-      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider"
       style={{ background: tone.bg, border: `1px solid ${tone.border}`, color: tone.color }}
     >
       {verdict}
@@ -934,7 +934,7 @@ function ScorePill({
     <div className="flex flex-col items-center">
       <p className="text-[10px] text-text-tertiary uppercase tracking-wider text-center">{label}</p>
       <p
-        className={`mt-1 tabular-nums ${emphasized ? "text-lg font-bold" : "text-base font-semibold"}`}
+        className={`mt-1 tabular-nums ${emphasized ? "text-lg font-medium" : "text-base font-medium"}`}
         style={{ color }}
       >
         {value == null ? "—" : value}
@@ -959,12 +959,12 @@ function WeeklyPreviewCard({
   const lowConfidence = confidence_label === "low";
 
   return (
-    <section className="mx-5 mt-4 rounded-3xl bg-bg-2 border border-white/5 p-4">
+    <section className="mx-5 mt-4 rounded-2xl bg-bg-2 border border-white/5 p-4">
       <div className="flex items-baseline justify-between">
-        <p className="text-[15px] font-semibold text-white">This week so far</p>
+        <p className="text-[15px] font-medium text-white">This week so far</p>
         {weekly_nutrition_score != null && !lowConfidence && (
           <span
-            className="text-[12px] font-semibold tabular-nums"
+            className="text-[12px] font-medium tabular-nums"
             style={{ color: scoreColor(weekly_nutrition_score) }}
           >
             {weekly_nutrition_score}
@@ -973,7 +973,7 @@ function WeeklyPreviewCard({
       </div>
 
       <div className="mt-1 flex items-baseline gap-2">
-        <span className="text-2xl font-extrabold tabular-nums text-white leading-none">
+        <span className="text-2xl font-medium tabular-nums text-white leading-none">
           {logged_days}
         </span>
         <span className="text-[12px] text-text-tertiary">
@@ -992,7 +992,7 @@ function WeeklyPreviewCard({
       <button
         type="button"
         onClick={onOpen}
-        className="mt-3 w-full inline-flex items-center justify-between rounded-2xl bg-white/[0.04] border border-white/10 px-3 py-2 text-[12px] font-semibold text-text-primary active:scale-[0.99] transition"
+        className="mt-3 w-full inline-flex items-center justify-between rounded-2xl bg-white/[0.04] border border-white/10 px-3 py-2 text-[12px] font-medium text-text-primary active:scale-[0.99] transition"
       >
         <span>View weekly graph</span>
         <ChevronRight size={16} className="text-text-tertiary" />
@@ -1094,7 +1094,7 @@ function WeeklyGraphSheet({
         </div>
         <div className="px-5 pt-3 pb-2 flex items-start justify-between">
           <div className="min-w-0">
-            <p className="text-[17px] font-semibold text-white tracking-tight">Weekly adherence</p>
+            <p className="text-[17px] font-medium text-white tracking-tight">Weekly adherence</p>
             <p className="mt-0.5 text-[12px] text-text-tertiary">{rangeLabel || "Loading…"}</p>
           </div>
           <button
@@ -1115,7 +1115,7 @@ function WeeklyGraphSheet({
           >
             <ChevronLeft size={18} />
           </button>
-          <span className="text-[13px] font-semibold text-white">
+          <span className="text-[13px] font-medium text-white">
             {isThisWeek ? "This week" : rangeLabel}
           </span>
           <button
@@ -1185,7 +1185,7 @@ function WeeklyGraphContent({ data }: { data: WeeklyNutritionInsight }) {
     <div className="space-y-5">
       {/* Chart header */}
       <div>
-        <p className="text-[13px] font-semibold text-white">Macro calories by day</p>
+        <p className="text-[13px] font-medium text-white">Macro calories by day</p>
         <p className="mt-0.5 text-[11px] text-text-tertiary leading-snug">
           Protein, carbs, and fat stacked against your calorie target.
         </p>
@@ -1366,7 +1366,7 @@ function StackedBarChart({
       </svg>
       {empty && (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 pointer-events-none">
-          <p className="text-[13px] font-semibold text-white">No meals logged this week yet.</p>
+          <p className="text-[13px] font-medium text-white">No meals logged this week yet.</p>
           <p className="mt-1 text-[12px] text-text-tertiary">Log meals to see your weekly pattern.</p>
         </div>
       )}
@@ -1378,7 +1378,7 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub?:
   return (
     <div className="rounded-2xl bg-white/[0.03] border border-white/5 px-3 py-2.5">
       <p className="text-[11px] text-text-tertiary">{label}</p>
-      <p className="mt-0.5 text-[16px] font-semibold tabular-nums text-white leading-tight">{value}</p>
+      <p className="mt-0.5 text-[16px] font-medium tabular-nums text-white leading-tight">{value}</p>
       {sub && <p className="text-[11px] text-text-tertiary leading-tight mt-0.5">{sub}</p>}
     </div>
   );
@@ -1398,7 +1398,7 @@ function MacroReviewCard({ review, compact = false }: { review: MacroAdjustmentR
   const haveWeigh = Math.min(review.weigh_in_count, reqWeigh);
 
   return (
-    <section className={`${compact ? "" : "mx-5 mt-4"} rounded-3xl bg-bg-2 border border-white/5 p-4`}>
+    <section className={`${compact ? "" : "mx-5 mt-4"} rounded-2xl bg-bg-2 border border-white/5 p-4`}>
       <div className="flex items-center justify-between">
         <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Next target review</p>
         <span className="text-[11px] text-text-tertiary">
@@ -1408,7 +1408,7 @@ function MacroReviewCard({ review, compact = false }: { review: MacroAdjustmentR
 
       {locked ? (
         <>
-          <p className="mt-2 text-[15px] font-semibold text-white">🔒 Macro adjustment locked</p>
+          <p className="mt-2 text-[15px] font-medium text-white">🔒 Macro adjustment locked</p>
           <p className="mt-1 text-[12px] text-text-secondary leading-snug">
             Log {reqDays} nutrition days and {reqWeigh} weigh-ins in last week's review window to unlock a reliable adjustment.
           </p>
@@ -1427,7 +1427,7 @@ function MacroReviewCard({ review, compact = false }: { review: MacroAdjustmentR
                 return (
                   <div key={i} className="flex flex-col items-center gap-1 flex-1">
                     <span className="text-[16px] leading-none">{on ? "🔥" : "○"}</span>
-                    <span className={`text-[10px] ${isToday ? "text-white font-semibold" : "text-text-tertiary"}`}>
+                    <span className={`text-[10px] ${isToday ? "text-white font-medium" : "text-text-tertiary"}`}>
                       {isToday ? "Today" : ""}
                     </span>
                   </div>
@@ -1442,7 +1442,7 @@ function MacroReviewCard({ review, compact = false }: { review: MacroAdjustmentR
         </>
       ) : (
         <>
-          <p className="mt-2 text-[15px] font-semibold text-white">
+          <p className="mt-2 text-[15px] font-medium text-white">
             🔥 {review.decision === "Ready to adjust" ? "Review unlocked" : "Target review ready"}
           </p>
           <p className="mt-2 text-[13px] text-white">
@@ -1471,7 +1471,7 @@ function ProgressRow({ label, current, required }: { label: string; current: num
   return (
     <div className="rounded-2xl bg-white/[0.03] border border-white/5 px-3 py-2">
       <p className="text-[11px] text-text-tertiary">{label}</p>
-      <p className="mt-0.5 text-[14px] font-semibold tabular-nums text-white">
+      <p className="mt-0.5 text-[14px] font-medium tabular-nums text-white">
         {current} <span className="text-text-tertiary text-[12px]">/ {required}</span>
         {done && <span className="ml-1 text-success">✓</span>}
       </p>

@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChevronLeft, FileText, Download, Loader2, BookOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { BottomNav } from "@/components/BottomNav";
+import { DashboardNav } from "@/components/dashboard/DashboardNav";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/resources")({
@@ -87,7 +87,7 @@ function ResourcesPage() {
         )}
       </section>
 
-      <BottomNav />
+      <DashboardNav />
     </div>
   );
 }

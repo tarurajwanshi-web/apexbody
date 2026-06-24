@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { ChevronLeft, Lock, Check, Dumbbell, Sparkles, X, ChevronDown, ChevronUp, Zap, Camera, Trash2, Loader2, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { BottomNav } from "@/components/BottomNav";
+import { DashboardNav } from "@/components/dashboard/DashboardNav";
 import { AICard } from "@/components/AIOrb";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
@@ -187,7 +187,7 @@ function WorkoutsPage() {
       </header>
 
       <div className="px-5 mt-3 flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Your Week</h1>
+        <h1 className="text-3xl font-medium">Your Week</h1>
         <RefreshStamp refreshing={refreshing} lastUpdatedAt={lastUpdatedAt} />
       </div>
 
@@ -232,7 +232,7 @@ function WorkoutsPage() {
               <div className="mx-5 mt-4">
                 <button
                   onClick={() => setPreCheckOpen(true)}
-                  className="w-full rounded-2xl gradient-brand py-3.5 text-[14px] font-semibold text-white active:scale-[0.98] transition"
+                  className="w-full rounded-2xl gradient-brand py-3.5 text-[14px] font-medium text-white active:scale-[0.98] transition"
                 >
                   Start workout →
                 </button>
@@ -277,7 +277,7 @@ function WorkoutsPage() {
           the user's stated training-days-per-week cap is respected. This
           is a manual stopgap — no adaptive volume rebalancing happens. */}
 
-      <BottomNav />
+      <DashboardNav />
     </div>
   );
 }
@@ -299,11 +299,11 @@ function VolumeNudge({ plan, weekLogs, todayIdx }: { plan: WeeklyPlan; weekLogs:
   }
   let msg: ReactNode;
   if (gap >= 4) {
-    msg = <>You're <span className="text-text-primary font-semibold">{gap} sets behind plan</span> this week. Add an extra set or two on {nextDayLabel} to catch up.</>;
+    msg = <>You're <span className="text-text-primary font-medium">{gap} sets behind plan</span> this week. Add an extra set or two on {nextDayLabel} to catch up.</>;
   } else if (gap >= 1) {
-    msg = <>You're <span className="text-text-primary font-semibold">{gap} {gap === 1 ? "set" : "sets"} short</span> of plan through today. Knock them out before {nextDayLabel}.</>;
+    msg = <>You're <span className="text-text-primary font-medium">{gap} {gap === 1 ? "set" : "sets"} short</span> of plan through today. Knock them out before {nextDayLabel}.</>;
   } else {
-    msg = <>You're <span className="text-text-primary font-semibold">on track</span> — {completed}/{plannedThroughToday} planned sets logged this week. Keep it up.</>;
+    msg = <>You're <span className="text-text-primary font-medium">on track</span> — {completed}/{plannedThroughToday} planned sets logged this week. Keep it up.</>;
   }
   return <div className="mx-5 mt-4"><AICard>{msg}</AICard></div>;
 }
@@ -313,16 +313,16 @@ function CueSheet({ exercise, onClose }: { exercise: Exercise; onClose: () => vo
   return (
     <div className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center px-4" onClick={onClose}>
       <div
-        className="w-full max-w-[420px] mx-auto bg-bg-2 rounded-3xl border border-white/10 p-6 animate-fade-up shadow-2xl max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-[420px] mx-auto bg-bg-2 rounded-2xl border border-white/10 p-6 animate-fade-up shadow-2xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-1.5">
               <Zap size={12} className="text-ai" fill="currentColor" />
-              <p className="text-[10px] uppercase tracking-wider text-ai font-semibold">Exercise cue</p>
+              <p className="text-[10px] uppercase tracking-wider text-ai font-medium">Exercise cue</p>
             </div>
-            <h3 className="mt-1 text-xl font-bold">{exercise.name}</h3>
+            <h3 className="mt-1 text-xl font-medium">{exercise.name}</h3>
             <p className="text-[12px] text-text-tertiary mt-0.5">{exercise.sets}×{exercise.reps} · {exercise.rest_seconds}s rest</p>
           </div>
           <button onClick={onClose} className="text-text-tertiary p-1"><X size={18} /></button>
@@ -391,7 +391,7 @@ function LockBanner({ plan }: { plan: WeeklyPlan }) {
       style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.10), rgba(59,130,246,0.08))", border: "1px solid rgba(124,58,237,0.25)" }}>
       <Lock size={16} className="text-ai shrink-0 mt-0.5" />
       <div>
-        <p className="text-sm font-semibold">Week 1 — Your baseline program</p>
+        <p className="text-sm font-medium">Week 1 — Your baseline program</p>
         <p className="mt-0.5 text-[12px] text-text-secondary">
           Adapts starting {plan.unlock_date} based on your performance.
         </p>
@@ -420,7 +420,7 @@ function DayCard({
           {label}{isToday && " · Today"}
         </p>
         {expanded ? (
-          <p className="mt-1 font-semibold text-[15px] truncate">{titleText}</p>
+          <p className="mt-1 font-medium text-[15px] truncate">{titleText}</p>
         ) : (
           <p className="mt-1 text-[13px] text-text-secondary truncate">{collapsedHint}</p>
         )}
@@ -677,7 +677,7 @@ function PreWorkoutCheckSheet({ onClose, onSaved }: { onClose: () => void; onSav
       >
         <div className="h-1 w-12 rounded-full bg-white/20 mx-auto mb-4" />
         <p className="text-[10px] uppercase tracking-wider text-text-tertiary text-center">Quick check</p>
-        <h3 className="mt-1 text-xl font-bold text-center">How do you feel right now?</h3>
+        <h3 className="mt-1 text-xl font-medium text-center">How do you feel right now?</h3>
         <p className="mt-1 text-[12px] text-text-tertiary text-center">Helps me read today's session honestly.</p>
         <div className="mt-6 grid grid-cols-5 gap-2">
           {READINESS_OPTIONS.map((opt) => (
@@ -762,7 +762,7 @@ function BodyScanSection() {
         <button
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
-          className="flex items-center gap-1 text-[11px] text-text-accent font-semibold disabled:opacity-50"
+          className="flex items-center gap-1 text-[11px] text-text-accent font-medium disabled:opacity-50"
         >
           {uploading ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} />}
           {uploading ? "Uploading…" : "Add photo"}
@@ -919,7 +919,7 @@ function RestDaySwapCard({
               style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
             >
               <div className="min-w-0">
-                <p className="text-[13px] font-semibold text-text-primary truncate">
+                <p className="text-[13px] font-medium text-text-primary truncate">
                   {day.session_name ?? "Session"}
                 </p>
                 <p className="text-[11px] text-text-tertiary">
