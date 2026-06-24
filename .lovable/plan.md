@@ -1,42 +1,45 @@
-## Fix 82 lint:ui violations across nutrition / coach / workouts
+## Goal
+Rewrite the per-user logic in `supabase/functions/calculate-macros-weekly/index.ts` to:
+1. Compute and persist training metrics (`training_load_index`, `weekly_sets_avg`, `avg_strain_value`).
+2. Replace the current eligibility + safety-cap + RPC flow with the pasted goal-specific decision tree and floor/ceiling caps.
+3. Insert reviews directly into `nutrition_weekly_reviews` (no `apply_weekly_macro_review` RPC call).
 
-Pure mechanical substitution. No layout, no logic, no color changes. Run via `sed` then re-run `npm run lint:ui` until exit 0.
+## Known consequences (please confirm you accept these before I build)
+- **Active macro target stops auto-updating.** Today the code calls `apply_weekly_macro_review`, which atomically closes the old `daily_macro_targets` row and inserts the new one. The pasted flow only writes a review row, so `daily_macro_targets` will go stale until a follow-up "Apply" path is built (you mentioned Prompt 2 will add a frontend Apply button — that flow does not exist yet).
+- **Existing safety caps removed:** 25%/750 kcal deficit cap, BMR + sex-based + macro-floor minimum, and the 250/150 kcal weekly adjustment cap are dropped in favor of the per-goal floor/ceiling table (`*0.95`, `*1.05`, `*1.10`, `*1.20`, `weight_kg*10`).
+- **Eligibility loosens** from (weigh_in ≥4 AND days_logged ≥5 AND adherence ≥70%) to (days_logged ≥3 AND weigh_in ≥2). Confidence tiers become: high (days ≥6 & weigh ≥3), medium (days ≥4 & weigh ≥2), else low.
+- **Profile schema requirement:** existing `Profile` type doesn't include `goal` values `strength` / `athletic_performance` distinctly, but `goalMultiplier()` already handles them. Verified.
+- **Weight trend interpretation:** pasted code uses `weightTrendPerWeek`. I will map that to the existing `trend_delta_kg` (kg over the 7‑day window) — i.e. treat the window delta as the per-week trend. No additional smoothing change.
 
-### Substitution map (applied to `src/routes/nutrition.tsx`, `src/routes/coach.tsx`, `src/routes/workouts.tsx`)
+## Implementation
+Single file: `supabase/functions/calculate-macros-weekly/index.ts`.
 
-Arbitrary px → nearest locked size:
-- `text-[11px]` → `text-[12px]`
-- `text-[13px]` → `text-[12px]`
-- `text-[15px]` → `text-[14px]`
-- `text-[17px]` → `text-[16px]`
+Inside `processUser`, after the existing weigh-in / nutrition log / `current_weight_kg` / `observed_tdee` / `blended_tdee` block:
 
-Tailwind size tokens → arbitrary locked size (so the regex stops flagging them):
-- `text-xs` → `text-[12px]`
-- `text-sm` → `text-[14px]`
-- `text-base` → `text-[16px]`
-- `text-lg` → `text-[18px]`
-- `text-xl` → `text-[20px]`
-- `text-2xl` → `text-[20px]`
-- `text-3xl` → `text-[20px]`
+1. **Fetch training data** for `[week_start_date, window_end_exclusive)`:
+   - `workout_set_logs` → `strain_value[]` → `totalSets`, `avgStrain`, `weeklySetAvg = totalSets / 7`.
+   - `readiness_scores` (column `score_date`, `final_score`) → `avgReadiness` (default 50 when empty).
+   - Compute `trainingLoadIndex` per pasted thresholds (0.85 / 1.0 / 1.1 / 1.15), apply readiness×high-volume scaledown, clamp to [0.7, 1.3].
 
-`rounded-3xl` already cleared in the previous pass — no occurrences left to fix. Font-weights `font-bold/semibold/extrabold/black` were also cleared in the previous pass; nothing more to do for weights.
+2. **Confidence tier** from `days_logged` + `weigh_in_count` per pasted rules. Sets `flagReason = "insufficient_data"` when `days_logged < 3`.
 
-### Why these targets
-- `home.tsx` and `_authenticated/dashboard.tsx` already pass; not touched.
-- All 82 violations live in the three files above. After substitution, every flagged token maps to an allowed value, so re-running `node scripts/check-ui-consistency.mjs` will return exit 0.
+3. **Decision tree** keyed on `profile.goal` (`fat_loss`, `muscle_gain`, `recomposition`, `strength`, `athletic_performance`) using `trend_delta_kg` as `weightTrendPerWeek`. Branches set `decision ∈ {reduce, increase, hold}` exactly as pasted.
 
-### Risks / accepted trade-offs
-- `text-2xl` (24px) and `text-3xl` (30px) collapse to 20px. Two large headings in `workouts.tsx` ("Your Week", "How do you feel right now?") will look smaller. This is intentional under the locked size policy.
-- `text-[11px]` → `text-[12px]` shifts micro labels up by 1px. No layout impact.
+4. **Compute target**: `newTargetBeforeCaps = blended_tdee * goalMultiplier(goal) * trainingLoadIndex`, then apply per-goal `safeFloor` / `safeCeiling` table. If clamped, set `decision = "capped"` and (floor case) `flagReason = "deficit_capped_for_safety"`.
 
-### Verification
-1. Apply the seven sed substitutions to the three files.
-2. Run `npm run lint:ui` — expect `✓ UI consistency check passed.` and exit 0.
-3. If any new violation surfaces (e.g. a substitution exposed a previously masked token), apply one more sed pass and re-check.
+5. **Abnormal week** short-circuit: `decision = "hold"`, `flagReason = "abnormal_week"`, `confidenceTier = "low"`, skip target math, still populate training metrics.
 
-### Files touched
-- `src/routes/nutrition.tsx`
-- `src/routes/coach.tsx`
-- `src/routes/workouts.tsx`
+6. **Single INSERT** into `nutrition_weekly_reviews` with all fields including the three training columns, `applied_target_id: null`, `applied_at: null`. No RPC call.
 
-No backend, no other routes, no nav or component changes.
+7. **Remove** the now-unused codepaths: ineligible-hold INSERT (replaced by step 6), Step 8/9 safety-cap & decision blocks, Step 10 RPC `apply_weekly_macro_review` call, and `recomputeMacros` usage in this file (`recomputeMacros` and `apply_weekly_macro_review` will remain unused — left in place for the future Apply path).
+
+8. Keep idempotency check, `insertHold("missing_required_profile_data", …)` early-exits, time helpers, `goalMultiplier`, weigh-in / intake / observed-TDEE math, and the per-user error/result envelope unchanged.
+
+## Out of scope
+- Frontend WeeklyReviewCard / Apply button (pasted as "Prompt 2").
+- New migrations — all three columns already exist (`double precision`).
+- Edits to `apply_weekly_macro_review` RPC.
+- Tests / cron schedule changes.
+
+## Verification
+After deploy: invoke with `{ user_id, force_recalculate: true }`, then run the SELECT in your prompt against `nutrition_weekly_reviews` to confirm the three training columns are non-null and `decision` / `confidence_tier` reflect the new logic.
