@@ -246,201 +246,196 @@ async function processUser(supa: SupabaseClient, p: Profile, force: boolean): Pr
     return insertHold("missing_required_profile_data", false, false);
   }
 
-  // Step 4: abnormal week
-  if (p.user_marked_abnormal_week_start === week_start_date) {
-    await supa.from("nutrition_weekly_reviews").insert({
-      user_id: p.user_id,
-      week_start_date, week_end_date,
-      weigh_in_count, days_logged, adherence_pct,
-      eligible: false, abnormal_week: true,
-      old_target_calories,
-      old_observed_tdee,
-      adjustment_kcal: 0,
-      decision: "hold",
-      flag_reason: "abnormal_week",
-      timezone_used: tz,
-    });
-    return { user_id: p.user_id, status: "hold", decision: "hold", flag_reason: "abnormal_week" };
-  }
-
-  // eligibility
-  const eligible = weigh_in_count >= 4 && days_logged >= 5 && adherence_pct >= 70;
-  if (!eligible) {
-    await supa.from("nutrition_weekly_reviews").insert({
-      user_id: p.user_id,
-      week_start_date, week_end_date,
-      weigh_in_count, days_logged, adherence_pct,
-      eligible: false, abnormal_week: false,
-      old_target_calories,
-      old_observed_tdee,
-      adjustment_kcal: 0,
-      decision: "hold",
-      flag_reason: "insufficient_data",
-      timezone_used: tz,
-    });
-    return { user_id: p.user_id, status: "hold", decision: "hold", flag_reason: "insufficient_data" };
-  }
-
-  // Step 5: observed TDEE via trend weight
-  const sortedDates = [...dailyWeights.keys()].sort();
-  const windowSize = weigh_in_count >= 6 ? 3 : 2;
-  const startSlice = sortedDates.slice(0, windowSize).map(d => dailyWeights.get(d)!);
-  const endSlice = sortedDates.slice(-windowSize).map(d => dailyWeights.get(d)!);
-  const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
-  const smoothed_start = avg(startSlice);
-  const smoothed_end = avg(endSlice);
-  const trend_delta_kg = smoothed_end - smoothed_start;
-
-  // avg daily intake from shield_nutrition_logs — need calories per log
-  // shield_nutrition_logs doesn't store calories directly, so we pull from
-  // a calories column if present, otherwise estimate via the score table.
-  // For Module 5 MVP we assume calories live on the logs row as `total_kcal`
-  // if available; fallback to 0 (which will be filtered out and treated as
-  // insufficient_data on a downstream pass).
-  const { data: kcalRows } = await supa
-    .from("shield_nutrition_logs")
-    .select("entry_date, estimated_calories, calorie_estimate_status")
+  // ── Training load metrics ────────────────────────────────────────────────
+  const { data: workoutSets, error: setError } = await supa
+    .from("workout_set_logs")
+    .select("strain_value")
     .eq("user_id", p.user_id)
-    .eq("deleted", false)
-    .in("calorie_estimate_status", ["estimated", "manual_edited"])
     .gte("entry_date", week_start_date)
     .lt("entry_date", window_end_exclusive);
-  // Sum kcal per local day, then average over days_logged
-  const dayKcal = new Map<string, number>();
-  for (const r of kcalRows ?? []) {
-    const k = Number((r as { estimated_calories?: number | string | null }).estimated_calories ?? 0);
-    if (!isFinite(k) || k <= 0) continue;
-    dayKcal.set(r.entry_date as string, (dayKcal.get(r.entry_date as string) ?? 0) + k);
+  if (setError) console.error("[calculate-macros-weekly] workout sets fetch failed", setError);
+
+  const totalSets = workoutSets?.length ?? 0;
+  const avgStrain = workoutSets && workoutSets.length > 0
+    ? workoutSets.reduce((sum, s) => sum + Number(s.strain_value ?? 0), 0) / workoutSets.length
+    : 0;
+
+  let trainingLoadIndex = 1.0;
+  if (totalSets < 10) trainingLoadIndex = 0.85;
+  else if (totalSets < 20) trainingLoadIndex = 1.0;
+  else if (totalSets < 30) trainingLoadIndex = 1.1;
+  else trainingLoadIndex = 1.15;
+
+  const { data: readinessDays, error: readinessError } = await supa
+    .from("readiness_scores")
+    .select("final_score")
+    .eq("user_id", p.user_id)
+    .gte("score_date", week_start_date)
+    .lt("score_date", window_end_exclusive);
+  if (readinessError) console.error("[calculate-macros-weekly] readiness fetch failed", readinessError);
+
+  const avgReadiness = readinessDays && readinessDays.length > 0
+    ? readinessDays.reduce((sum, r) => sum + Number(r.final_score ?? 0), 0) / readinessDays.length
+    : 50;
+
+  if (avgReadiness < 45 && trainingLoadIndex > 1.0) {
+    trainingLoadIndex = Math.max(0.85, trainingLoadIndex * 0.85);
   }
-  const totalKcal = [...dayKcal.values()].reduce((a, b) => a + b, 0);
-  const avg_daily_intake = days_logged > 0 ? totalKcal / days_logged : 0;
+  trainingLoadIndex = Math.max(0.7, Math.min(1.3, trainingLoadIndex));
+  const weeklySetAvg = totalSets / 7;
 
-  let observed_tdee: number;
-  if (trend_delta_kg < 0) {
-    const daily_deficit = (Math.abs(trend_delta_kg) * 7700) / 7;
-    observed_tdee = avg_daily_intake + daily_deficit;
-  } else {
-    const daily_surplus = (trend_delta_kg * 7700) / 7;
-    observed_tdee = avg_daily_intake - daily_surplus;
+  // ── Observed TDEE (from trend + intake) ──────────────────────────────────
+  const haveTrendData = weigh_in_count >= 2 && days_logged >= 1;
+  let new_observed_tdee: number | null = null;
+  let blended_tdee = old_tdee;
+  let trend_delta_kg = 0;
+
+  if (haveTrendData) {
+    const sortedDates = [...dailyWeights.keys()].sort();
+    const windowSize = weigh_in_count >= 6 ? 3 : Math.min(2, weigh_in_count);
+    const startSlice = sortedDates.slice(0, windowSize).map(d => dailyWeights.get(d)!);
+    const endSlice = sortedDates.slice(-windowSize).map(d => dailyWeights.get(d)!);
+    const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    trend_delta_kg = avg(endSlice) - avg(startSlice);
+
+    const { data: kcalRows } = await supa
+      .from("shield_nutrition_logs")
+      .select("entry_date, estimated_calories, calorie_estimate_status")
+      .eq("user_id", p.user_id)
+      .eq("deleted", false)
+      .in("calorie_estimate_status", ["estimated", "manual_edited"])
+      .gte("entry_date", week_start_date)
+      .lt("entry_date", window_end_exclusive);
+    const dayKcal = new Map<string, number>();
+    for (const r of kcalRows ?? []) {
+      const k = Number((r as { estimated_calories?: number | string | null }).estimated_calories ?? 0);
+      if (!isFinite(k) || k <= 0) continue;
+      dayKcal.set(r.entry_date as string, (dayKcal.get(r.entry_date as string) ?? 0) + k);
+    }
+    const totalKcal = [...dayKcal.values()].reduce((a, b) => a + b, 0);
+    const avg_daily_intake = days_logged > 0 ? totalKcal / days_logged : 0;
+
+    const daily_delta_kcal = (trend_delta_kg * 7700) / 7;
+    new_observed_tdee = trend_delta_kg < 0
+      ? avg_daily_intake + Math.abs(daily_delta_kcal)
+      : avg_daily_intake - daily_delta_kcal;
+
+    if (weigh_in_count >= 6 && days_logged >= 6) {
+      blended_tdee = old_tdee * 0.40 + new_observed_tdee * 0.60;
+    } else {
+      blended_tdee = old_tdee * 0.70 + new_observed_tdee * 0.30;
+    }
   }
-  const new_observed_tdee = observed_tdee;
 
-  // Step 6: confidence + blended TDEE
-  let confidence_tier: "high" | "medium";
-  let blended_tdee: number;
-  if (weigh_in_count >= 6 && days_logged >= 6 && adherence_pct >= 85) {
-    confidence_tier = "high";
-    blended_tdee = old_tdee * 0.40 + observed_tdee * 0.60;
-  } else {
-    confidence_tier = "medium";
-    blended_tdee = old_tdee * 0.70 + observed_tdee * 0.30;
+  // ── Decision + confidence ────────────────────────────────────────────────
+  type Decision = "reduce" | "increase" | "hold" | "capped";
+  let decision: Decision = "hold";
+  let flagReason: string | null = null;
+  let confidenceTier: "high" | "medium" | "low" = "low";
+
+  if (days_logged >= 6 && weigh_in_count >= 3) confidenceTier = "high";
+  else if (days_logged >= 4 && weigh_in_count >= 2) confidenceTier = "medium";
+  else {
+    confidenceTier = "low";
+    if (days_logged < 3) flagReason = "insufficient_data";
   }
 
-  // Step 7: raw target
-  let raw_target_calories = blended_tdee * goalMultiplier(p.goal);
+  const abnormal = p.user_marked_abnormal_week_start === week_start_date;
+  const goal = p.goal || "recomposition";
+  const weightTrendPerWeek = trend_delta_kg;
+  let raw_target_calories = blended_tdee * goalMultiplier(goal) * trainingLoadIndex;
+  let new_target_calories = old_target_calories;
 
-  // Step 8a: deficit cap
-  const max_deficit = Math.min(blended_tdee * 0.25, 750);
-  if (blended_tdee - raw_target_calories > max_deficit) {
-    raw_target_calories = blended_tdee - max_deficit;
-  }
-
-  // Step 8b: safety floor
-  const protein_floor_kcal = current_weight_kg * 1.6 * 4;
-  const fat_floor_kcal = current_weight_kg * 0.6 * 9;
-  const carb_floor_kcal = 50 * 4;
-  const macro_floor = protein_floor_kcal + fat_floor_kcal + carb_floor_kcal;
-  const sex_floor = p.biological_sex === "male" ? 1500 : 1200;
-  const minimum_calories = Math.max(old_bmr, sex_floor, macro_floor);
-
-  let floor_capped = false;
-  if (raw_target_calories < minimum_calories) {
-    floor_capped = true;
-    raw_target_calories = minimum_calories;
-  }
-
-  // Step 8c: weekly adjustment cap
-  let new_target_calories: number;
-  let clamped_adjustment = 0;
-  if (old_target_calories < minimum_calories) {
-    new_target_calories = minimum_calories;
-    floor_capped = true;
-  } else {
-    const proposed = raw_target_calories - old_target_calories;
-    const weekly_cap = confidence_tier === "high" ? 250 : 150;
-    clamped_adjustment = Math.max(-weekly_cap, Math.min(weekly_cap, proposed));
-    new_target_calories = old_target_calories + clamped_adjustment;
-  }
-  const adjustment_kcal = new_target_calories - old_target_calories;
-
-  // Step 9: decision label
-  let decision: "reduce" | "increase" | "hold" | "capped";
-  let flag_reason: string | null = null;
-  if (floor_capped) {
-    decision = "capped";
-    flag_reason = "deficit_capped_for_safety";
-  } else if (clamped_adjustment < 0) {
-    decision = "reduce";
-  } else if (clamped_adjustment > 0) {
-    decision = "increase";
-  } else {
+  if (abnormal) {
     decision = "hold";
+    flagReason = "abnormal_week";
+    confidenceTier = "low";
+    new_target_calories = old_target_calories;
+  } else if (days_logged >= 3 && weigh_in_count >= 2) {
+    if (goal === "fat_loss") {
+      if (weightTrendPerWeek > -0.5) decision = trainingLoadIndex < 0.95 ? "reduce" : "hold";
+      else if (weightTrendPerWeek < -1.5) decision = "increase";
+      else decision = "hold";
+    } else if (goal === "muscle_gain") {
+      if (weightTrendPerWeek < 0.2) decision = trainingLoadIndex > 1.0 ? "increase" : "hold";
+      else if (weightTrendPerWeek > 1.2) decision = "reduce";
+      else decision = "hold";
+    } else if (goal === "recomposition") {
+      if (weightTrendPerWeek > 0.3) decision = "reduce";
+      else if (weightTrendPerWeek < -0.5) decision = "increase";
+      else decision = "hold";
+    } else if (goal === "strength" || goal === "athletic_performance") {
+      if (weightTrendPerWeek < 0.2) decision = trainingLoadIndex > 1.1 ? "increase" : "hold";
+      else if (weightTrendPerWeek > 1.0) decision = "reduce";
+      else decision = "hold";
+    }
+
+    const safeFloorMap: Record<string, number> = {
+      fat_loss: (p.measurement_weight_kg ?? current_weight_kg ?? 70) * 10,
+      muscle_gain: blended_tdee * 0.95,
+      recomposition: blended_tdee * 0.95,
+      strength: blended_tdee * 0.95,
+      athletic_performance: blended_tdee * 0.95,
+    };
+    const safeCeilingMap: Record<string, number> = {
+      fat_loss: blended_tdee * 0.95,
+      muscle_gain: blended_tdee * 1.2,
+      recomposition: blended_tdee * 1.05,
+      strength: blended_tdee * 1.1,
+      athletic_performance: blended_tdee * 1.1,
+    };
+    const floor = safeFloorMap[goal] ?? safeFloorMap.recomposition;
+    const ceiling = safeCeilingMap[goal] ?? safeCeilingMap.recomposition;
+
+    if (raw_target_calories < floor) {
+      new_target_calories = Math.ceil(floor);
+      decision = "capped";
+      flagReason = "deficit_capped_for_safety";
+    } else if (raw_target_calories > ceiling) {
+      new_target_calories = Math.ceil(ceiling);
+      decision = "capped";
+    } else {
+      new_target_calories = Math.ceil(raw_target_calories);
+    }
+  } else {
+    new_target_calories = old_target_calories;
   }
 
-  // Step 10: write via RPC (transactional)
-  if (decision === "hold") {
-    // Hold from a zero-net adjustment after math — still record the review,
-    // no target change.
-    await supa.from("nutrition_weekly_reviews").insert({
-      user_id: p.user_id,
-      week_start_date, week_end_date,
-      weigh_in_count, days_logged, adherence_pct,
-      eligible: true, abnormal_week: false, confidence_tier,
-      old_target_calories, old_observed_tdee, new_observed_tdee,
-      blended_tdee, raw_target_calories, new_target_calories,
-      adjustment_kcal: 0,
-      decision: "hold",
-      flag_reason: null,
-      timezone_used: tz,
-    });
-    return { user_id: p.user_id, status: "hold", decision: "hold" };
-  }
+  const adjustment_kcal = new_target_calories - (old_target_calories || blended_tdee);
 
-  // Generate the review_id app-side so the RPC can use it to link the new target.
-  const review_id = crypto.randomUUID();
-  const macros = recomputeMacros(new_target_calories, current_weight_kg, p.goal);
-
-  const { error: rpcErr } = await supa.rpc("apply_weekly_macro_review", {
-    p_review_id: review_id,
-    p_user_id: p.user_id,
-    p_week_start_date: week_start_date,
-    p_week_end_date: week_end_date,
-    p_effective_start_date: new_effective_start_date,
-    p_weigh_in_count: weigh_in_count,
-    p_days_logged: days_logged,
-    p_adherence_pct: adherence_pct,
-    p_eligible: true,
-    p_confidence_tier: confidence_tier,
-    p_abnormal_week: false,
-    p_old_target_calories: old_target_calories,
-    p_old_observed_tdee: old_observed_tdee,
-    p_new_observed_tdee: new_observed_tdee,
-    p_blended_tdee: blended_tdee,
-    p_raw_target_calories: raw_target_calories,
-    p_new_target_calories: new_target_calories,
-    p_adjustment_kcal: adjustment_kcal,
-    p_decision: decision,
-    p_flag_reason: flag_reason,
-    p_timezone_used: tz,
-    p_bmr: old_bmr,
-    p_target_protein_g: macros.target_protein_g,
-    p_target_carbs_g: macros.target_carbs_g,
-    p_target_fat_g: macros.target_fat_g,
+  await supa.from("nutrition_weekly_reviews").insert({
+    user_id: p.user_id,
+    week_start_date,
+    week_end_date,
+    weigh_in_count,
+    days_logged,
+    adherence_pct,
+    eligible: days_logged >= 3,
+    confidence_tier: confidenceTier,
+    abnormal_week: abnormal,
+    old_target_calories: old_target_calories || null,
+    old_observed_tdee,
+    new_observed_tdee,
+    blended_tdee,
+    raw_target_calories,
+    new_target_calories,
+    adjustment_kcal,
+    training_load_index: trainingLoadIndex,
+    weekly_sets_avg: weeklySetAvg,
+    avg_strain_value: avgStrain,
+    decision,
+    flag_reason: flagReason,
+    applied_target_id: null,
+    applied_at: null,
+    timezone_used: tz,
   });
-  if (rpcErr) {
-    return { user_id: p.user_id, status: "error", error: rpcErr.message };
-  }
-  return { user_id: p.user_id, status: "adjusted", decision, flag_reason };
+
+  return {
+    user_id: p.user_id,
+    status: decision === "hold" || decision === "capped" ? "hold" : "adjusted",
+    decision,
+    flag_reason: flagReason,
+  };
 }
 
 // ── HTTP entry ──────────────────────────────────────────────────────────────
