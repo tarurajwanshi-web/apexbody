@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:ui": "node scripts/check-ui-consistency.mjs",
+    "test:visual": "playwright test",
+    "test:visual:update": "playwright test --update-snapshots",
     "format": "prettier --write ."
   },
   "dependencies": {
