@@ -6,6 +6,8 @@ import { AICard } from "@/components/AIOrb";
 import { RingChart } from "@/components/RingChart";
 import { scoreColor } from "@/lib/score-color";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
+import { DecisionPanel } from "@/components/DecisionPanel";
+import { MetricRing } from "@/components/MetricRing";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { HydrationLogModal } from "@/components/LogModals";
 import { MealDetailModal } from "@/components/MealDetailModal";
@@ -59,6 +61,14 @@ const GOAL_LABEL: Record<string, string> = {
   strength: "strength",
   athletic_performance: "athletic performance",
 };
+
+function nutritionBrief(hasMeals: boolean, proteinShort: number, adherence: number | null): string {
+  if (!hasMeals) return "Log your first meal to start today's read.";
+  if (proteinShort > 15) return `You're ${Math.round(proteinShort)}g protein short — pick a high-protein snack.`;
+  if (adherence != null && adherence >= 85) return "Macros locked in. Keep this pattern.";
+  if (adherence != null && adherence >= 60) return "Solid day. One more clean meal closes it out.";
+  return "Macros drifting — aim for protein + veg at the next meal.";
+}
 
 function Nutrition() {
   const userTz = useUserTimezone();
@@ -343,6 +353,38 @@ function Nutrition() {
 
 
       <NutritionDateHeader selectedDate={selectedDate} onChange={setSelectedDate} timezone={userTz} />
+
+      {/* AI decision layer */}
+      <div className="mx-5 mt-3">
+        <DecisionPanel
+          eyebrow="FUEL BRIEF"
+          brief={nutritionBrief(hasMeals, proteinShort, macros?.macro_adherence_score ?? null)}
+          confidence={
+            macros?.macro_adherence_score == null
+              ? "low"
+              : macros.macro_adherence_score >= 85
+              ? "high"
+              : macros.macro_adherence_score >= 60
+              ? "medium"
+              : "low"
+          }
+          actions={[
+            { label: "Log meal", href: "/dashboard" },
+            { label: "Log water", href: "/dashboard" },
+          ]}
+          right={
+            hasTarget ? (
+              <MetricRing
+                value={Math.min(100, Math.round((cCal / (tCal as number)) * 100))}
+                size={44}
+                thickness={4}
+                color={cCal > (tCal as number) * 1.1 ? "#FF5A5F" : "#7DF9FF"}
+                suffix="%"
+              />
+            ) : null
+          }
+        />
+      </div>
 
       {/* Goal-based framing line */}
       <p className="mx-5 mt-5 text-[12px] text-text-secondary leading-snug">

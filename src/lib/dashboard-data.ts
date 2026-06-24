@@ -47,6 +47,7 @@ export type DashboardCard = {
 export type DashboardWeightTrend = {
   latest_kg: number | null;
   delta_kg: number | null; // latest - previous
+  series7d: (number | null)[]; // oldest → newest, length 7
 };
 
 export type DashboardMeal = {
@@ -77,6 +78,8 @@ export type DashboardData = {
   todayMeals: DashboardMeal[];
   recentMeals: DashboardMeal[]; // last 30d for food_sources sampling
   lastLogDate: string | null;
+  consistency7d: boolean[]; // oldest → newest, length 7
+  compliance7d: (number | null)[]; // oldest → newest, length 7
 };
 
 export async function loadDashboardData(userId: string, tz: string): Promise<DashboardData> {
@@ -121,7 +124,7 @@ export async function loadDashboardData(userId: string, tz: string): Promise<Das
       .maybeSingle(),
     supabase
       .from("nutrition_daily_summaries")
-      .select("compliance_pct")
+      .select("summary_date, compliance_pct")
       .eq("user_id", userId)
       .gte("summary_date", sevenDaysAgo)
       .lte("summary_date", today),
@@ -166,8 +169,9 @@ export async function loadDashboardData(userId: string, tz: string): Promise<Das
       .select("weight_kg, entry_date")
       .eq("user_id", userId)
       .not("weight_kg", "is", null)
+      .gte("entry_date", sevenDaysAgo)
       .order("entry_date", { ascending: false })
-      .limit(2),
+      .limit(14),
     supabase
       .from("nutrition_meal_full_analysis")
       .select("id, food_sources, entry_date, meal_time")
@@ -251,12 +255,26 @@ export async function loadDashboardData(userId: string, tz: string): Promise<Das
       : null;
 
   const weightRows = (weightRes.data as any[]) ?? [];
+  // Bucket last 7 days oldest → newest. Take the latest reading per day if multiple.
+  const weightByDay = new Map<string, number>();
+  for (const r of weightRows) {
+    const d = r?.entry_date as string | undefined;
+    const w = r?.weight_kg != null ? Number(r.weight_kg) : null;
+    if (!d || w == null) continue;
+    if (!weightByDay.has(d)) weightByDay.set(d, w);
+  }
+  const series7d: (number | null)[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const iso = addDaysISO(today, -i);
+    series7d.push(weightByDay.has(iso) ? (weightByDay.get(iso) as number) : null);
+  }
   const weight: DashboardWeightTrend = {
     latest_kg: weightRows[0]?.weight_kg != null ? Number(weightRows[0].weight_kg) : null,
     delta_kg:
       weightRows[0]?.weight_kg != null && weightRows[1]?.weight_kg != null
         ? Number(weightRows[0].weight_kg) - Number(weightRows[1].weight_kg)
         : null,
+    series7d,
   };
 
   // Today's planned session from the most recent weekly plan.
@@ -277,6 +295,24 @@ export async function loadDashboardData(userId: string, tz: string): Promise<Das
   const recentMeals = ((mealsRecentRes.data as any[]) ?? []) as DashboardMeal[];
   const lastLogDate = (lastMealRes.data as any[])?.[0]?.entry_date ?? null;
 
+  // 7-day consistency from recent meals (oldest → newest)
+  const mealDays = new Set(recentMeals.map((m) => m.entry_date));
+  const consistency7d: boolean[] = [];
+  for (let i = 6; i >= 0; i--) consistency7d.push(mealDays.has(addDaysISO(today, -i)));
+
+  // 7-day compliance series (oldest → newest) from summary7Res
+  const complianceByDay = new Map<string, number>();
+  for (const r of (summary7Res.data as any[]) ?? []) {
+    if (r?.summary_date && typeof r.compliance_pct === "number") {
+      complianceByDay.set(r.summary_date, Number(r.compliance_pct));
+    }
+  }
+  const compliance7d: (number | null)[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const iso = addDaysISO(today, -i);
+    compliance7d.push(complianceByDay.has(iso) ? (complianceByDay.get(iso) as number) : null);
+  }
+
   return {
     profile,
     readiness,
@@ -294,5 +330,7 @@ export async function loadDashboardData(userId: string, tz: string): Promise<Das
     todayMeals,
     recentMeals,
     lastLogDate,
+    consistency7d,
+    compliance7d,
   };
 }

@@ -213,8 +213,8 @@ function Dashboard() {
         />
         <StateCard readiness={readiness} />
         <MetricCards
-          weight={{ deltaKg: data.weight.delta_kg, goal: data.profile.goal }}
-          consistency={{ daysLogged }}
+          weight={{ deltaKg: data.weight.delta_kg, goal: data.profile.goal, trend: data.weight.series7d }}
+          consistency={{ daysLogged, series: data.consistency7d }}
           streak={{ days: streakDays, protected: streakProtected }}
         />
         <Insights

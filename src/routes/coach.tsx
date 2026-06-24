@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronLeft, Sparkles, Send, Lock, Flame } from "lucide-react";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
+import { DecisionPanel } from "@/components/DecisionPanel";
 import { useProfile } from "@/lib/store";
 import { askCoach } from "@/lib/coach.functions";
 import { getActivityWeek, type ActivityWeek } from "@/lib/shield.functions";
@@ -33,6 +34,16 @@ const UNLOCKED_CHIPS = [
 ];
 
 const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"]; // visual labels in locked streak strip
+
+function coachBriefFromActivity(name: string, a: ActivityWeek | null): string {
+  if (!a) return `Ready when you are, ${name}. Ask anything about today.`;
+  const streak = a.streak ?? 0;
+  const todayLogged = a.last7?.[6] === true;
+  if (!todayLogged) return "No log yet today — kick things off with one quick action.";
+  if (streak >= 5) return `${streak}-day streak. Stay the course.`;
+  if (streak >= 3) return `${streak} days stacked. Keep tempo.`;
+  return "Good base today. What do you want to push on?";
+}
 
 function Coach() {
   const { profile } = useProfile();
@@ -157,7 +168,20 @@ function Coach() {
           userTz={userTz}
         />
       ) : (
-        <UnlockedHero name={profile.name || "athlete"} />
+        <>
+          <div className="mx-5 mt-4">
+            <DecisionPanel
+              eyebrow="TODAY'S BRIEF"
+              brief={coachBriefFromActivity(profile.name || "athlete", activity)}
+              confidence={(activity?.streak ?? 0) >= 3 ? "high" : "medium"}
+              actions={[
+                { label: "Plan today", href: "/workouts" },
+                { label: "Fuel check", href: "/nutrition" },
+              ]}
+            />
+          </div>
+          <UnlockedHero name={profile.name || "athlete"} />
+        </>
       )}
 
       {/* CONVERSATION */}
