@@ -62,6 +62,14 @@ const GOAL_LABEL: Record<string, string> = {
   athletic_performance: "athletic performance",
 };
 
+function nutritionBrief(hasMeals: boolean, proteinShort: number, adherence: number | null): string {
+  if (!hasMeals) return "Log your first meal to start today's read.";
+  if (proteinShort > 15) return `You're ${Math.round(proteinShort)}g protein short — pick a high-protein snack.`;
+  if (adherence != null && adherence >= 85) return "Macros locked in. Keep this pattern.";
+  if (adherence != null && adherence >= 60) return "Solid day. One more clean meal closes it out.";
+  return "Macros drifting — aim for protein + veg at the next meal.";
+}
+
 function Nutrition() {
   const userTz = useUserTimezone();
   const [selectedDate, setSelectedDate] = useState<string>(() => getLocalDateISO(userTz));
@@ -350,13 +358,13 @@ function Nutrition() {
       <div className="mx-5 mt-3">
         <DecisionPanel
           eyebrow="FUEL BRIEF"
-          brief={nutritionBrief(macros, hasMeals, proteinShort)}
+          brief={nutritionBrief(hasMeals, proteinShort, macros?.macro_adherence_score ?? null)}
           confidence={
-            macros?.compliance_pct == null
+            macros?.macro_adherence_score == null
               ? "low"
-              : macros.compliance_pct >= 85
+              : macros.macro_adherence_score >= 85
               ? "high"
-              : macros.compliance_pct >= 60
+              : macros.macro_adherence_score >= 60
               ? "medium"
               : "low"
           }
