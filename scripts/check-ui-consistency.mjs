@@ -16,12 +16,15 @@ const TARGETS = [
 ];
 const DIRS = ["src/components/dashboard"];
 
-// Files where text-text-accent (purple #A78BFA) is the intended AI / action
-// color. Anywhere else it must be text-text-secondary.
-const ACCENT_ALLOWLIST = new Set([
-  "src/components/AIOrb.tsx",
-  "src/components/ApexStreakStrip.tsx",
+// text-text-accent (purple #A78BFA) is reserved for AI / action UI. This
+// rule guards files that historically misused it for plain helper copy,
+// snackbars, or descriptive links. Other files (e.g. coach.tsx APEX Coach
+// label, workouts.tsx "Move here →") legitimately use accent for action UI
+// and are not scanned by this rule.
+const ACCENT_SCOPED_FILES = new Set([
+  "src/routes/nutrition.tsx",
 ]);
+const ACCENT_SCOPED_DIRS = ["src/components/dashboard"];
 
 const RULES = [
   { name: "rounded-3xl", re: /\brounded-3xl\b/g },
@@ -30,7 +33,8 @@ const RULES = [
   {
     name: "text-text-accent reserved for AI/action UI — use text-text-secondary",
     re: /\btext-text-accent\b/g,
-    allowlist: ACCENT_ALLOWLIST,
+    scopedFiles: ACCENT_SCOPED_FILES,
+    scopedDirs: ACCENT_SCOPED_DIRS,
   },
 ];
 const ARBITRARY_PX = /\btext-\[(\d+)px\]/g;
@@ -62,7 +66,11 @@ for (const file of collect()) {
   const lines = src.split("\n");
   lines.forEach((line, i) => {
     for (const r of RULES) {
-      if (r.allowlist && r.allowlist.has(rel)) continue;
+      if (r.scopedFiles || r.scopedDirs) {
+        const inFile = r.scopedFiles?.has(rel);
+        const inDir = r.scopedDirs?.some((d) => rel.startsWith(d + "/") || rel === d);
+        if (!inFile && !inDir) continue;
+      }
       r.re.lastIndex = 0;
       let m;
       while ((m = r.re.exec(line))) {
