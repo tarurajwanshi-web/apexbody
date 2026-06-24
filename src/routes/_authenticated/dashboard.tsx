@@ -185,6 +185,11 @@ function Dashboard() {
     >
       <div className="relative px-5 pt-6 max-w-[480px] mx-auto" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <Header greeting={greeting} name={name} day={day} />
+        <DecisionPanel
+          brief={sentence}
+          confidence={readiness == null ? "low" : readiness > 70 ? "high" : readiness > 50 ? "medium" : "low"}
+          actions={buildDecisionActions(recovery, fuel, effort, trainingPlanned)}
+        />
         <TodayCard
           recovery={recovery}
           fuel={fuel}
