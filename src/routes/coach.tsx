@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronLeft, Sparkles, Send, Lock, Flame } from "lucide-react";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
+import { DecisionPanel } from "@/components/DecisionPanel";
 import { useProfile } from "@/lib/store";
 import { askCoach } from "@/lib/coach.functions";
 import { getActivityWeek, type ActivityWeek } from "@/lib/shield.functions";
@@ -157,7 +158,20 @@ function Coach() {
           userTz={userTz}
         />
       ) : (
-        <UnlockedHero name={profile.name || "athlete"} />
+        <>
+          <div className="mx-5 mt-4">
+            <DecisionPanel
+              eyebrow="TODAY'S BRIEF"
+              brief={coachBriefFromActivity(profile.name || "athlete", activity)}
+              confidence={(activity?.streak ?? 0) >= 3 ? "high" : "medium"}
+              actions={[
+                { label: "Plan today", href: "/workouts" },
+                { label: "Fuel check", href: "/nutrition" },
+              ]}
+            />
+          </div>
+          <UnlockedHero name={profile.name || "athlete"} />
+        </>
       )}
 
       {/* CONVERSATION */}
