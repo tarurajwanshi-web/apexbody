@@ -35,6 +35,16 @@ const UNLOCKED_CHIPS = [
 
 const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"]; // visual labels in locked streak strip
 
+function coachBriefFromActivity(name: string, a: ActivityWeek | null): string {
+  if (!a) return `Ready when you are, ${name}. Ask anything about today.`;
+  const streak = a.streak ?? 0;
+  const todayLogged = a.last7?.[6] === true;
+  if (!todayLogged) return "No log yet today — kick things off with one quick action.";
+  if (streak >= 5) return `${streak}-day streak. Stay the course.`;
+  if (streak >= 3) return `${streak} days stacked. Keep tempo.`;
+  return "Good base today. What do you want to push on?";
+}
+
 function Coach() {
   const { profile } = useProfile();
   const userTz = useUserTimezone();
