@@ -58,6 +58,20 @@ function deterministicSentence(
   }
   return "Log meals and recovery to build your full picture.";
 }
+function buildDecisionActions(
+  recovery: number | null,
+  fuel: number | null,
+  effort: number | null,
+  trainingPlanned: boolean,
+): DecisionAction[] {
+  const out: DecisionAction[] = [];
+  if (fuel == null || fuel < 60) out.push({ label: "Log a meal", href: "/nutrition" });
+  if (trainingPlanned) out.push({ label: "Start session", href: "/workouts" });
+  else if (effort != null && effort < 50) out.push({ label: "Plan training", href: "/workouts" });
+  out.push({ label: "Ask coach", href: "/coach" });
+  return out.slice(0, 3);
+}
+
 
 function Dashboard() {
   const { profile } = useProfile();
