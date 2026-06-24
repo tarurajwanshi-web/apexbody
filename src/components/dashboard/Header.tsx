@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { T } from "./tokens";
 
 type Props = {
