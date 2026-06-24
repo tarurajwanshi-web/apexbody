@@ -9,6 +9,7 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
+    "lint:ui": "node scripts/check-ui-consistency.mjs",
     "format": "prettier --write ."
   },
   "dependencies": {
