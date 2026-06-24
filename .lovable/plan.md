@@ -1,79 +1,99 @@
-# Apex — Whoop Obsidian Revamp
+# DecisionPanel + Sparkline/MetricRing rollout
 
-A full UI/UX redesign of every screen around a near-black canvas, electric data accents, and a persistent AI decision layer. Inspired by Whoop's data density and Bevel's clinical calm.
+Extend the AI decision layer to Coach/Nutrition/Workouts and replace static
+`—` placeholders on the dashboard with real trend visuals.
 
-## Design system (foundation)
+## 1. New shared components
 
-**Color tokens** (rewrite `src/styles.css` + `src/components/dashboard/tokens.ts`)
-- `--bg-base` `#0A0A0A` — page
-- `--bg-surface` `#141416` — cards
-- `--bg-elevated` `#1C1C1F` — modals, sheets, hover
-- `--border-hairline` `#26262A` (1px) / `--border-strong` `#3A3A3F`
-- `--text-primary` `#F5F5F7` / `--text-secondary` `#A1A1A6` / `--text-tertiary` `#6E6E73`
-- `--accent-data` `#00E5A0` (recovery / positive metrics, ring fills)
-- `--accent-signal` `#7DF9FF` (AI insights, coach voice, links)
-- `--accent-warn` `#FFB627` / `--accent-strain` `#FF5A5F`
-- Ring gradients: `conic-gradient(from -90deg, #00E5A0, #7DF9FF)`
+**`src/components/MetricRing.tsx`** — small conic-gradient ring (32/48/72 px)
+with a centered numeric value. Props: `value` (0–100 | null), `size`, `label`,
+`color` (defaults to T.green → T.primary gradient). Renders a neutral track +
+overlay arc; null/0 → empty track with a hairline. Used in DecisionPanel
+right slots (Coach readiness, Workouts strain) and inside MetricCards.
 
-**Typography** — Space Grotesk (display/metrics) + DM Sans (body/UI). Loaded via `<link>` in `__root.tsx`. Tabular numerals for all metrics. Sizes: 10/12/14/16/20/28/40/56 px. No bold; weight 500 max for body, 600 for metric numerals.
+**`src/components/Sparkline.tsx`** — pure inline SVG, 7-point default.
+Props: `points: (number|null)[]`, `width=80`, `height=24`, `color`, `fill`
+(toggle area gradient). Skips null gaps; if all null → renders flat hairline
++ "no data" affordance. Tabular-numerals safe (no text, draws only path).
 
-**Motion** — 180ms standard ease, 320ms spring on data updates, ring sweep on mount.
+## 2. Dashboard wiring (`src/components/dashboard/MetricCards.tsx`)
 
-## AI decision layer (new pattern)
+- Each `ValueBlock` gets an optional `trend: (number|null)[]` prop.
+- When trend present + has values → render `<Sparkline>` under the sub label.
+- When weight delta is null → keep "—" but show 7-day weight `Sparkline` if
+  any points exist, replacing the static dash with context.
+- Consistency block gets a 7-bar mini bar grid (logged vs not, hairline track).
+- New props plumbed from `dashboard.tsx`:
+  - `weightTrend`: last 7 weight readings from a new field on `DashboardData`.
+  - `consistencyDays`: boolean[7] derived from `recentMeals` (one entry per day).
+  - `streakTrend`: optional — skip if data not cheaply available.
 
-A `DecisionPanel` component pinned to the top of every primary screen:
-- Single-sentence AI brief ("Recovery's at 62 — keep training, but cap RPE at 7.")
-- 1–3 contextual action chips ("Log breakfast", "Start session", "Move workout")
-- Confidence dot + "Why" affordance → opens reasoning sheet
-- Same component, screen-specific content driven by Coach functions
+**`src/lib/dashboard-data.ts`** — add `weightTrend7d: (number|null)[]` by
+selecting last 7 daily weight rows; add `consistency7d: boolean[]` derived
+from existing `recentMeals` grouping (no new query — pure transform).
 
-## Screen redesigns
+## 3. DecisionPanel on Coach (`src/routes/coach.tsx`)
 
-**Dashboard (`_authenticated/dashboard.tsx`)**
-- DecisionPanel → Today ring trio (Recovery / Fuel / Strain) at 180px, conic gradients, tabular % inside
-- Below: 2-col metric strip (Sleep, HRV, Steps, Protein) with sparklines
-- "This Week" → 7-day bar grid, hairline borders, accent fills for completed days
-- Insights → stacked editorial cards, no rounded-3xl, 12px radius max
+Insert directly under `<header>`, only in the **unlocked** state (locked
+state keeps the existing `LockedHero` to preserve the unlock UX):
 
-**Coach (`coach.tsx`)**
-- Full-bleed chat surface, AI Elements `Conversation` + `Message` + `PromptInput`
-- Signal-cyan assistant text, no bubble; user messages in elevated surface
-- Sticky DecisionPanel header with safe-area inset
-- Quick-prompt chips above composer
+```
+<DecisionPanel
+  eyebrow="TODAY'S BRIEF"
+  brief={coachBrief}            // derived locally from activity + last readiness
+  confidence={"medium"}         // bumped to "high" if last readiness > 70
+  actions={[
+    { label: "Plan today", href: "/workouts" },
+    { label: "Fuel check", href: "/nutrition" },
+  ]}
+/>
+```
 
-**Nutrition (`nutrition.tsx`)**
-- DecisionPanel → macro rings (P/C/F) horizontal, target vs actual
-- Meal timeline (vertical rail), tap → MealDetailModal restyled to elevated surface
-- All helper/snackbar/link text uses `--text-secondary`, never accent
+`coachBrief` is computed from existing `activity` (streak / last 7) — no new
+network calls. Example: streak ≥ 3 → "You've stacked 3 days. Keep tempo." /
+no log today → "No log yet today — start with one quick action."
 
-**Workouts (`workouts.tsx`)**
-- DecisionPanel → "Today's session" hero card with strain forecast
-- Exercise list as dense rows (Whoop-style), set × rep × load in tabular
-- Empty state: cyan outline ring
+## 4. DecisionPanel on Nutrition (`src/routes/nutrition.tsx`)
 
-**Settings / Resources / Trust / Health-data / Onboarding / Meet-coach**
-- Adopt new tokens, restyle headers, cards, form controls (input bg `--bg-surface`, border hairline, focus ring signal-cyan)
-- Onboarding: full-screen panels, large display type, single CTA per step
+Insert after `NutritionDateHeader` (above the goal-framing line). Brief
+derived from existing `macros` + `proteinShort`:
 
-**Navigation (`DashboardNav.tsx`)**
-- Floating bottom bar, `--bg-elevated` with hairline top border, blur backdrop
-- 5 tabs + center "+" → QuickActionSheet restyled
-- Active state: signal-cyan dot under icon, no fill
+- `proteinShort > 0` → "You're {n}g protein short — pick a high-protein snack."
+- compliance ≥ 85 → "Macros locked in. Keep this pattern."
+- no meals → "Log your first meal to start today's read."
 
-## Components touched
+Actions: `[Log meal, Log water]` (open existing modals via callbacks). Right
+slot: small `MetricRing` showing calorie compliance.
 
-Tokens/system: `styles.css`, `tokens.ts`, `text.ts`, `__root.tsx` (font links)
-New: `src/components/DecisionPanel.tsx`, `src/components/MetricRing.tsx` (replaces ad-hoc rings), `src/components/Sparkline.tsx`
-Restyled: `Dashboard*`, `Header`, `TopBar`, `BottomNav`, `DashboardNav`, `TodayCard`, `ApexScoreCard`, `ContextCard`, `Insights`, `MetricCards`, `MomentumBar`, `ThisWeek`, `WhatApexKnows`, `QuickActions`, `QuickActionSheet`, `MealDetailModal`, `NutritionDateHeader`, `RingChart`, `AIOrb`, `FloatingCoach`, `CoachingFeed`, `LogModals`, `ApexStreakStrip`
-Routes: all under `src/routes/` except generated files
+## 5. DecisionPanel on Workouts (`src/routes/workouts.tsx`)
 
-## Out of scope
+Insert after `<header>`, before `<LockBanner>`. Brief derived from `plan` +
+`weekLogs`:
 
-- Backend / edge functions / DB schema unchanged
-- AI brief copy will use existing coach functions; no new model calls this pass
-- Visual regression baselines will be regenerated after redesign lands (`bun run test:visual:update`)
-- Lint rule for `text-text-accent` stays; new `--accent-signal` (cyan) replaces purple
+- today is rest → "Rest day — protect recovery, hit protein."
+- today planned + not started → "Today: {session_name}. ~{n} sets."
+- session in progress → "Session live — keep RPE ≤ 8."
+- no plan → existing empty-state copy.
 
-## Rollout
+Actions:
+- planned + not started → `[Start session]` (opens existing pre-check sheet).
+- rest day → `[Train anyway]` triggers existing swap path.
+- locked → `[See preview]` scrolls to plan.
 
-Single PR, structured per screen. Order: tokens → DecisionPanel → Dashboard → Nav → Coach → Nutrition → Workouts → secondary screens → regenerate visual baselines.
+Right slot: small `MetricRing` with today's planned-set completion %.
+
+## 6. Out of scope
+
+- No backend / edge-function / schema changes.
+- No new model calls; briefs are deterministic from data already loaded.
+- Visual regression baselines will be regenerated (`bun run test:visual:update`)
+  after this lands — same workflow as the previous pass.
+- Helper text in Nutrition continues to follow the lint rule (no
+  `text-text-accent` for non-AI copy); DecisionPanel itself counts as AI UI.
+
+## Files touched
+
+New: `src/components/MetricRing.tsx`, `src/components/Sparkline.tsx`
+Edited: `src/lib/dashboard-data.ts`, `src/components/dashboard/MetricCards.tsx`,
+`src/routes/_authenticated/dashboard.tsx`, `src/routes/coach.tsx`,
+`src/routes/nutrition.tsx`, `src/routes/workouts.tsx`
