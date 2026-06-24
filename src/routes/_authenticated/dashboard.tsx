@@ -12,6 +12,7 @@ import { StateCard } from "@/components/dashboard/StateCard";
 import { MetricCards } from "@/components/dashboard/MetricCards";
 import { Insights } from "@/components/dashboard/Insights";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
+import { DecisionPanel, type DecisionAction } from "@/components/DecisionPanel";
 
 import { loadDashboardData, type DashboardData } from "@/lib/dashboard-data";
 import { detectStreak } from "@/lib/dashboard-state";
@@ -57,6 +58,20 @@ function deterministicSentence(
   }
   return "Log meals and recovery to build your full picture.";
 }
+function buildDecisionActions(
+  recovery: number | null,
+  fuel: number | null,
+  effort: number | null,
+  trainingPlanned: boolean,
+): DecisionAction[] {
+  const out: DecisionAction[] = [];
+  if (fuel == null || fuel < 60) out.push({ label: "Log a meal", href: "/nutrition" });
+  if (trainingPlanned) out.push({ label: "Start session", href: "/workouts" });
+  else if (effort != null && effort < 50) out.push({ label: "Plan training", href: "/workouts" });
+  out.push({ label: "Ask coach", href: "/coach" });
+  return out.slice(0, 3);
+}
+
 
 function Dashboard() {
   const { profile } = useProfile();
@@ -184,6 +199,11 @@ function Dashboard() {
     >
       <div className="relative px-5 pt-6 max-w-[480px] mx-auto" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <Header greeting={greeting} name={name} day={day} />
+        <DecisionPanel
+          brief={sentence}
+          confidence={readiness == null ? "low" : readiness > 70 ? "high" : readiness > 50 ? "medium" : "low"}
+          actions={buildDecisionActions(recovery, fuel, effort, trainingPlanned)}
+        />
         <TodayCard
           recovery={recovery}
           fuel={fuel}

@@ -5,11 +5,11 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 24px;
-  --radius-2xl: 32px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 22px;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -40,47 +40,49 @@
   --color-text-tertiary: var(--text-tertiary);
   --color-text-accent: var(--text-accent);
 
-  --color-ai: var(--ai-purple);
-  --color-ai-glow: var(--ai-purple-glow);
+  --color-ai: var(--ai-signal);
+  --color-ai-glow: var(--ai-signal-glow);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-sleep: var(--sleep-blue);
   --color-hrv: var(--hrv-teal);
 
-  --font-display: "Sora", system-ui, sans-serif;
-  --font-sans: "Inter", system-ui, sans-serif;
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-sans: "DM Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 
 :root {
-  /* Force dark always */
-  --bg-0: #06080F;
-  --bg-1: #0A0E1A;
-  --bg-2: #0F1524;
-  --bg-3: #171F33;
+  /* Whoop Obsidian — near-black canvas, electric accents */
+  --bg-0: #0A0A0A;
+  --bg-1: #0A0A0A;
+  --bg-2: #141416;
+  --bg-3: #1C1C1F;
 
-  --text-primary: #F0F4FF;
-  --text-secondary: #8892A4;
-  --text-tertiary: #4A566A;
-  --text-accent: #A78BFA;
+  --text-primary: #F5F5F7;
+  --text-secondary: #A1A1A6;
+  --text-tertiary: #6E6E73;
+  /* Repurposed: was purple; now signal-cyan (AI / interactive). Lint still
+     restricts text-text-accent in dashboard/nutrition to keep helper text neutral. */
+  --text-accent: #7DF9FF;
 
-  --ai-purple: #8B5CF6;
-  --ai-purple-glow: rgba(139, 92, 246, 0.35);
-  --success: #10B981;
-  --warning: #F59E0B;
-  --danger: #EF4444;
-  --sleep-blue: #3B82F6;
-  --hrv-teal: #06B6D4;
+  --ai-signal: #7DF9FF;
+  --ai-signal-glow: rgba(125, 249, 255, 0.28);
+  --success: #00E5A0;
+  --warning: #FFB627;
+  --danger: #FF5A5F;
+  --sleep-blue: #7DF9FF;
+  --hrv-teal: #00E5A0;
 
-  --background: var(--bg-1);
+  --background: var(--bg-0);
   --foreground: var(--text-primary);
   --card: var(--bg-2);
   --card-foreground: var(--text-primary);
-  --popover: var(--bg-2);
+  --popover: var(--bg-3);
   --popover-foreground: var(--text-primary);
-  --primary: #7C3AED;
-  --primary-foreground: #FFFFFF;
+  --primary: #7DF9FF;
+  --primary-foreground: #0A0A0A;
   --secondary: var(--bg-3);
   --secondary-foreground: var(--text-primary);
   --muted: var(--bg-3);
@@ -89,10 +91,10 @@
   --accent-foreground: var(--text-primary);
   --destructive: var(--danger);
   --destructive-foreground: #ffffff;
-  --border: rgba(255, 255, 255, 0.07);
-  --input: rgba(255, 255, 255, 0.09);
-  --ring: rgba(124, 58, 237, 0.5);
-  --radius: 16px;
+  --border: rgba(255, 255, 255, 0.06);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: rgba(125, 249, 255, 0.45);
+  --radius: 14px;
 }
 
 @layer base {
@@ -101,47 +103,55 @@
     color: var(--text-primary);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss01", "cv11";
   }
   * { border-color: var(--color-border); }
-  h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: -0.02em; }
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    font-weight: 500;
+  }
+  /* Tabular numerals everywhere — Whoop-style metric precision */
+  .tabular, [data-metric] { font-variant-numeric: tabular-nums; }
   ::-webkit-scrollbar { width: 0; height: 0; }
-  /* iOS Safari zooms on focus for any input with font-size < 16px. Force ≥16px globally. */
   input, textarea, select { font-size: 16px; }
-  /* Badge hiding on published builds is handled via Lovable publish settings, not CSS. */
 }
 
-/* Safe-area helpers — env(safe-area-inset-*) instead of any fixed pixel values. */
+/* Safe-area helpers */
 @utility pt-safe { padding-top: env(safe-area-inset-top, 0px); }
 @utility pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
 @utility pl-safe { padding-left:  env(safe-area-inset-left, 0px); }
 @utility pr-safe { padding-right: env(safe-area-inset-right, 0px); }
 
 @utility gradient-brand {
-  background-image: linear-gradient(90deg, #7C3AED 0%, #3B82F6 100%);
+  background-image: linear-gradient(90deg, #00E5A0 0%, #7DF9FF 100%);
 }
 @utility gradient-text {
-  background-image: linear-gradient(135deg, #A78BFA 0%, #60A5FA 100%);
+  background-image: linear-gradient(135deg, #00E5A0 0%, #7DF9FF 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 @utility ai-glow {
-  box-shadow: 0 0 30px var(--ai-purple-glow);
+  box-shadow: 0 0 30px var(--ai-signal-glow);
 }
 @utility card-shadow {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 @utility ai-border {
   position: relative;
-  border-left: 3px solid var(--ai-purple);
+  border-left: 2px solid var(--ai-signal);
 }
 @utility phone-frame {
   max-width: 430px;
   margin-left: auto;
   margin-right: auto;
   min-height: 100vh;
-  background-color: var(--bg-1);
+  background-color: var(--bg-0);
   position: relative;
+}
+@utility hairline {
+  border: 1px solid var(--border);
 }
 
 @keyframes breathe {
@@ -149,12 +159,12 @@
   50% { transform: scale(0.97); opacity: 0.92; }
 }
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.3); }
-  50% { box-shadow: 0 0 40px rgba(139, 92, 246, 0.6); }
+  0%, 100% { box-shadow: 0 0 20px rgba(125, 249, 255, 0.22); }
+  50% { box-shadow: 0 0 40px rgba(125, 249, 255, 0.5); }
 }
 @keyframes pulse-ring {
-  0%, 100% { filter: drop-shadow(0 0 4px rgba(124,58,237,0.25)); }
-  50% { filter: drop-shadow(0 0 12px rgba(124,58,237,0.55)); }
+  0%, 100% { filter: drop-shadow(0 0 4px rgba(125, 249, 255, 0.22)); }
+  50% { filter: drop-shadow(0 0 12px rgba(125, 249, 255, 0.5)); }
 }
 .animate-pulse-ring { animation: pulse-ring 3s ease-in-out infinite; }
 @keyframes shimmer {
@@ -180,11 +190,9 @@
   to { transform: rotate(360deg); }
 }
 @keyframes ambient-pulse {
-  0%, 100% { opacity: 0.92; filter: drop-shadow(0 0 16px rgba(124,58,237,0.32)); }
-  50% { opacity: 1; filter: drop-shadow(0 0 38px rgba(59,130,246,0.6)); }
+  0%, 100% { opacity: 0.92; filter: drop-shadow(0 0 16px rgba(0, 229, 160, 0.28)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 38px rgba(125, 249, 255, 0.55)); }
 }
-/* Breathe the arc length itself — gradient grows/shrinks while it spins.
-   Values are tuned for r=105 (circumference ~659): 0.50c..0.74c. */
 @keyframes ambient-arc-breathe {
   0%, 100% { stroke-dasharray: 330 659; }
   50% { stroke-dasharray: 488 659; }
@@ -193,16 +201,12 @@
 .ambient-ring-rotate { animation: ambient-rotate 26s linear infinite; transform-origin: 50% 50%; }
 .ambient-ring-arc { animation: ambient-arc-breathe 6s ease-in-out infinite; }
 
-/* Score-ring ambient halo: slow opacity/blur breathing on the glow layer only.
-   Cycle ~3.6s — deliberately slow so it reads as "instrument idling", NOT a
-   heartbeat. The ring shape itself never changes size. */
 @keyframes score-halo-breathe {
   0%, 100% { opacity: 0.55; filter: blur(8px); }
   50%      { opacity: 1;    filter: blur(14px); }
 }
 .score-halo-breathe { animation: score-halo-breathe 3.6s ease-in-out infinite; }
 
-/* Whole-unit (ring + halo) gentle breathe — explicitly NOT a heartbeat tempo. */
 @keyframes score-ring-breathe {
   0%, 100% { transform: scale(1); }
   50%      { transform: scale(1.025); }
@@ -214,16 +218,16 @@
   .score-halo-breathe, .score-ring-breathe { animation: none; }
 }
 
-.legal-prose { color: hsl(var(--text-secondary)); font-size: 14px; line-height: 1.65; }
-.legal-prose h1 { font-size: 20px; font-weight: 700; color: hsl(var(--text-primary)); margin-top: 2rem; margin-bottom: 0.75rem; }
-.legal-prose h2 { font-size: 17px; font-weight: 600; color: hsl(var(--text-primary)); margin-top: 1.75rem; margin-bottom: 0.5rem; }
-.legal-prose h3 { font-size: 15px; font-weight: 600; color: hsl(var(--text-primary)); margin-top: 1.25rem; margin-bottom: 0.5rem; }
+.legal-prose { color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
+.legal-prose h1 { font-size: 20px; font-weight: 600; color: var(--text-primary); margin-top: 2rem; margin-bottom: 0.75rem; }
+.legal-prose h2 { font-size: 17px; font-weight: 600; color: var(--text-primary); margin-top: 1.75rem; margin-bottom: 0.5rem; }
+.legal-prose h3 { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-top: 1.25rem; margin-bottom: 0.5rem; }
 .legal-prose p { margin: 0.75rem 0; }
 .legal-prose ul, .legal-prose ol { margin: 0.75rem 0; padding-left: 1.25rem; }
 .legal-prose ul { list-style: disc; }
 .legal-prose ol { list-style: decimal; }
 .legal-prose li { margin: 0.35rem 0; }
-.legal-prose strong { color: hsl(var(--text-primary)); font-weight: 600; }
+.legal-prose strong { color: var(--text-primary); font-weight: 600; }
 .legal-prose em { font-style: italic; }
-.legal-prose a { color: hsl(var(--accent, 220 90% 60%)); text-decoration: underline; }
-.legal-prose hr { border-color: hsl(var(--border, 0 0% 20%)); margin: 1.5rem 0; }
+.legal-prose a { color: var(--ai-signal); text-decoration: underline; }
+.legal-prose hr { border-color: var(--border); margin: 1.5rem 0; }
