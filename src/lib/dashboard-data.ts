@@ -124,7 +124,7 @@ export async function loadDashboardData(userId: string, tz: string): Promise<Das
       .maybeSingle(),
     supabase
       .from("nutrition_daily_summaries")
-      .select("compliance_pct")
+      .select("summary_date, compliance_pct")
       .eq("user_id", userId)
       .gte("summary_date", sevenDaysAgo)
       .lte("summary_date", today),
