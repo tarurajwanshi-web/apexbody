@@ -138,8 +138,8 @@ function Coach() {
     >
       <header className="flex items-center justify-between px-5 pt-6">
         <Link to="/dashboard" className="text-text-secondary"><ChevronLeft size={24} /></Link>
-        <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Coach</span>
-        <Link to="/settings" className="text-[11px] text-text-tertiary">Settings</Link>
+        <span className="text-[12px] uppercase tracking-wider text-text-tertiary">Coach</span>
+        <Link to="/settings" className="text-[12px] text-text-tertiary">Settings</Link>
       </header>
 
       {isLocked ? (
@@ -163,7 +163,7 @@ function Coach() {
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
             <div
-              className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+              className={`max-w-[85%] rounded-2xl px-4 py-3 text-[14px] leading-relaxed whitespace-pre-wrap ${
                 m.role === "user" ? "gradient-brand text-white" : "bg-bg-2 border border-white/5"
               }`}
             >
@@ -182,7 +182,7 @@ function Coach() {
         )}
         <style>{`@keyframes typing-dot { 0%,60%,100% { opacity: 0.3; transform: scale(0.85); } 30% { opacity: 1; transform: scale(1); } }`}</style>
         {error && (
-          <div className="rounded-2xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
+          <div className="rounded-2xl border border-danger/30 bg-danger/10 p-3 text-[14px] text-danger">
             {error}
           </div>
         )}
@@ -200,7 +200,7 @@ function Coach() {
                 key={s}
                 onClick={() => send(s)}
                 disabled={loading}
-                className="shrink-0 rounded-full border border-white/10 bg-bg-2/90 backdrop-blur px-3.5 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:border-ai/40 transition disabled:opacity-50"
+                className="shrink-0 rounded-full border border-white/10 bg-bg-2/90 backdrop-blur px-3.5 py-1.5 text-[12px] text-text-secondary hover:text-text-primary hover:border-ai/40 transition disabled:opacity-50"
               >
                 {s}
               </button>
@@ -218,7 +218,7 @@ function Coach() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send(input)}
             placeholder={isLocked ? "Ask a general fitness question…" : "What's on your mind?"}
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-text-tertiary"
+            className="flex-1 bg-transparent text-[14px] outline-none placeholder:text-text-tertiary"
           />
           <button
             onClick={() => send(input)}
@@ -265,7 +265,7 @@ function LockedHero({
     <>
       <div className="mx-5 mt-4 flex items-center gap-2 rounded-full border border-white/10 bg-bg-2 px-3 py-1.5 w-fit">
         <Lock size={12} className="text-text-tertiary" />
-        <span className="text-[11px] font-medium text-text-secondary">
+        <span className="text-[12px] font-medium text-text-secondary">
           Day {dayOfJourney} of {totalDays} — personalized coaching unlocking
         </span>
       </div>
@@ -282,8 +282,8 @@ function LockedHero({
             <Sparkles size={18} className="text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[11px] uppercase tracking-wider text-text-accent font-medium">APEX Coach</p>
-            <p className="mt-1 text-sm leading-relaxed text-text-primary">
+            <p className="text-[12px] uppercase tracking-wider text-text-accent font-medium">APEX Coach</p>
+            <p className="mt-1 text-[14px] leading-relaxed text-text-primary">
               Hey {name}, I'm learning your patterns from your first {totalDays} days of logs so coaching is genuinely personalized — not generic advice. Until then I can answer general fitness, nutrition, and sleep questions below.
             </p>
           </div>
@@ -293,7 +293,7 @@ function LockedHero({
         <div className="mt-5">
           <div className="flex items-center justify-between mb-2">
             <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Unlock progress</p>
-            <span className="text-[11px] text-text-secondary tabular-nums">{progressPct}%</span>
+            <span className="text-[12px] text-text-secondary tabular-nums">{progressPct}%</span>
           </div>
           <div className="h-1.5 w-full rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
             <div className="h-full gradient-brand transition-all" style={{ width: `${progressPct}%` }} />
@@ -312,13 +312,13 @@ function LockedHero({
         <div className="mt-5">
           <div className="flex items-center justify-between mb-2">
             <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Last 7 days</p>
-            <span className="inline-flex items-center gap-1 text-[11px] text-text-secondary">
+            <span className="inline-flex items-center gap-1 text-[12px] text-text-secondary">
               <Flame size={11} className="text-warning" />
               <span className="tabular-nums">{streak}</span> day streak
             </span>
           </div>
           <ApexStreakStrip days={days} variant="coach" />
-          <p className="mt-3 text-[11px] text-text-secondary">
+          <p className="mt-3 text-[12px] text-text-secondary">
             {todayLogged ? "Today counted 🔥" : "Log today to keep your unlock streak alive."}
           </p>
           <p className="mt-1 text-[10px] text-text-tertiary leading-relaxed">
@@ -344,10 +344,10 @@ function UnlockedHero({ name }: { name: string }) {
           <Sparkles size={16} className="text-white" />
         </div>
         <div className="flex-1">
-          <p className="text-[11px] uppercase tracking-wider text-text-accent font-medium">
+          <p className="text-[12px] uppercase tracking-wider text-text-accent font-medium">
             APEX Coach
           </p>
-          <p className="mt-1 text-sm leading-relaxed text-text-primary">
+          <p className="mt-1 text-[14px] leading-relaxed text-text-primary">
             Ready when you are, {name}. Ask me anything about your training, recovery, or nutrition.
           </p>
         </div>
