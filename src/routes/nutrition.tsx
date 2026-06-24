@@ -473,7 +473,7 @@ function Nutrition() {
                 ? "Yesterday's meals"
                 : `Meals on ${formatShortDate(selectedDate)}`}
           </p>
-          <p className="text-[12px] text-text-accent">
+          <p className="text-[12px] text-text-secondary">
             {isToday ? "Tap + below to log a meal" : "Viewing this day. New meals log to today only."}
           </p>
         </div>
@@ -501,7 +501,7 @@ function Nutrition() {
           <p className="text-[12px] text-text-secondary flex-1 min-w-0">
             Add your weight in Settings to enable a hydration target.
           </p>
-          <Link to="/settings" className="text-[12px] font-medium text-text-accent shrink-0">
+          <Link to="/settings" className="text-[12px] font-medium text-text-secondary shrink-0">
             Open →
           </Link>
         </div>
@@ -515,7 +515,7 @@ function Nutrition() {
           <button
             type="button"
             onClick={handleUndoDelete}
-            className="text-[12px] font-medium text-text-accent active:scale-95"
+            className="text-[12px] font-medium text-text-secondary active:scale-95"
           >
             Undo
           </button>
@@ -599,7 +599,7 @@ function HydrationCard({
               </p>
               <Link
                 to="/settings"
-                className="mt-2 inline-block text-[12px] font-medium text-text-accent"
+                className="mt-2 inline-block text-[12px] font-medium text-text-secondary"
               >
                 Open Settings →
               </Link>
