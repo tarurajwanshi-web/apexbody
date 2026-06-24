@@ -370,10 +370,14 @@ async function processUser(supa: SupabaseClient, p: Profile, force: boolean): Pr
       else decision = "hold";
     }
 
+    const sex_floor = p.biological_sex === "male" ? 1500
+                     : p.biological_sex === "female" ? 1200
+                     : 1350;
+    const weight_floor = (p.measurement_weight_kg ?? current_weight_kg ?? 70) * 10;
     const safeFloorMap: Record<string, number> = {
-      fat_loss: (p.measurement_weight_kg ?? current_weight_kg ?? 70) * 10,
+      fat_loss: Math.max(weight_floor, sex_floor),
       muscle_gain: blended_tdee * 0.95,
-      recomposition: blended_tdee * 0.95,
+      recomposition: Math.max(blended_tdee * 0.95, sex_floor),
       strength: blended_tdee * 0.95,
       athletic_performance: blended_tdee * 0.95,
     };
