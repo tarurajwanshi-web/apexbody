@@ -16,10 +16,22 @@ const TARGETS = [
 ];
 const DIRS = ["src/components/dashboard"];
 
+// Files where text-text-accent (purple #A78BFA) is the intended AI / action
+// color. Anywhere else it must be text-text-secondary.
+const ACCENT_ALLOWLIST = new Set([
+  "src/components/AIOrb.tsx",
+  "src/components/ApexStreakStrip.tsx",
+]);
+
 const RULES = [
   { name: "rounded-3xl", re: /\brounded-3xl\b/g },
   { name: "forbidden font-weight", re: /\bfont-(bold|semibold|extrabold|black)\b/g },
   { name: "forbidden text size token", re: /\btext-(xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl)\b/g },
+  {
+    name: "text-text-accent reserved for AI/action UI — use text-text-secondary",
+    re: /\btext-text-accent\b/g,
+    allowlist: ACCENT_ALLOWLIST,
+  },
 ];
 const ARBITRARY_PX = /\btext-\[(\d+)px\]/g;
 
@@ -46,9 +58,11 @@ let violations = 0;
 for (const file of collect()) {
   let src;
   try { src = readFileSync(file, "utf8"); } catch { continue; }
+  const rel = relative(ROOT, file);
   const lines = src.split("\n");
   lines.forEach((line, i) => {
     for (const r of RULES) {
+      if (r.allowlist && r.allowlist.has(rel)) continue;
       r.re.lastIndex = 0;
       let m;
       while ((m = r.re.exec(line))) {
