@@ -136,7 +136,14 @@ function Coach() {
     <div
       className="min-h-screen pb-40 flex flex-col bg-bg-1"
     >
-      <header className="flex items-center justify-between px-5 pt-[max(1.5rem,env(safe-area-inset-top))]">
+      <header
+        className="flex items-center justify-between"
+        style={{
+          paddingTop: "calc(env(safe-area-inset-top, 0px) + 1rem)",
+          paddingLeft: "max(1.25rem, env(safe-area-inset-left, 0px))",
+          paddingRight: "max(1.25rem, env(safe-area-inset-right, 0px))",
+        }}
+      >
         <Link to="/dashboard" className="text-text-secondary"><ChevronLeft size={24} /></Link>
         <span className="text-[12px] uppercase tracking-wider text-text-tertiary">Coach</span>
         <Link to="/settings" className="text-[12px] text-text-tertiary">Settings</Link>
