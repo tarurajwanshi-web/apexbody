@@ -47,6 +47,7 @@ export type DashboardCard = {
 export type DashboardWeightTrend = {
   latest_kg: number | null;
   delta_kg: number | null; // latest - previous
+  series7d: (number | null)[]; // oldest → newest, length 7
 };
 
 export type DashboardMeal = {
@@ -77,6 +78,8 @@ export type DashboardData = {
   todayMeals: DashboardMeal[];
   recentMeals: DashboardMeal[]; // last 30d for food_sources sampling
   lastLogDate: string | null;
+  consistency7d: boolean[]; // oldest → newest, length 7
+  compliance7d: (number | null)[]; // oldest → newest, length 7
 };
 
 export async function loadDashboardData(userId: string, tz: string): Promise<DashboardData> {
@@ -166,8 +169,9 @@ export async function loadDashboardData(userId: string, tz: string): Promise<Das
       .select("weight_kg, entry_date")
       .eq("user_id", userId)
       .not("weight_kg", "is", null)
+      .gte("entry_date", sevenDaysAgo)
       .order("entry_date", { ascending: false })
-      .limit(2),
+      .limit(14),
     supabase
       .from("nutrition_meal_full_analysis")
       .select("id, food_sources, entry_date, meal_time")
