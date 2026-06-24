@@ -193,6 +193,38 @@ function WorkoutsPage() {
         <RefreshStamp refreshing={refreshing} lastUpdatedAt={lastUpdatedAt} />
       </div>
 
+      {!loading && plan && (() => {
+        const todayDay = plan.plan_data?.days?.[todayIdx];
+        const planned = todayDay && !todayDay.rest ? (todayDay.exercises?.length ?? 0) : 0;
+        const doneToday = setLogs.filter((s) => s.completed).length;
+        const pct = planned > 0 ? Math.round((doneToday / (planned * 3)) * 100) : null;
+        const isRest = !!todayDay?.rest;
+        const sessionName = todayDay?.session_name ?? null;
+        const brief = sessionStarted
+          ? "Session live — keep RPE ≤ 8 unless tagged top set."
+          : isRest
+          ? "Rest day — protect recovery, hit your protein target."
+          : sessionName
+          ? `Today: ${sessionName}. ~${planned} movements queued.`
+          : "Today's session is ready when you are.";
+        const actions = sessionStarted
+          ? [{ label: "Continue", onClick: () => {} }]
+          : isRest
+          ? [{ label: "Train anyway", onClick: () => setPreCheckOpen(true) }]
+          : [{ label: "Start session", onClick: () => setPreCheckOpen(true) }];
+        return (
+          <div className="mx-5 mt-3">
+            <DecisionPanel
+              eyebrow="TRAINING BRIEF"
+              brief={brief}
+              confidence={sessionStarted ? "high" : isRest ? "medium" : "high"}
+              actions={actions}
+              right={pct != null ? <MetricRing value={pct} size={44} thickness={4} color="#00E5A0" suffix="%" /> : null}
+            />
+          </div>
+        );
+      })()}
+
       {loading && <p className="px-5 mt-10 text-[14px] text-text-tertiary">Loading…</p>}
 
       {!loading && !plan && (
