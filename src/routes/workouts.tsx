@@ -3,6 +3,8 @@ import { useEffect, useState, useCallback, useMemo, useRef, type ReactNode } fro
 import { ChevronLeft, Lock, Check, Dumbbell, Sparkles, X, ChevronDown, ChevronUp, Zap, Camera, Trash2, Loader2, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
+import { DecisionPanel } from "@/components/DecisionPanel";
+import { MetricRing } from "@/components/MetricRing";
 import { AICard } from "@/components/AIOrb";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
