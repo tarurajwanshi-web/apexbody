@@ -38,7 +38,8 @@ export function Header({ greeting, name, day }: Props) {
           {phaseLine(day)}
         </div>
       </div>
-      <div
+      <Link
+        to="/settings"
         style={{
           width: 38,
           height: 38,
@@ -52,11 +53,13 @@ export function Header({ greeting, name, day }: Props) {
           fontSize: 13,
           fontWeight: 500,
           letterSpacing: "0.5px",
+          textDecoration: "none",
         }}
+        className="active:scale-95 transition-transform"
         aria-label="Profile"
       >
         {initials(name)}
-      </div>
+      </Link>
     </div>
   );
 }
