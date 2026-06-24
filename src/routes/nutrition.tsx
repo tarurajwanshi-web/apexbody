@@ -6,6 +6,8 @@ import { AICard } from "@/components/AIOrb";
 import { RingChart } from "@/components/RingChart";
 import { scoreColor } from "@/lib/score-color";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
+import { DecisionPanel } from "@/components/DecisionPanel";
+import { MetricRing } from "@/components/MetricRing";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { HydrationLogModal } from "@/components/LogModals";
 import { MealDetailModal } from "@/components/MealDetailModal";
@@ -343,6 +345,38 @@ function Nutrition() {
 
 
       <NutritionDateHeader selectedDate={selectedDate} onChange={setSelectedDate} timezone={userTz} />
+
+      {/* AI decision layer */}
+      <div className="mx-5 mt-3">
+        <DecisionPanel
+          eyebrow="FUEL BRIEF"
+          brief={nutritionBrief(macros, hasMeals, proteinShort)}
+          confidence={
+            macros?.compliance_pct == null
+              ? "low"
+              : macros.compliance_pct >= 85
+              ? "high"
+              : macros.compliance_pct >= 60
+              ? "medium"
+              : "low"
+          }
+          actions={[
+            { label: "Log meal", href: "/dashboard" },
+            { label: "Log water", href: "/dashboard" },
+          ]}
+          right={
+            hasTarget ? (
+              <MetricRing
+                value={Math.min(100, Math.round((cCal / (tCal as number)) * 100))}
+                size={44}
+                thickness={4}
+                color={cCal > (tCal as number) * 1.1 ? "#FF5A5F" : "#7DF9FF"}
+                suffix="%"
+              />
+            ) : null
+          }
+        />
+      </div>
 
       {/* Goal-based framing line */}
       <p className="mx-5 mt-5 text-[12px] text-text-secondary leading-snug">
