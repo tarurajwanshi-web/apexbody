@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight, RotateCcw, LogOut, FileText, FileLock, ShieldCheck, Heart } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useProfile } from "@/lib/store";
-import { BottomNav } from "@/components/BottomNav";
+import { DashboardNav } from "@/components/dashboard/DashboardNav";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -189,7 +189,7 @@ function Settings() {
         </p>
       </footer>
 
-      <BottomNav />
+      <DashboardNav />
     </div>
   );
 }

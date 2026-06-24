@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useRef, useEffect } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronLeft, Sparkles, Send, Lock, Flame } from "lucide-react";
-import { BottomNav } from "@/components/BottomNav";
+import { DashboardNav } from "@/components/dashboard/DashboardNav";
 import { useProfile } from "@/lib/store";
 import { askCoach } from "@/lib/coach.functions";
 import { getActivityWeek, type ActivityWeek } from "@/lib/shield.functions";
@@ -134,8 +134,7 @@ function Coach() {
 
   return (
     <div
-      className="min-h-screen pb-40 flex flex-col"
-      style={{ background: "linear-gradient(180deg, #0F1524 0%, #0A0E1A 60%)" }}
+      className="min-h-screen pb-40 flex flex-col bg-bg-1"
     >
       <header className="flex items-center justify-between px-5 pt-6">
         <Link to="/dashboard" className="text-text-secondary"><ChevronLeft size={24} /></Link>
@@ -231,7 +230,7 @@ function Coach() {
         </div>
       </div>
 
-      <BottomNav />
+      <DashboardNav />
     </div>
   );
 }
@@ -266,7 +265,7 @@ function LockedHero({
     <>
       <div className="mx-5 mt-4 flex items-center gap-2 rounded-full border border-white/10 bg-bg-2 px-3 py-1.5 w-fit">
         <Lock size={12} className="text-text-tertiary" />
-        <span className="text-[11px] font-semibold text-text-secondary">
+        <span className="text-[11px] font-medium text-text-secondary">
           Day {dayOfJourney} of {totalDays} — personalized coaching unlocking
         </span>
       </div>
@@ -283,7 +282,7 @@ function LockedHero({
             <Sparkles size={18} className="text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[11px] uppercase tracking-wider text-text-accent font-semibold">APEX Coach</p>
+            <p className="text-[11px] uppercase tracking-wider text-text-accent font-medium">APEX Coach</p>
             <p className="mt-1 text-sm leading-relaxed text-text-primary">
               Hey {name}, I'm learning your patterns from your first {totalDays} days of logs so coaching is genuinely personalized — not generic advice. Until then I can answer general fitness, nutrition, and sleep questions below.
             </p>
@@ -345,7 +344,7 @@ function UnlockedHero({ name }: { name: string }) {
           <Sparkles size={16} className="text-white" />
         </div>
         <div className="flex-1">
-          <p className="text-[11px] uppercase tracking-wider text-text-accent font-semibold">
+          <p className="text-[11px] uppercase tracking-wider text-text-accent font-medium">
             APEX Coach
           </p>
           <p className="mt-1 text-sm leading-relaxed text-text-primary">
