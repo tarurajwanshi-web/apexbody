@@ -55,6 +55,7 @@ function Ring({ value, color, label }: { value: number | null; color: string; la
 }
 
 export function TodayCard({ recovery, fuel, effort, readiness, sentence }: Props) {
+  const hasAnyData = recovery != null || fuel != null || effort != null;
   return (
     <div style={cardStyle}>
       <div style={{ ...microLabel, marginBottom: 14 }}>Today</div>
@@ -63,6 +64,19 @@ export function TodayCard({ recovery, fuel, effort, readiness, sentence }: Props
         <Ring value={fuel} color={T.ringFuel} label="Fuel" />
         <Ring value={effort} color={T.ringEffort} label="Effort" />
       </div>
+      {!hasAnyData && (
+        <div
+          style={{
+            marginTop: 14,
+            fontSize: 12,
+            color: T.text3,
+            textAlign: "center",
+            lineHeight: 1.5,
+          }}
+        >
+          Log a meal or recovery check-in to see your scores
+        </div>
+      )}
       <div
         style={{
           marginTop: 18,

@@ -2,7 +2,7 @@
 // global CSS. Keep this list in sync with the spec.
 
 export const T = {
-  bg: "#09091A",
+  bg: "#0A0E1A",
   surface: "#10142A",
   surface2: "#161C38",
   border: "#1E2445",
