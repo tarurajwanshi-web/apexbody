@@ -1,30 +1,67 @@
-## Goal
+# Onboarding Full Rewrite — Plan
 
-Replace the existing `createServerFn`-based `triggerWeeklyMacroReview` in `src/lib/nutrition.functions.ts` with a direct client-side `fetch` wrapper that calls the `trigger-weekly-macro-review` edge function with the user's JWT — per the APEX spec.
+**Scope:** one file only — `src/routes/_authenticated/onboarding.tsx`. Full replacement, no patching. Schema already has `experience_level` and `eating_pattern` columns on `profiles` (verified). `coaching_time` deliberately not collected — push notifications are not built yet.
 
-## Why the small departure from "add to existing file"
+## New 8-step flow
 
-The file currently exports `triggerWeeklyMacroReview` as a TanStack server function. The spec's new version is a plain async function with a different signature (no `{ data }` wrapper, no `useServerFn`). We can't have both under the same name, so this is a replace, not an add. The caller in `nutrition.tsx` must be updated in the same change or the build breaks.
+1. About you — name, age, biological_sex (unchanged UI)
+2. **Experience** (NEW) — beginner / intermediate / advanced (tap cards)
+3. Goal (unchanged)
+4. Training days (unchanged)
+5. Equipment (unchanged)
+6. **Eating pattern** (NEW) — standard / intermittent / plant_based / flexible (2×2 grid)
+7. **Body data** (redesigned, single flow, no path picker)
+8. Review + submit
 
-## Changes
+Progress bar: `step / 8`. Label: "Step N of 8".
 
-1. **`src/lib/nutrition.functions.ts`**
-   - Remove the `createServerFn` version of `triggerWeeklyMacroReview` and its `TriggerWeeklyMacroReviewResult` type.
-   - Add the spec's `triggerWeeklyMacroReview` async function exactly as provided: gets session via `supabase.auth.getSession()`, reads `VITE_SUPABASE_URL`, POSTs to `/functions/v1/trigger-weekly-macro-review` with `Authorization: Bearer <token>`, handles 204 → `{status: "not_monday"}`, parses JSON otherwise, throws on `!response.ok`.
-   - Keep the other server-fn exports in this file untouched.
+## Step 7 redesign
 
-2. **`src/routes/nutrition.tsx`**
-   - Drop `const triggerReview = useServerFn(triggerWeeklyMacroReview);` and call `triggerWeeklyMacroReview()` directly in the Monday-trigger `useEffect`.
-   - Result-handling stays the same: on `"computed"` or `"already_computed"` call `reloadNutritionSnapshot()`; `"not_monday"` is a no-op; `.catch` already logs.
-   - Remove the now-unused `useServerFn` import only if no other call site uses it (it does — leave the import alone).
+- Required: Weight (UnitField kg/lb), Height (UnitField cm/in), Body fat % via **sex-linked slider** (range + descriptions from `BF_RANGE` / `BF_DESCRIPTIONS` tables in the spec; default per sex on mount).
+- Slider UI: big 32px % number, colour-coded label (blue/green/secondary/amber by bucket), italic 12px cue, ACE footnote.
+- Collapsed-by-default sections:
+  - "I have a body scan result" → reveals optional Lean mass (kg) input.
+  - "Add measurements" → reveals waist / hip / arm / thigh (all optional).
+- Full-width "Skip for now" button (`bg-bg-2` card style).
+- `bodyDataType` derived on submit: `dexa` if lean mass filled, `measurements` if weight+height+BF filled, `null` if skipped.
+
+## Step 8 review
+
+Card with rows for every captured field. Body data row reflects state (DEXA / Visual estimate / "Not provided — macro targets will be estimated" in `text-amber-400`). CTA label flips to "Continue without body data" when skipped.
+
+## Submit payload
+
+Upsert to `profiles` on `user_id` with all fields per spec, including new `experience_level` and `eating_pattern`. Omit `coaching_time`.
+
+Engine bootstrap branching:
+- Has body data → `Promise.allSettled([calculate-macros, generate-plan])`
+- Skipped → only `generate-plan`
+- `logBodyMeasurement` still guarded by `bodyDataType !== null`.
+
+Then `navigate({ to: "/dashboard" })`.
+
+## Draft type
+
+Replace existing `Draft` with the typed shape from the spec (adds `experienceLevel`, `eatingPattern`; `bodyDataType` becomes derived, not user-chosen; keeps `dexaBf`, `dexaLean`, circumferences, weight, height).
+
+## Validation
+
+Per-step `canContinue` switch exactly as specified (step 7: skipped OR weight+height present; slider always has a default).
+
+## Reset mode
+
+- Still starts at step 3 (goal).
+- Add `useEffect` (gated on `isReset`) to prefetch `experience_level`, `eating_pattern`, `goal`, `equipment_access`, `training_day_codes` from `profiles` and `patch()` them into the draft so submit doesn't null them out.
+- Reset payload additions: `experience_level`, `eating_pattern`.
+
+## Preserved as-is (do not touch)
+
+`BuildingPlanScreen`, `UnitField`, `UnitToggle`, `Field`, `logBodyMeasurement`, route definition, `validateSearch`, `getBrowserTimezone`, `isReset` mode entry logic, all design tokens (`SELECTED_STYLE`, `gradient-brand`, `bg-bg-1/2`, `rounded-2xl`).
 
 ## Out of scope
 
-- No changes to the edge function itself, RPC, or DB.
-- No changes to the Monday detection / StrictMode guard logic.
-- No changes to other server fns in `nutrition.functions.ts`.
+No other file changes. No schema changes (columns exist). No edge function edits. No router changes.
 
-## Verification
+## Post-build verification
 
-- `bun run build` (typecheck) passes.
-- Manual: on a Monday in user tz, opening Fuel logs `[nutrition-trigger] result {status: "computed"|"already_computed"}` and the snapshot reloads; non-Monday returns `{status: "not_monday"}` without error.
+Run the spec's SQL against `profiles` for rows with `profile_completed_at > now() - interval '1 hour'` and confirm `experience_level` + `eating_pattern` are non-null. (`coaching_time` will remain null by design.)

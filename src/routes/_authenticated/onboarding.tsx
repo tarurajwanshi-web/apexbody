@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { ChevronLeft, Check, Trophy, Flame, Dumbbell, Zap, Activity, Sparkles, Watch, Pencil } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronDown, Check, Trophy, Flame, Dumbbell, Zap, Activity, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { logBodyMeasurement } from "@/lib/shield.functions";
@@ -14,14 +14,13 @@ export const Route = createFileRoute("/_authenticated/onboarding")({
   component: ProfileSetup,
 });
 
-
 type Goal = "recomposition" | "muscle_gain" | "fat_loss" | "strength" | "athletic_performance";
 type Equipment = "home_gym_db_only" | "commercial_gym" | "limited_equipment" | "bodyweight_only";
-type BodyDataType = "dexa" | "measurements" | null;
 type LengthUnit = "cm" | "in";
 type WeightUnit = "kg" | "lb";
 type Sex = "male" | "female";
-type InputPath = "device" | "manual";
+type ExperienceLevel = "beginner" | "intermediate" | "advanced";
+type EatingPattern = "standard" | "intermittent" | "plant_based" | "flexible";
 
 const GOALS: { id: Goal; label: string; desc: string; Icon: typeof Trophy }[] = [
   { id: "recomposition", label: "Recomposition", desc: "Build muscle, lose fat", Icon: Activity },
@@ -38,36 +37,97 @@ const EQUIPMENT: { id: Equipment; label: string; desc: string }[] = [
   { id: "bodyweight_only", label: "Bodyweight only", desc: "No equipment" },
 ];
 
-const TOTAL = 8; // 1 About-you  2 Recovery-method  3 Goal  4 Days  5 Equipment  6 Body-data  7 Review
+const EXPERIENCE: { id: ExperienceLevel; label: string; desc: string; hint: string }[] = [
+  { id: "beginner", label: "Beginner", desc: "Less than 1 year of consistent training", hint: "We keep it simple. No jargon." },
+  { id: "intermediate", label: "Intermediate", desc: "1–3 years. You know the movements.", hint: "We add structure and progression." },
+  { id: "advanced", label: "Advanced", desc: "3+ years. You track sets and effort closely.", hint: "Full RIR-based intensity control." },
+];
+
+const EATING_PATTERNS: { id: EatingPattern; label: string; desc: string }[] = [
+  { id: "standard", label: "Standard", desc: "3+ meals across the day" },
+  { id: "intermittent", label: "Intermittent fasting", desc: "16:8 or similar eating window" },
+  { id: "plant_based", label: "Plant-based", desc: "Vegan or vegetarian" },
+  { id: "flexible", label: "Flexible", desc: "No fixed pattern" },
+];
+
+const TOTAL = 8;
+
+// Body fat slider config — ACE/ACSM-derived ranges, appearance-only descriptions.
+const BF_RANGE = {
+  female: { min: 10, max: 50, default: 28 },
+  male:   { min: 5,  max: 40, default: 20 },
+} as const;
+
+const BF_DESCRIPTIONS = {
+  female: [
+    { max: 13, label: "Very lean",  cue: "Minimal body fat. Visible muscle separation, very little softness anywhere. Typical of competitive athletes." },
+    { max: 20, label: "Athletic",   cue: "Lean with visible muscle tone. Some definition in the arms and legs. Stomach is flat with some muscle visible." },
+    { max: 24, label: "Fit",        cue: "Defined shape with some softness. Arms and legs look toned. Stomach is mostly flat. Some curve at the hips and waist." },
+    { max: 31, label: "Average",    cue: "Soft and rounded in the midsection. Arms and legs have some shape but no visible muscle. Hips and thighs carry more volume." },
+    { max: 38, label: "Soft",       cue: "Noticeable softness across the midsection, arms, and thighs. Little visible muscle definition." },
+    { max: 50, label: "Very high",  cue: "Significant fat across the whole body. Stomach protrudes. Arms and legs are thick with no muscle definition." },
+  ],
+  male: [
+    { max: 8,  label: "Very lean",  cue: "Extremely low body fat. Visible abs, striations in shoulders and chest. Typical of competitive athletes." },
+    { max: 13, label: "Athletic",   cue: "Visible six-pack at rest or close to it. Clear muscle separation in shoulders and arms. Very little fat anywhere." },
+    { max: 17, label: "Fit",        cue: "Flat stomach, some ab definition visible. Arms and shoulders look muscular. A small amount of fat around the waist." },
+    { max: 24, label: "Average",    cue: "Soft midsection, no visible abs. Some fat around the waist and lower stomach. Arms have some shape but are not defined." },
+    { max: 30, label: "Soft",       cue: "Noticeable belly. Face and neck carry more fat. Arms and chest are soft. Little visible muscle definition." },
+    { max: 40, label: "Very high",  cue: "Large stomach, significant fat across the chest, arms, and back. Minimal muscle definition visible anywhere." },
+  ],
+} as const;
+
+function getBfDescription(pct: number, sex: Sex) {
+  const buckets = BF_DESCRIPTIONS[sex];
+  return buckets.find((b) => pct <= b.max) ?? buckets[buckets.length - 1];
+}
+
+function bfLabelColor(label: string) {
+  if (label === "Very lean" || label === "Athletic") return "text-blue-400";
+  if (label === "Fit") return "text-green-400";
+  if (label === "Soft" || label === "Very high") return "text-amber-400";
+  return "text-text-secondary";
+}
 
 type Draft = {
+  // Step 1
   name: string;
   age: string;
   sex: Sex | null;
-  inputPath: InputPath | null;
+  // Step 2
+  experienceLevel: ExperienceLevel | null;
+  // Step 3
   goal: Goal | null;
-  days: number;
+  // Step 4
   trainingDays: string[];
+  // Step 5
   equipment: Equipment | null;
-  bodyDataType: BodyDataType;       // "dexa" | "measurements" | null  (null = skipped)
-  dexaBf: string;                   // body-fat %  (path-agnostic; named for legacy column)
-  dexaLean: string;                 // lean mass kg (device path only)
-  dexaFileName: null;               // legacy; always null now
-  waist: string;                    // cm canonical
-  hip: string;                      // cm canonical
-  arm: string;                      // cm canonical
-  thigh: string;                    // cm canonical
-  weight: string;                   // kg canonical
-  height: string;                   // cm canonical
+  // Step 6
+  eatingPattern: EatingPattern | null;
+  // Step 7 — bodyDataType is computed at submit.
+  bodyDataType: "dexa" | "measurements" | null;
+  dexaBf: string;
+  dexaLean: string;
+  waist: string;
+  hip: string;
+  arm: string;
+  thigh: string;
+  weight: string;
+  height: string;
 };
 
 const EMPTY: Draft = {
-  name: "", age: "", sex: null, inputPath: null,
-  goal: null, days: 3, trainingDays: [], equipment: null, bodyDataType: null,
-  dexaBf: "", dexaLean: "", dexaFileName: null,
-  waist: "", hip: "", arm: "", thigh: "", weight: "", height: "",
+  name: "", age: "", sex: null,
+  experienceLevel: null,
+  goal: null,
+  trainingDays: [],
+  equipment: null,
+  eatingPattern: null,
+  bodyDataType: null,
+  dexaBf: "", dexaLean: "",
+  waist: "", hip: "", arm: "", thigh: "",
+  weight: "", height: "",
 };
-
 
 function ProfileSetup() {
   const navigate = useNavigate();
@@ -76,19 +136,44 @@ function ProfileSetup() {
   const logMeasure = useServerFn(logBodyMeasurement);
   const minStep = isReset ? 3 : 1;
   const [step, setStep] = useState(minStep);
-  const [bodySub, setBodySub] = useState<"A" | "B">("A"); // sub-step inside step 6
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [submitting, setSubmitting] = useState(false);
+  const [bodySkipped, setBodySkipped] = useState(false);
 
   const patch = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }));
 
-  // Step 6 sub-A requires: a path picked + weight + body-fat + height (needed for BMR).
-  const bodyAValid = (() => {
-    if (draft.bodyDataType === null) return false;
-    return !!draft.weight && !!draft.dexaBf && !!draft.height;
-  })();
-  // Step 6 sub-B circumferences are always optional.
-  const bodyBValid = true;
+  // Reset-mode pre-population: hydrate Steps 2 + 6 (skipped in reset flow) and
+  // any other plan-shaping fields from the existing profile so submit doesn't
+  // null them out.
+  useEffect(() => {
+    if (!isReset) return;
+    let cancelled = false;
+    (async () => {
+      const { data: userRes } = await supabase.auth.getUser();
+      if (!userRes.user) return;
+      const { data } = await supabase
+        .from("profiles")
+        .select("experience_level, eating_pattern, goal, equipment_access, training_day_codes")
+        .eq("user_id", userRes.user.id)
+        .single();
+      if (cancelled || !data) return;
+      patch({
+        experienceLevel: (data.experience_level as ExperienceLevel | null) ?? null,
+        eatingPattern: (data.eating_pattern as EatingPattern | null) ?? null,
+        goal: (data.goal as Goal | null) ?? null,
+        equipment: (data.equipment_access as Equipment | null) ?? null,
+        trainingDays: (data.training_day_codes as string[] | null) ?? [],
+      });
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReset]);
+
+  const bodyDataType: "dexa" | "measurements" | null = useMemo(() => {
+    if (bodySkipped) return null;
+    if (!draft.weight || !draft.height) return null;
+    return draft.dexaLean ? "dexa" : "measurements";
+  }, [bodySkipped, draft.weight, draft.height, draft.dexaLean]);
 
   const canContinue = (() => {
     switch (step) {
@@ -96,35 +181,32 @@ function ProfileSetup() {
         const a = Number(draft.age);
         return draft.name.trim().length >= 1 && !!draft.sex && Number.isFinite(a) && a >= 10 && a <= 100;
       }
-      case 2: return !!draft.inputPath;
+      case 2: return !!draft.experienceLevel;
       case 3: return !!draft.goal;
       case 4: return draft.trainingDays.length >= 1;
       case 5: return !!draft.equipment;
-      case 6: return bodySub === "A" ? bodyAValid : bodyBValid;
-      case 7: return true;
+      case 6: return !!draft.eatingPattern;
+      case 7: {
+        if (bodySkipped) return true;
+        if (!draft.weight && !draft.height && !draft.dexaBf) return true;
+        return !!draft.weight && !!draft.height;
+      }
+      case 8: return true;
       default: return false;
     }
   })();
 
-  const next = () => {
-    if (step === 6 && bodySub === "A") { setBodySub("B"); return; }
-    if (step === 6 && bodySub === "B") { setBodySub("A"); setStep((s) => Math.min(s + 1, TOTAL - 1)); return; }
-    setStep((s) => Math.min(s + 1, TOTAL - 1));
-  };
-  const back = () => {
-    if (step === 6 && bodySub === "B") { setBodySub("A"); return; }
-    setStep((s) => Math.max(s - 1, minStep));
-  };
+  const next = () => setStep((s) => Math.min(s + 1, TOTAL));
+  const back = () => setStep((s) => Math.max(s - 1, minStep));
 
   const skipBody = () => {
+    setBodySkipped(true);
     patch({
-      bodyDataType: null,
       dexaBf: "", dexaLean: "",
       waist: "", hip: "", arm: "", thigh: "",
       weight: "", height: "",
     });
-    setBodySub("A");
-    setStep((s) => Math.min(s + 1, TOTAL - 1));
+    next();
   };
 
   const submit = async () => {
@@ -134,49 +216,51 @@ function ProfileSetup() {
       if (uerr || !userRes.user) throw new Error("Not signed in");
       const userId = userRes.user.id;
 
-      const trainingDaysCount = draft.trainingDays.length || draft.days;
+      const trainingDaysCount = draft.trainingDays.length;
+      const hasBody = bodyDataType !== null && !!draft.weight && !!draft.height;
 
       let payload: any;
       if (isReset) {
-        // Reset mode: only update plan-shaping fields. Identity, recovery method,
-        // and profile_completed_at are preserved so we don't reset learning phase.
         payload = {
           user_id: userId,
+          experience_level: draft.experienceLevel,
           goal: draft.goal,
           training_days_per_week: trainingDaysCount,
           training_day_codes: draft.trainingDays,
           equipment_access: draft.equipment,
-          body_data_type: draft.bodyDataType,
-          dexa_body_fat_pct: draft.bodyDataType === "dexa" && draft.dexaBf ? Number(draft.dexaBf) : null,
-          dexa_lean_mass_kg: draft.bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
+          eating_pattern: draft.eatingPattern,
+          body_data_type: bodyDataType,
+          dexa_body_fat_pct: hasBody && draft.dexaLean && draft.dexaBf ? Number(draft.dexaBf) : null,
+          dexa_lean_mass_kg: hasBody && draft.dexaLean ? Number(draft.dexaLean) : null,
           measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
           measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
-          measurement_weight_kg: draft.weight ? Number(draft.weight) : null,
-          measurement_height_cm: draft.height ? Number(draft.height) : null,
+          measurement_weight_kg: hasBody ? Number(draft.weight) : null,
+          measurement_height_cm: hasBody ? Number(draft.height) : null,
         };
       } else {
         const now = new Date();
         const unlock = new Date(now.getTime() + 7 * 86400000);
-        const unlockDate = unlock.toISOString().slice(0, 10);
         payload = {
           user_id: userId,
           name: draft.name.trim(),
           age: Number(draft.age),
           biological_sex: draft.sex,
-          input_path_preference: draft.inputPath,
+          experience_level: draft.experienceLevel,
+          input_path_preference: "manual",
           goal: draft.goal,
           training_days_per_week: trainingDaysCount,
           training_day_codes: draft.trainingDays,
           equipment_access: draft.equipment,
-          body_data_type: draft.bodyDataType,
-          dexa_body_fat_pct: draft.bodyDataType === "dexa" && draft.dexaBf ? Number(draft.dexaBf) : null,
-          dexa_lean_mass_kg: draft.bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
+          eating_pattern: draft.eatingPattern,
+          body_data_type: bodyDataType,
+          dexa_body_fat_pct: hasBody && draft.dexaLean && draft.dexaBf ? Number(draft.dexaBf) : null,
+          dexa_lean_mass_kg: hasBody && draft.dexaLean ? Number(draft.dexaLean) : null,
           measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
           measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
-          measurement_weight_kg: draft.weight ? Number(draft.weight) : null,
-          measurement_height_cm: draft.height ? Number(draft.height) : null,
+          measurement_weight_kg: hasBody ? Number(draft.weight) : null,
+          measurement_height_cm: hasBody ? Number(draft.height) : null,
           profile_completed_at: now.toISOString(),
-          plan_unlock_date: unlockDate,
+          plan_unlock_date: unlock.toISOString().slice(0, 10),
           timezone: getBrowserTimezone(),
         };
       }
@@ -184,16 +268,14 @@ function ProfileSetup() {
       const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "user_id" });
       if (error) throw error;
 
-      // Persist a per-entry row in body_measurement_events so the new history table
-      // gets seeded from onboarding (Section 6 requirement: every save = a dated row).
-      if (draft.bodyDataType !== null) {
+      if (hasBody) {
         try {
           await logMeasure({
             data: {
-              source: draft.bodyDataType === "dexa" ? "dexa" : "manual",
-              weight_kg: draft.weight ? Number(draft.weight) : null,
+              source: bodyDataType === "dexa" ? "dexa" : "manual",
+              weight_kg: Number(draft.weight),
               body_fat_pct: draft.dexaBf ? Number(draft.dexaBf) : null,
-              lean_mass_kg: draft.bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
+              lean_mass_kg: bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
               waist_cm: draft.waist ? Number(draft.waist) : null,
               hip_cm: draft.hip ? Number(draft.hip) : null,
               arm_cm: draft.arm ? Number(draft.arm) : null,
@@ -206,7 +288,6 @@ function ProfileSetup() {
         }
       }
 
-      // Mirror name to local store so the dashboard greets immediately.
       if (!isReset) {
         try {
           const raw = localStorage.getItem("apex_user_profile");
@@ -217,12 +298,19 @@ function ProfileSetup() {
         } catch {}
       }
 
-      const [macroRes, planRes] = await Promise.allSettled([
-        supabase.functions.invoke("calculate-macros", { body: { user_id: userId } }),
-        supabase.functions.invoke("generate-plan", { body: { user_id: userId } }),
-      ]);
-      if (macroRes.status === "rejected") console.warn("calculate-macros failed", macroRes.reason);
-      if (planRes.status === "rejected") console.warn("generate-plan failed", planRes.reason);
+      if (hasBody) {
+        const [macroRes, planRes] = await Promise.allSettled([
+          supabase.functions.invoke("calculate-macros", { body: { user_id: userId } }),
+          supabase.functions.invoke("generate-plan", { body: { user_id: userId } }),
+        ]);
+        if (macroRes.status === "rejected") console.warn("calculate-macros failed", macroRes.reason);
+        if (planRes.status === "rejected") console.warn("generate-plan failed", planRes.reason);
+      } else {
+        const planRes = await Promise.allSettled([
+          supabase.functions.invoke("generate-plan", { body: { user_id: userId } }),
+        ]);
+        if (planRes[0].status === "rejected") console.warn("generate-plan failed", planRes[0].reason);
+      }
 
       navigate({ to: "/dashboard" });
     } catch (e: any) {
@@ -233,7 +321,7 @@ function ProfileSetup() {
 
   if (submitting) return <BuildingPlanScreen />;
 
-  const stepLabel = step === 6 ? `Step 6${bodySub} of ${TOTAL - 1}` : `Step ${step} of ${TOTAL - 1}`;
+  const stepLabel = `Step ${step} of ${TOTAL}`;
 
   return (
     <div className="min-h-screen bg-bg-1 pb-32" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
@@ -246,17 +334,26 @@ function ProfileSetup() {
       </header>
 
       <div className="mx-5 mt-4 h-1 rounded-full bg-white/5 overflow-hidden">
-        <div className="h-full gradient-brand transition-all" style={{ width: `${(step / (TOTAL - 1)) * 100}%` }} />
+        <div className="h-full gradient-brand transition-all" style={{ width: `${(step / TOTAL) * 100}%` }} />
       </div>
 
       <main className="px-5 mt-8 max-w-[480px] mx-auto">
         {step === 1 && <AboutYouStep name={draft.name} age={draft.age} sex={draft.sex} onName={(n) => patch({ name: n })} onAge={(age) => patch({ age })} onSex={(sex) => patch({ sex })} />}
-        {step === 2 && <RecoveryMethodStep value={draft.inputPath} onChange={(v) => patch({ inputPath: v })} />}
+        {step === 2 && <ExperienceStep value={draft.experienceLevel} onChange={(v) => patch({ experienceLevel: v })} />}
         {step === 3 && <GoalStep value={draft.goal} onChange={(goal) => patch({ goal })} />}
-        {step === 4 && <DaysStep value={draft.trainingDays} onChange={(trainingDays, count) => patch({ trainingDays, days: count || draft.days })} />}
+        {step === 4 && <DaysStep value={draft.trainingDays} onChange={(trainingDays) => patch({ trainingDays })} />}
         {step === 5 && <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />}
-        {step === 6 && <BodyStep draft={draft} patch={patch} subStep={bodySub} onSkip={skipBody} />}
-        {step === 7 && <ReviewStep draft={draft} />}
+        {step === 6 && <EatingPatternStep value={draft.eatingPattern} onChange={(v) => patch({ eatingPattern: v })} />}
+        {step === 7 && (
+          <BodyStep
+            draft={draft}
+            patch={patch}
+            bodySkipped={bodySkipped}
+            unskip={() => setBodySkipped(false)}
+            onSkip={skipBody}
+          />
+        )}
+        {step === 8 && <ReviewStep draft={draft} bodyDataType={bodyDataType} />}
       </main>
 
       <footer
@@ -267,14 +364,14 @@ function ProfileSetup() {
         }}
       >
         <div className="mx-auto max-w-[480px] px-5">
-          {step < TOTAL - 1 ? (
+          {step < TOTAL ? (
             <button
               disabled={!canContinue}
               onClick={next}
               className="block w-full rounded-2xl gradient-brand text-white py-3.5 text-sm font-semibold disabled:opacity-40"
               style={{ borderRadius: 18 }}
             >
-              {step === 6 && bodySub === "A" ? "Next: measurements" : "Continue"}
+              Continue
             </button>
           ) : (
             <button
@@ -283,13 +380,16 @@ function ProfileSetup() {
               className="block w-full rounded-2xl gradient-brand text-white py-3.5 text-sm font-semibold disabled:opacity-40"
               style={{ borderRadius: 18 }}
             >
-              {submitting ? "Generating your plan…" : "Generate my plan"}
+              {submitting
+                ? "Generating your plan…"
+                : bodyDataType === null
+                ? "Continue without body data"
+                : "Generate my plan"}
             </button>
           )}
         </div>
       </footer>
     </div>
-
   );
 }
 
@@ -360,38 +460,34 @@ function AboutYouStep({
               );
             })}
           </div>
-          <p className="mt-3 text-[11px] text-text-tertiary">Used to estimate metabolic rate (Mifflin-St Jeor).</p>
+          <p className="mt-3 text-[11px] text-text-tertiary">Used to calculate your metabolic rate.</p>
         </div>
       </div>
     </>
   );
 }
 
-function RecoveryMethodStep({ value, onChange }: { value: InputPath | null; onChange: (v: InputPath) => void }) {
-  const opts: { id: InputPath; label: string; desc: string; Icon: typeof Watch }[] = [
-    { id: "device", label: "I have a wearable", desc: "WHOOP, Oura, Garmin, Apple Watch — we'll read your recovery and sleep data directly.", Icon: Watch },
-    { id: "manual", label: "I'll log manually", desc: "Quick daily check-in — takes 10 seconds.", Icon: Pencil },
-  ];
+function ExperienceStep({ value, onChange }: { value: ExperienceLevel | null; onChange: (v: ExperienceLevel) => void }) {
   return (
     <>
-      <StepHeader title="How will you track recovery?" sub="This shapes how your APEX score is calculated. You can change this later in Settings." />
+      <StepHeader title="How long have you been training?" sub="Shapes your plan complexity and how we talk about effort." />
       <div className="space-y-2">
-        {opts.map(({ id, label, desc, Icon }) => {
+        {EXPERIENCE.map(({ id, label, desc, hint }) => {
           const active = value === id;
           return (
             <button
               key={id} type="button" onClick={() => onChange(id)}
-              className={`w-full flex items-start gap-3 rounded-2xl p-4 text-left border transition ${active ? "" : "border-white/5 bg-bg-2"}`}
+              className={`w-full text-left rounded-2xl p-4 border transition ${active ? "" : "border-white/5 bg-bg-2"}`}
               style={active ? SELECTED_STYLE : undefined}
             >
-              <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${active ? "gradient-brand text-white" : "bg-bg-1 text-text-secondary"}`}>
-                <Icon size={18} />
+              <div className="flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-white">{label}</p>
+                  <p className="text-xs text-text-tertiary mt-0.5">{desc}</p>
+                  <p className="text-xs text-text-secondary mt-2">→ {hint}</p>
+                </div>
+                {active && <Check size={18} className="text-white shrink-0 mt-1" />}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-sm">{label}</p>
-                <p className="text-xs text-text-tertiary mt-0.5 leading-snug">{desc}</p>
-              </div>
-              {active && <Check size={18} className="text-white shrink-0 mt-1" />}
             </button>
           );
         })}
@@ -427,19 +523,14 @@ function GoalStep({ value, onChange }: { value: Goal | null; onChange: (g: Goal)
   );
 }
 
-function DaysStep({ value, onChange }: { value: string[]; onChange: (days: string[], count: number) => void }) {
+function DaysStep({ value, onChange }: { value: string[]; onChange: (days: string[]) => void }) {
   const DAYS: { id: string; label: string }[] = [
-    { id: "mon", label: "M" },
-    { id: "tue", label: "T" },
-    { id: "wed", label: "W" },
-    { id: "thu", label: "T" },
-    { id: "fri", label: "F" },
-    { id: "sat", label: "S" },
-    { id: "sun", label: "S" },
+    { id: "mon", label: "M" }, { id: "tue", label: "T" }, { id: "wed", label: "W" },
+    { id: "thu", label: "T" }, { id: "fri", label: "F" }, { id: "sat", label: "S" }, { id: "sun", label: "S" },
   ];
   const toggle = (id: string) => {
     const next = value.includes(id) ? value.filter((d) => d !== id) : [...value, id];
-    onChange(next, next.length);
+    onChange(next);
   };
   const count = value.length;
   return (
@@ -450,10 +541,7 @@ function DaysStep({ value, onChange }: { value: string[]; onChange: (days: strin
           const active = value.includes(id);
           return (
             <button
-              key={id}
-              type="button"
-              onClick={() => toggle(id)}
-              aria-pressed={active}
+              key={id} type="button" onClick={() => toggle(id)} aria-pressed={active}
               className={`h-12 rounded-full text-sm font-semibold transition active:scale-95 ${active ? "gradient-brand text-white" : "bg-bg-2 text-text-secondary border border-white/5"}`}
             >
               {label}
@@ -494,95 +582,170 @@ function EquipmentStep({ value, onChange }: { value: Equipment | null; onChange:
   );
 }
 
+function EatingPatternStep({ value, onChange }: { value: EatingPattern | null; onChange: (v: EatingPattern) => void }) {
+  return (
+    <>
+      <StepHeader title="How do you eat?" sub="Shapes your macro timing and how we read your meal logs." />
+      <div className="grid grid-cols-2 gap-2">
+        {EATING_PATTERNS.map(({ id, label, desc }) => {
+          const active = value === id;
+          return (
+            <button
+              key={id} type="button" onClick={() => onChange(id)}
+              className={`text-left rounded-2xl p-4 border transition ${active ? "" : "border-white/5 bg-bg-2"}`}
+              style={active ? SELECTED_STYLE : undefined}
+            >
+              <p className="text-sm font-semibold text-white">{label}</p>
+              <p className="text-xs text-text-tertiary mt-0.5 leading-snug">{desc}</p>
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-3 text-[11px] text-text-tertiary">You can update this any time in Settings.</p>
+    </>
+  );
+}
+
 function cmToIn(cm: number) { return cm / 2.54; }
 function inToCm(inches: number) { return inches * 2.54; }
 function kgToLb(kg: number) { return kg * 2.20462; }
 function lbToKg(lb: number) { return lb / 2.20462; }
 
 function BodyStep({
-  draft, patch, subStep, onSkip,
-}: { draft: Draft; patch: (p: Partial<Draft>) => void; subStep: "A" | "B"; onSkip: () => void }) {
+  draft, patch, bodySkipped, unskip, onSkip,
+}: {
+  draft: Draft;
+  patch: (p: Partial<Draft>) => void;
+  bodySkipped: boolean;
+  unskip: () => void;
+  onSkip: () => void;
+}) {
   const [wUnit, setWUnit] = useState<WeightUnit>("kg");
   const [lUnit, setLUnit] = useState<LengthUnit>("cm");
+  const [scanOpen, setScanOpen] = useState(false);
+  const [measureOpen, setMeasureOpen] = useState(false);
 
-  const pathBtn = (id: Exclude<BodyDataType, null>, label: string, sub: string) => {
-    const active = draft.bodyDataType === id;
-    return (
-      <button
-        type="button"
-        onClick={() => patch({ bodyDataType: id })}
-        className={`flex-1 rounded-xl py-3 px-3 text-left border transition ${active ? "text-white" : "border-white/5 bg-bg-2 text-text-secondary"}`}
-        style={active ? SELECTED_STYLE : undefined}
-      >
-        <p className="text-[13px] font-semibold">{label}</p>
-        <p className="text-[11px] text-text-tertiary mt-0.5">{sub}</p>
-      </button>
-    );
-  };
+  const sex: Sex = draft.sex ?? "male";
+  const range = BF_RANGE[sex];
 
-  if (subStep === "A") {
+  // Initialise body-fat to the sex-linked default on first mount of this step.
+  useEffect(() => {
+    if (!draft.dexaBf) patch({ dexaBf: String(range.default) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (bodySkipped) {
     return (
       <>
-        <StepHeader title="Body composition" sub="Required for accurate macro targets — takes 20 seconds." />
-
-        <div className="flex gap-2 mb-2">
-          {pathBtn("dexa", "I have DEXA / InBody", "Enter scan results")}
-          {pathBtn("measurements", "Estimate manually", "Quick visual estimate")}
-        </div>
-        <div className="text-right mb-5">
-          <button type="button" onClick={onSkip} className="text-xs underline underline-offset-2 text-text-tertiary">
-            Skip for now →
+        <StepHeader title="Your starting point" sub="Used to calculate your calorie and macro targets." />
+        <div className="rounded-2xl bg-bg-2 border border-white/5 p-4">
+          <p className="text-sm text-text-secondary">
+            You've skipped body data. Macro targets will be rough estimates until you add this from your profile.
+          </p>
+          <button
+            type="button"
+            onClick={unskip}
+            className="mt-3 text-xs text-text-secondary underline underline-offset-2"
+          >
+            Add it now instead
           </button>
         </div>
-
-        {draft.bodyDataType !== null && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Weight unit</span>
-              <UnitToggle options={[{ id: "kg", label: "kg" }, { id: "lb", label: "lb" }]} value={wUnit} onChange={(v) => setWUnit(v as WeightUnit)} />
-            </div>
-            <UnitField label="Weight" cmValue={draft.weight} onChangeCm={(v) => patch({ weight: v })} unit={wUnit} convertToDisplay={kgToLb} convertFromDisplay={lbToKg} />
-            <UnitField label="Height" cmValue={draft.height} onChangeCm={(v) => patch({ height: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-            <Field label="Body fat %" value={draft.dexaBf} onChange={(v) => patch({ dexaBf: v })} suffix="%" />
-            {draft.bodyDataType === "dexa" && (
-              <UnitField label="Lean mass (optional)" cmValue={draft.dexaLean} onChangeCm={(v) => patch({ dexaLean: v })} unit={wUnit} convertToDisplay={kgToLb} convertFromDisplay={lbToKg} />
-            )}
-            <p className="text-[11px] text-text-tertiary px-1">
-              {draft.bodyDataType === "dexa"
-                ? "Enter values directly from your DEXA or InBody report."
-                : "A rough visual estimate is fine — we'll refine this from your circumference history over time."}
-            </p>
-          </div>
-        )}
-
-        {draft.bodyDataType === null && (
-          <p className="text-center text-xs text-text-tertiary mt-10">
-            Pick one to continue, or skip and add this later from the Log tab.
-          </p>
-        )}
       </>
     );
   }
 
-  // Sub-step B — circumferences (all optional).
+  const bfNum = Number(draft.dexaBf) || range.default;
+  const desc = getBfDescription(bfNum, sex);
+
   return (
     <>
-      <StepHeader title="Circumferences" sub="Optional — improves progress tracking." />
+      <StepHeader title="Your starting point" sub="Used to calculate your calorie and macro targets." />
+      <p className="text-xs text-text-tertiary mb-4">
+        No scan needed — a rough estimate is enough to start. We adjust from your real data every week.
+      </p>
 
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Weight unit</span>
+          <UnitToggle options={[{ id: "kg", label: "kg" }, { id: "lb", label: "lb" }]} value={wUnit} onChange={(v) => setWUnit(v as WeightUnit)} />
+        </div>
+        <UnitField label="Weight" cmValue={draft.weight} onChangeCm={(v) => patch({ weight: v })} unit={wUnit} convertToDisplay={kgToLb} convertFromDisplay={lbToKg} />
+
+        <div className="flex items-center justify-between gap-2 pt-1">
           <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Length unit</span>
           <UnitToggle options={[{ id: "cm", label: "cm" }, { id: "in", label: "in" }]} value={lUnit} onChange={(v) => setLUnit(v as LengthUnit)} />
         </div>
-        <UnitField label="Waist" cmValue={draft.waist} onChangeCm={(v) => patch({ waist: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-        <UnitField label="Hip" cmValue={draft.hip} onChangeCm={(v) => patch({ hip: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-        <UnitField label="Arm" cmValue={draft.arm} onChangeCm={(v) => patch({ arm: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-        <UnitField label="Thigh" cmValue={draft.thigh} onChangeCm={(v) => patch({ thigh: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+        <UnitField label="Height" cmValue={draft.height} onChangeCm={(v) => patch({ height: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+
+        {/* Sex-linked body-fat slider */}
+        <div className="rounded-2xl bg-bg-2 border border-white/5 p-4">
+          <p className="text-[11px] uppercase tracking-wider text-text-tertiary text-center">Body fat</p>
+          <p className="text-center mt-2 text-white" style={{ fontSize: 32, fontWeight: 700 }}>{bfNum}%</p>
+          <p className={`text-center text-sm font-semibold mt-1 ${bfLabelColor(desc.label)}`}>{desc.label}</p>
+          <input
+            type="range"
+            min={range.min}
+            max={range.max}
+            step={1}
+            value={bfNum}
+            onChange={(e) => patch({ dexaBf: e.target.value })}
+            className="w-full mt-4 accent-violet-400"
+          />
+          <p className="text-xs italic text-text-tertiary text-center mt-3 mx-auto" style={{ maxWidth: 320 }}>
+            {desc.cue}
+          </p>
+          <p className="text-[11px] text-text-tertiary text-center mt-3">
+            Based on ACE classifications. We track the trend — the exact number matters less than consistency.
+          </p>
+        </div>
+
+        {/* Optional — body scan */}
+        <button
+          type="button"
+          onClick={() => setScanOpen((v) => !v)}
+          className="w-full flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 text-left"
+        >
+          <span className="text-sm text-text-secondary">I have a body scan result</span>
+          <ChevronDown size={16} className={`text-text-tertiary transition-transform ${scanOpen ? "rotate-180" : ""}`} />
+        </button>
+        {scanOpen && (
+          <div className="space-y-2">
+            <UnitField label="Lean mass" cmValue={draft.dexaLean} onChangeCm={(v) => patch({ dexaLean: v })} unit={wUnit} convertToDisplay={kgToLb} convertFromDisplay={lbToKg} />
+            <p className="text-[11px] text-text-tertiary px-1">
+              From your InBody or DEXA report (PBF and SMM). Improves your BMR calculation.
+            </p>
+          </div>
+        )}
+
+        {/* Optional — circumferences */}
+        <button
+          type="button"
+          onClick={() => setMeasureOpen((v) => !v)}
+          className="w-full flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 text-left"
+        >
+          <span className="text-sm text-text-secondary">Add measurements</span>
+          <ChevronDown size={16} className={`text-text-tertiary transition-transform ${measureOpen ? "rotate-180" : ""}`} />
+        </button>
+        {measureOpen && (
+          <div className="space-y-2">
+            <UnitField label="Waist" cmValue={draft.waist} onChangeCm={(v) => patch({ waist: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+            <UnitField label="Hip" cmValue={draft.hip} onChangeCm={(v) => patch({ hip: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+            <UnitField label="Arm" cmValue={draft.arm} onChangeCm={(v) => patch({ arm: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+            <UnitField label="Thigh" cmValue={draft.thigh} onChangeCm={(v) => patch({ thigh: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={onSkip}
+          className="w-full bg-bg-2 border border-white/5 rounded-2xl py-3 text-sm text-text-tertiary"
+        >
+          Skip for now — I'll add this from my profile later
+        </button>
       </div>
     </>
   );
 }
-
 
 function UnitToggle({ options, value, onChange }: { options: { id: string; label: string }[]; value: string; onChange: (v: string) => void }) {
   return (
@@ -600,7 +763,6 @@ function UnitToggle({ options, value, onChange }: { options: { id: string; label
   );
 }
 
-/* Stores canonical (cm or kg). Typed input is parsed as a literal number — no implied decimals. */
 function UnitField({
   label, cmValue, onChangeCm, unit, convertToDisplay, convertFromDisplay,
 }: {
@@ -610,7 +772,6 @@ function UnitField({
   const isCanonical = unit === "cm" || unit === "kg";
   const [localDisplay, setLocalDisplay] = useState<string>("");
 
-  // Initialize / sync display whenever the canonical value or unit changes from outside.
   useEffect(() => {
     if (cmValue === "") { setLocalDisplay(""); return; }
     if (isCanonical) { setLocalDisplay(cmValue); return; }
@@ -620,7 +781,6 @@ function UnitField({
   }, [cmValue, unit, isCanonical, convertToDisplay]);
 
   const handle = (raw: string) => {
-    // Allow empty, digits, optional single '.'
     if (raw === "") { setLocalDisplay(""); onChangeCm(""); return; }
     if (!/^\d*\.?\d*$/.test(raw)) return;
     setLocalDisplay(raw);
@@ -650,60 +810,49 @@ function UnitField({
   );
 }
 
-function Field({ label, value, onChange, suffix }: { label: string; value: string; onChange: (v: string) => void; suffix?: string }) {
-  const handle = (raw: string) => {
-    if (raw === "") return onChange("");
-    if (!/^\d*\.?\d*$/.test(raw)) return;
-    onChange(raw);
-  };
-  return (
-    <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3">
-      <span className="text-sm text-text-secondary">{label}</span>
-      <span className="flex items-center gap-1">
-        <input
-          type="text"
-          inputMode="decimal"
-          value={value}
-          onChange={(e) => handle(e.target.value)}
-          className="w-20 bg-transparent text-right text-sm font-semibold focus:outline-none"
-          placeholder="—"
-          style={{ fontSize: 16 }}
-        />
-        {suffix && <span className="text-xs text-text-tertiary">{suffix}</span>}
-      </span>
-    </label>
-  );
-}
-
-function ReviewStep({ draft }: { draft: Draft }) {
+function ReviewStep({ draft, bodyDataType }: { draft: Draft; bodyDataType: "dexa" | "measurements" | null }) {
   const goalLabel = GOALS.find((g) => g.id === draft.goal)?.label ?? "—";
   const eqLabel = EQUIPMENT.find((e) => e.id === draft.equipment)?.label ?? "—";
-  const pathLabel = draft.inputPath === "device" ? "Wearable device" : draft.inputPath === "manual" ? "Manual log" : "—";
+  const expLabel = EXPERIENCE.find((e) => e.id === draft.experienceLevel)?.label ?? "—";
+  const eatLabel = EATING_PATTERNS.find((e) => e.id === draft.eatingPattern)?.label ?? "—";
+
+  const dayLabels: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
+  const order = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  const daysPretty = draft.trainingDays.length
+    ? order.filter((d) => draft.trainingDays.includes(d)).map((d) => dayLabels[d]).join(" ")
+    : "—";
+
+  let bodyValue = "Not provided — macro targets will be estimated";
+  let bodyAmber = true;
+  if (bodyDataType === "dexa") {
+    bodyValue = `DEXA · ${draft.weight}kg · ${draft.dexaBf}%bf`;
+    bodyAmber = false;
+  } else if (bodyDataType === "measurements") {
+    bodyValue = `Visual estimate · ${draft.weight}kg · ${draft.dexaBf}%bf`;
+    bodyAmber = false;
+  }
+
   return (
     <>
-      <StepHeader title="Review" sub="Confirm and we'll build your plan." />
+      <StepHeader title="All set" sub="Confirm and we'll build your plan." />
       <div className="rounded-2xl bg-bg-2 border border-white/5 divide-y divide-white/5">
         <Row label="Name" value={draft.name || "—"} />
-        <Row label="Recovery method" value={pathLabel} />
+        <Row label="Experience" value={expLabel} />
         <Row label="Goal" value={goalLabel} />
-        <Row label="Training days" value={`${draft.days} / week`} />
+        <Row label="Training days" value={`${draft.trainingDays.length} / week · ${daysPretty}`} />
         <Row label="Equipment" value={eqLabel} />
-        <Row label="Body data"
-          value={draft.bodyDataType === null
-            ? "Not provided"
-            : `${draft.bodyDataType === "dexa" ? "DEXA/InBody" : "Manual"} · ${draft.weight || "—"}kg · ${draft.dexaBf || "—"}%`} />
-
+        <Row label="Eating pattern" value={eatLabel} />
+        <Row label="Body data" value={bodyValue} valueClass={bodyAmber ? "text-amber-400" : undefined} />
       </div>
-      <p className="mt-4 text-center text-[11px] text-text-tertiary">Your plan unlocks for customization 7 days from now.</p>
     </>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3.5">
-      <span className="text-sm text-text-secondary">{label}</span>
-      <span className="text-sm font-medium text-right">{value}</span>
+    <div className="flex items-center justify-between px-4 py-3.5 gap-3">
+      <span className="text-sm text-text-secondary shrink-0">{label}</span>
+      <span className={`text-sm font-medium text-right ${valueClass ?? ""}`}>{value}</span>
     </div>
   );
 }
