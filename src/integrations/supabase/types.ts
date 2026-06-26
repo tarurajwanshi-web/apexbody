@@ -380,6 +380,7 @@ export type Database = {
           adjustment_kcal: number
           applied_at: string | null
           applied_target_id: string | null
+          avg_rir: number | null
           avg_strain_value: number | null
           blended_tdee: number | null
           confidence_tier: string | null
@@ -408,6 +409,7 @@ export type Database = {
           adjustment_kcal?: number
           applied_at?: string | null
           applied_target_id?: string | null
+          avg_rir?: number | null
           avg_strain_value?: number | null
           blended_tdee?: number | null
           confidence_tier?: string | null
@@ -436,6 +438,7 @@ export type Database = {
           adjustment_kcal?: number
           applied_at?: string | null
           applied_target_id?: string | null
+          avg_rir?: number | null
           avg_strain_value?: number | null
           blended_tdee?: number | null
           confidence_tier?: string | null
@@ -495,6 +498,7 @@ export type Database = {
       profiles: {
         Row: {
           age: number | null
+          behavioral_input_preference: string | null
           biological_sex: string | null
           body_data_type: string | null
           coaching_time: string | null
@@ -504,6 +508,7 @@ export type Database = {
           disclaimer_accepted_at: string | null
           eating_pattern: string | null
           equipment_access: string | null
+          experience_level: string | null
           goal: string | null
           id: string
           input_path_preference: string | null
@@ -524,6 +529,7 @@ export type Database = {
         }
         Insert: {
           age?: number | null
+          behavioral_input_preference?: string | null
           biological_sex?: string | null
           body_data_type?: string | null
           coaching_time?: string | null
@@ -533,6 +539,7 @@ export type Database = {
           disclaimer_accepted_at?: string | null
           eating_pattern?: string | null
           equipment_access?: string | null
+          experience_level?: string | null
           goal?: string | null
           id?: string
           input_path_preference?: string | null
@@ -553,6 +560,7 @@ export type Database = {
         }
         Update: {
           age?: number | null
+          behavioral_input_preference?: string | null
           biological_sex?: string | null
           body_data_type?: string | null
           coaching_time?: string | null
@@ -562,6 +570,7 @@ export type Database = {
           disclaimer_accepted_at?: string | null
           eating_pattern?: string | null
           equipment_access?: string | null
+          experience_level?: string | null
           goal?: string | null
           id?: string
           input_path_preference?: string | null
@@ -883,8 +892,14 @@ export type Database = {
           entry_date: string
           exercise_name: string
           id: string
+          muscle_group: string | null
           reps_completed: number | null
+          rest_seconds_actual: number | null
+          rir: number | null
+          rpe: number | null
           set_number: number
+          target_reps: number | null
+          target_weight_kg: number | null
           updated_at: string
           user_id: string
           weight_kg: number | null
@@ -895,8 +910,14 @@ export type Database = {
           entry_date: string
           exercise_name: string
           id?: string
+          muscle_group?: string | null
           reps_completed?: number | null
+          rest_seconds_actual?: number | null
+          rir?: number | null
+          rpe?: number | null
           set_number: number
+          target_reps?: number | null
+          target_weight_kg?: number | null
           updated_at?: string
           user_id: string
           weight_kg?: number | null
@@ -907,8 +928,14 @@ export type Database = {
           entry_date?: string
           exercise_name?: string
           id?: string
+          muscle_group?: string | null
           reps_completed?: number | null
+          rest_seconds_actual?: number | null
+          rir?: number | null
+          rpe?: number | null
           set_number?: number
+          target_reps?: number | null
+          target_weight_kg?: number | null
           updated_at?: string
           user_id?: string
           weight_kg?: number | null
