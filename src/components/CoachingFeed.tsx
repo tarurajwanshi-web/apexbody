@@ -11,12 +11,12 @@ const TYPE_META: Record<string, { emoji: string; label: string }> = {
 };
 
 const COLORS = {
-  cardBg: "#1A1F3A",
-  textPrimary: "#E8E8E8",
-  textSecondary: "#A8A8A8",
-  teal: "#00D9FF",
-  gold: "#FFC107",
-  dotted: "1px dotted rgba(0, 217, 255, 0.4)",
+  cardBg: "#10162A",
+  textPrimary: "#F5F5F7",
+  textSecondary: "#A8ADBD",
+  teal: "#8B7FF7",
+  gold: "#5FE3C4",
+  dotted: "1px dotted rgba(139, 127, 247, 0.32)",
 };
 
 function relativeTime(iso: string): string {
@@ -70,20 +70,20 @@ function Card({ card }: { card: CoachingCard }) {
     borderRadius: 12,
     padding,
     background: isPermission
-      ? "linear-gradient(135deg, #00D9FF, #FFC107)"
+      ? "linear-gradient(135deg, #8B7FF7, #5FE3C4)"
       : COLORS.cardBg,
-    color: isPermission ? "#FFFFFF" : COLORS.textPrimary,
-    border: isPermission ? "none" : "1px solid rgba(255,255,255,0.04)",
-    borderLeft: isNote ? `3px solid ${COLORS.teal}` : undefined,
+    color: isPermission ? "#0A0E1A" : COLORS.textPrimary,
+    border: isPermission ? "none" : "1px solid rgba(255,255,255,0.06)",
+    borderLeft: isNote ? `2px solid ${COLORS.teal}` : undefined,
     boxShadow: isPermission
-      ? "0 12px 32px -12px rgba(0, 217, 255, 0.45)"
-      : "0 4px 16px -8px rgba(0,0,0,0.4)",
+      ? "0 16px 40px -16px rgba(139, 127, 247, 0.45)"
+      : "inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 24px -12px rgba(0,0,0,0.5)",
   };
 
-  const labelColor = isPermission ? "rgba(255,255,255,0.92)" : COLORS.textSecondary;
-  const timeColor = isPermission ? "rgba(255,255,255,0.75)" : COLORS.textSecondary;
+  const labelColor = isPermission ? "rgba(10,14,26,0.7)" : COLORS.textSecondary;
+  const timeColor = isPermission ? "rgba(10,14,26,0.55)" : COLORS.textSecondary;
   const separator = isPermission
-    ? "1px dotted rgba(255,255,255,0.5)"
+    ? "1px dotted rgba(10,14,26,0.35)"
     : COLORS.dotted;
 
   return (

@@ -7,15 +7,14 @@ import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 
 import { T } from "@/components/dashboard/tokens";
 import { Header } from "@/components/dashboard/Header";
-import { TodayCard } from "@/components/dashboard/TodayCard";
-import { StateCard } from "@/components/dashboard/StateCard";
-import { MetricCards } from "@/components/dashboard/MetricCards";
-import { Insights } from "@/components/dashboard/Insights";
+import { HeroRing } from "@/components/dashboard/HeroRing";
+import { ClosedLoopSentence } from "@/components/dashboard/ClosedLoopSentence";
+import { QuietRow, SectionLabel } from "@/components/dashboard/QuietRow";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
-import { DecisionPanel, type DecisionAction } from "@/components/DecisionPanel";
+import { Sparkline } from "@/components/Sparkline";
+import { CoachingFeed } from "@/components/CoachingFeed";
 
 import { loadDashboardData, type DashboardData } from "@/lib/dashboard-data";
-import { detectStreak } from "@/lib/dashboard-state";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — APEX" }] }),
@@ -25,7 +24,6 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 function pillarScore(d: DashboardData, key: string): number | null {
   const pb = d.readiness?.pillar_breakdown;
   if (!pb) return null;
-  // try common variants
   const candidates = [key, `${key}_score`, key.toLowerCase()];
   for (const k of candidates) {
     const v = (pb as any)[k];
@@ -38,40 +36,78 @@ function pillarScore(d: DashboardData, key: string): number | null {
   return null;
 }
 
-function deterministicSentence(
-  recovery: number | null,
-  fuel: number | null,
-  effort: number | null,
-  trainingPlanned: boolean,
-): string {
-  if (recovery != null && fuel != null && effort != null && recovery > 70 && fuel > 70 && effort > 70) {
-    return "Strong across the board today. Stay consistent.";
-  }
-  if (recovery != null && recovery < 50) {
-    return "Recovery needs attention. Consider lighter effort today.";
-  }
-  if (fuel != null && fuel < 50) {
-    return "Fuel score is low — log your meals to close the gap.";
-  }
-  if (effort != null && effort < 50 && trainingPlanned) {
-    return "Training ahead today. You're ready.";
-  }
-  return "Log meals and recovery to build your full picture.";
-}
-function buildDecisionActions(
-  recovery: number | null,
-  fuel: number | null,
-  effort: number | null,
-  trainingPlanned: boolean,
-): DecisionAction[] {
-  const out: DecisionAction[] = [];
-  if (fuel == null || fuel < 60) out.push({ label: "Log a meal", href: "/nutrition" });
-  if (trainingPlanned) out.push({ label: "Start session", href: "/workouts" });
-  else if (effort != null && effort < 50) out.push({ label: "Plan training", href: "/workouts" });
-  out.push({ label: "Ask coach", href: "/coach" });
-  return out.slice(0, 3);
+function stripFirstSentence(content: string): string {
+  const cleaned = content
+    .replace(/\r\n/g, "\n")
+    .replace(/^[ \t]*#{1,6}[ \t]*/gm, "")
+    .replace(/\*\*/g, "")
+    .replace(/__/g, "")
+    .replace(/`+/g, "")
+    .replace(/[\u2600-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|\uD83E[\uDD00-\uDDFF]|\uFE0F|\u200D/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  const m = cleaned.match(/^[\s\S]*?[.!?\n]/);
+  return (m ? m[0].replace(/[.!?\s]+$/g, "") : cleaned).trim();
 }
 
+function truncate(s: string, n = 160): string {
+  if (s.length <= n) return s;
+  return s.slice(0, n - 3).trim() + "…";
+}
+
+/** Closed-loop sentence — one line that names which engine influenced which. */
+function buildClosedLoop(
+  recovery: number | null,
+  fuel: number | null,
+  effort: number | null,
+  readiness: number | null,
+  trainingPlanned: boolean,
+): { sentence: string; engines: { readiness?: boolean; load?: boolean; nutrition?: boolean; recovery?: boolean } } {
+  if (readiness != null && readiness >= 75 && trainingPlanned) {
+    return {
+      sentence: "Readiness is high — training load is pulling calories up today.",
+      engines: { readiness: true, load: true, nutrition: true },
+    };
+  }
+  if (recovery != null && recovery < 50) {
+    return {
+      sentence: "Recovery is low — APEX is easing training volume and holding fuel steady.",
+      engines: { recovery: true, load: true },
+    };
+  }
+  if (fuel != null && fuel < 50) {
+    return {
+      sentence: "Fuel score is low — log meals to keep training load on plan.",
+      engines: { nutrition: true, load: true },
+    };
+  }
+  if (effort != null && effort < 50 && trainingPlanned) {
+    return {
+      sentence: "Training planned today — readiness and recovery both clear.",
+      engines: { readiness: true, recovery: true, load: true },
+    };
+  }
+  if (recovery != null && fuel != null && effort != null) {
+    return {
+      sentence: "All four engines are steady. Keep the pattern.",
+      engines: { readiness: true, load: true, nutrition: true, recovery: true },
+    };
+  }
+  return {
+    sentence: "Log meals and recovery so APEX can close the loop on today.",
+    engines: { nutrition: true, recovery: true },
+  };
+}
+
+function trendWord(values: (number | null)[]): string {
+  const nums = values.filter((v): v is number => typeof v === "number");
+  if (nums.length < 2) return "—";
+  const first = nums[0];
+  const last = nums[nums.length - 1];
+  const delta = last - first;
+  if (Math.abs(delta) < 0.2) return "steady";
+  return delta > 0 ? "rising" : "easing";
+}
 
 function Dashboard() {
   const { profile } = useProfile();
@@ -92,10 +128,7 @@ function Dashboard() {
     }
   }, [tz]);
 
-  useEffect(() => {
-    reload();
-  }, [reload]);
-
+  useEffect(() => { reload(); }, [reload]);
   useAutoRefreshOnVisible(reload, lastUpdatedAt);
 
   const greeting = useMemo(() => {
@@ -127,13 +160,11 @@ function Dashboard() {
           paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 128px)",
         }}
       >
-        <div className="px-5 pt-6 max-w-[480px] mx-auto space-y-4">
+        <div className="px-5 pt-6 max-w-[480px] mx-auto space-y-5">
           <div style={{ height: 56 }} />
-          <Skeleton h={76} />
-          <Skeleton h={180} />
-          <Skeleton h={120} />
-          <Skeleton h={90} />
-          <Skeleton h={240} />
+          <div style={{ height: 240, borderRadius: 16, background: T.surface, opacity: 0.5, animation: "apex-pulse 1.6s ease-in-out infinite" }} />
+          <div style={{ height: 64, borderRadius: 12, background: T.surface, opacity: 0.4 }} />
+          <div style={{ height: 200, borderRadius: 16, background: T.surface, opacity: 0.4 }} />
         </div>
         <DashboardNav onLogged={onLogged} />
       </div>
@@ -147,45 +178,46 @@ function Dashboard() {
   const readiness = data.readiness?.final_score ?? null;
   const trainingPlanned = !!data.todayPlannedSession && !data.todayPlannedSession.rest;
 
-  // Daily note for today
+  const loop = buildClosedLoop(recovery, fuel, effort, readiness, trainingPlanned);
+
+  // Today rows
+  const planned = data.todayPlannedSession;
+  const trainText = planned?.rest
+    ? "Rest day"
+    : planned?.session_name
+      ? `${planned.session_name}${planned.exercises?.length ? ` · ${planned.exercises.length} ex` : ""}`
+      : "Open session";
+
+  const tCal = data.targets?.target_calories ?? null;
+  const cKcal = data.macros
+    ? Math.round(
+        (data.macros.total_protein ?? 0) * 4 +
+        (data.macros.total_carbs ?? 0) * 4 +
+        (data.macros.total_fat ?? 0) * 9,
+      )
+    : null;
+  const compliance = data.macros?.compliance_pct ?? null;
+  const fuelText = tCal && cKcal != null
+    ? `${cKcal} / ${tCal} kcal`
+    : cKcal != null
+      ? `${cKcal} kcal`
+      : "—";
+  const fuelMeta = compliance != null ? `${Math.round(compliance)}%` : undefined;
+
+  const recoveryText = recovery != null ? `Score ${Math.round(recovery)}` : "—";
+
+  // Week rows
+  const sevenDaysAgo = addDaysISO(today, -6);
+  const recentDays = new Set(
+    data.recentMeals.map((m) => m.entry_date).filter((d) => d >= sevenDaysAgo && d <= today),
+  );
+  const daysLogged = recentDays.size;
+  const weightDelta = data.weight.delta_kg;
+  const setsDelta = data.weekSetsCount - data.lastWeekSetsCount;
+
   const dailyNoteToday = data.cards.find(
     (c) => c.card_type === "daily_note" && c.card_date === today,
   );
-
-  const sentence = dailyNoteToday
-    ? // first sentence already lives in text.ts but TodayCard takes plain string
-      truncateSentence(stripFirstSentence(dailyNoteToday.content))
-    : deterministicSentence(recovery, fuel, effort, trainingPlanned);
-
-  // 7-day consistency from recentMeals
-  const sevenDaysAgo = addDaysISO(today, -6);
-  const recentDays = new Set(
-    data.recentMeals
-      .map((m) => m.entry_date)
-      .filter((d) => d >= sevenDaysAgo && d <= today),
-  );
-  const daysLogged = recentDays.size;
-
-  // Streak
-  const streakState = detectStreak(data, tz);
-  const streakDays =
-    streakState.kind === "reset" ? 0 : (streakState as any).days ?? 0;
-  const streakProtected = streakState.kind === "protected";
-
-  // Fuel macros for Insights
-  const protein = {
-    actual: data.macros?.total_protein ?? 0,
-    target: data.targets?.target_protein_g ?? 0,
-  };
-  const carbs = {
-    actual: data.macros?.total_carbs ?? 0,
-    target: data.targets?.target_carbs_g ?? 0,
-  };
-  const fat = {
-    actual: data.macros?.total_fat ?? 0,
-    target: data.targets?.target_fat_g ?? 0,
-  };
-  const carbsPctOfTarget = carbs.target > 0 ? carbs.actual / carbs.target : null;
 
   return (
     <div
@@ -197,47 +229,123 @@ function Dashboard() {
         color: T.text1,
       }}
     >
-      <div className="relative px-5 pt-6 max-w-[480px] mx-auto" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div
+        className="px-5 pt-6 max-w-[480px] mx-auto"
+        style={{ display: "flex", flexDirection: "column", gap: 4 }}
+      >
         <Header greeting={greeting} name={name} day={day} />
-        <DecisionPanel
-          brief={sentence}
-          confidence={readiness == null ? "low" : readiness > 70 ? "high" : readiness > 50 ? "medium" : "low"}
-          actions={buildDecisionActions(recovery, fuel, effort, trainingPlanned)}
-        />
-        <TodayCard
-          recovery={recovery}
-          fuel={fuel}
-          effort={effort}
-          readiness={readiness}
-          sentence={sentence}
-        />
-        <StateCard readiness={readiness} />
-        <MetricCards
-          weight={{ deltaKg: data.weight.delta_kg, goal: data.profile.goal, trend: data.weight.series7d }}
-          consistency={{ daysLogged, series: data.consistency7d }}
-          streak={{ days: streakDays, protected: streakProtected }}
-        />
-        <Insights
-          day={{
-            compliancePct: data.macros?.compliance_pct ?? null,
-            noteContent: dailyNoteToday?.content ?? null,
-          }}
-          fuel={{
-            score: fuel,
-            mealCount: data.todayMeals.length,
-            protein,
-            carbs,
-            fat,
-          }}
-          earned={{
-            trainingLogged: data.todaySetsCount > 0,
-            readiness,
-            setsCount: data.todaySetsCount,
-            carbsPctOfTarget,
-            goal: data.profile.goal,
-            proteinTarget: protein.target,
-          }}
-        />
+
+        {/* Hero — single readiness number */}
+        <div style={{ padding: "28px 0 8px", display: "flex", justifyContent: "center" }}>
+          <HeroRing value={readiness} label="Readiness" />
+        </div>
+
+        {/* Closed-loop sentence — the product's differentiator, ambient */}
+        <div style={{ padding: "8px 0 4px" }}>
+          <ClosedLoopSentence sentence={loop.sentence} engines={loop.engines} />
+        </div>
+
+        {/* Today */}
+        <SectionLabel>Today</SectionLabel>
+        <div>
+          <QuietRow label="Train" value={trainText} to="/workouts" />
+          <QuietRow label="Fuel" value={fuelText} meta={fuelMeta} to="/nutrition" />
+          <QuietRow label="Recovery" value={recoveryText} />
+        </div>
+
+        {/* This week */}
+        <SectionLabel>This week</SectionLabel>
+        <div>
+          <QuietRow
+            label="Load"
+            value={data.weekSetsCount === 0 ? "—" : `${data.weekSetsCount} sets`}
+            meta={
+              data.weekSetsCount === 0 && data.lastWeekSetsCount === 0
+                ? undefined
+                : setsDelta === 0
+                  ? "vs last wk"
+                  : `${setsDelta > 0 ? "+" : ""}${setsDelta} vs last wk`
+            }
+          />
+          <QuietRow
+            label="Adherence"
+            value={
+              data.complianceAvg7d != null ? `${data.complianceAvg7d}%` : "—"
+            }
+            meta={
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <Sparkline
+                  points={data.compliance7d}
+                  width={56}
+                  height={18}
+                  color={T.primary}
+                  fill={false}
+                  strokeWidth={1}
+                />
+                {daysLogged}/7
+              </span>
+            }
+          />
+          <QuietRow
+            label="Weight"
+            value={
+              weightDelta == null
+                ? "—"
+                : `${weightDelta > 0 ? "+" : ""}${weightDelta.toFixed(1)} kg`
+            }
+            meta={
+              <Sparkline
+                points={data.weight.series7d}
+                width={56}
+                height={18}
+                color={T.green}
+                fill={false}
+                strokeWidth={1}
+              />
+            }
+          />
+          <QuietRow label="Recovery" value={trendWord(data.compliance7d)} />
+        </div>
+
+        {/* Coach feed */}
+        <SectionLabel>Coach</SectionLabel>
+        {dailyNoteToday && (
+          <div
+            style={{
+              background: T.surface,
+              border: `1px solid ${T.border}`,
+              borderLeft: `2px solid ${T.primary}`,
+              borderRadius: 12,
+              padding: 16,
+              marginBottom: 12,
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: T.label,
+                marginBottom: 8,
+              }}
+            >
+              Today's note
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: 15,
+                lineHeight: 1.5,
+                color: T.text1,
+                letterSpacing: "-0.005em",
+              }}
+            >
+              {truncate(stripFirstSentence(dailyNoteToday.content))}
+            </div>
+          </div>
+        )}
+        <CoachingFeed />
       </div>
 
       <DashboardNav onLogged={onLogged} />
@@ -247,7 +355,7 @@ function Dashboard() {
           className="fixed left-1/2 -translate-x-1/2 bottom-28 z-[101] px-4 py-2 rounded-full"
           style={{
             background: T.surface,
-            border: `0.5px solid ${T.border}`,
+            border: `1px solid ${T.border}`,
             color: T.text1,
             fontSize: 13,
             backdropFilter: "blur(20px)",
@@ -257,40 +365,5 @@ function Dashboard() {
         </div>
       )}
     </div>
-  );
-}
-
-// Pull first sentence inline — avoids importing firstSentence/cleanCardText
-// from text.ts twice; the Insights card already imports them itself.
-function stripFirstSentence(content: string): string {
-  const cleaned = content
-    .replace(/\r\n/g, "\n")
-    .replace(/^[ \t]*#{1,6}[ \t]*/gm, "")
-    .replace(/\*\*/g, "")
-    .replace(/__/g, "")
-    .replace(/`+/g, "")
-    .replace(/[\u2600-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|\uD83E[\uDD00-\uDDFF]|\uFE0F|\u200D/g, "")
-    .replace(/[ \t]{2,}/g, " ")
-    .trim();
-  const m = cleaned.match(/^[\s\S]*?[.!?\n]/);
-  return (m ? m[0].replace(/[.!?\s]+$/g, "") : cleaned).trim();
-}
-
-function truncateSentence(s: string): string {
-  if (s.length <= 140) return s;
-  return s.slice(0, 137).trim() + "…";
-}
-
-function Skeleton({ h }: { h: number }) {
-  return (
-    <div
-      style={{
-        height: h,
-        background: T.surface,
-        border: `0.5px solid ${T.border}`,
-        borderRadius: 22,
-        animation: "apex-pulse 1.6s ease-in-out infinite",
-      }}
-    />
   );
 }
