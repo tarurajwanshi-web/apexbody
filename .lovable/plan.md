@@ -1,22 +1,30 @@
-## Findings
+## Goal
 
-- `src/lib/nutrition.functions.ts` does not exist; the spec imports from there. Existing nutrition server functions live in `src/lib/macros.functions.ts`.
-- No `triggerWeeklyMacroReview` server fn exists yet — needs to be created.
-- The edge function `trigger-weekly-macro-review` is JWT-gated. Easiest path is a thin `createServerFn` wrapper that uses `requireSupabaseAuth` and calls the edge function via the authenticated `context.supabase.functions.invoke("trigger-weekly-macro-review")` — that forwards the user's bearer.
-- `Nutrition()` already imports `useUserTimezone` and `getLocalDateISO`, has `reloadNutritionSnapshot`, and uses `useServerFn` for other calls.
-- The spec's effect body calls `useUserTimezone()` inside `useEffect` — that's an invalid hook call. The component already holds `userTz` in scope; the effect should reference it directly.
+Replace the existing `createServerFn`-based `triggerWeeklyMacroReview` in `src/lib/nutrition.functions.ts` with a direct client-side `fetch` wrapper that calls the `trigger-weekly-macro-review` edge function with the user's JWT — per the APEX spec.
 
-## Plan
+## Why the small departure from "add to existing file"
 
-1. **New file `src/lib/nutrition.functions.ts`**: export `triggerWeeklyMacroReview` as a `createServerFn({ method: "POST" }).middleware([requireSupabaseAuth]).handler(...)` that calls `context.supabase.functions.invoke("trigger-weekly-macro-review", { body: {} })` and returns a typed `{ status: "computed" | "already_computed" | "not_monday", decision?, applied_target_id?, review_id?, user_id? }`. Errors are returned as `{ status: "error", error }` so the client effect's catch is rarely needed but still wired.
+The file currently exports `triggerWeeklyMacroReview` as a TanStack server function. The spec's new version is a plain async function with a different signature (no `{ data }` wrapper, no `useServerFn`). We can't have both under the same name, so this is a replace, not an add. The caller in `nutrition.tsx` must be updated in the same change or the build breaks.
 
-2. **`src/routes/nutrition.tsx`**: 
-   - Import `triggerWeeklyMacroReview` from `@/lib/nutrition.functions`.
-   - Inside `Nutrition()`, after the existing `useServerFn` setup, add `const triggerReview = useServerFn(triggerWeeklyMacroReview);`.
-   - Add a `useEffect(..., [userTz])` placed after state init that:
-     - Computes today's day-of-week from `getLocalDateISO(userTz)` (matches the spec's UTC-parse trick — for a YYYY-MM-DD anchored to `T00:00:00Z`, `getUTCDay()` returns the correct weekday).
-     - Returns early if not Monday (day 1).
-     - Calls `triggerReview()`; on `computed`/`already_computed`, calls `reloadNutritionSnapshot()`. Logs errors, doesn't throw.
-   - Uses a `useRef` guard so it doesn't double-fire under React StrictMode dev double-invoke.
+## Changes
 
-No edge function, DB, or other route changes. Confirm and I'll build.
+1. **`src/lib/nutrition.functions.ts`**
+   - Remove the `createServerFn` version of `triggerWeeklyMacroReview` and its `TriggerWeeklyMacroReviewResult` type.
+   - Add the spec's `triggerWeeklyMacroReview` async function exactly as provided: gets session via `supabase.auth.getSession()`, reads `VITE_SUPABASE_URL`, POSTs to `/functions/v1/trigger-weekly-macro-review` with `Authorization: Bearer <token>`, handles 204 → `{status: "not_monday"}`, parses JSON otherwise, throws on `!response.ok`.
+   - Keep the other server-fn exports in this file untouched.
+
+2. **`src/routes/nutrition.tsx`**
+   - Drop `const triggerReview = useServerFn(triggerWeeklyMacroReview);` and call `triggerWeeklyMacroReview()` directly in the Monday-trigger `useEffect`.
+   - Result-handling stays the same: on `"computed"` or `"already_computed"` call `reloadNutritionSnapshot()`; `"not_monday"` is a no-op; `.catch` already logs.
+   - Remove the now-unused `useServerFn` import only if no other call site uses it (it does — leave the import alone).
+
+## Out of scope
+
+- No changes to the edge function itself, RPC, or DB.
+- No changes to the Monday detection / StrictMode guard logic.
+- No changes to other server fns in `nutrition.functions.ts`.
+
+## Verification
+
+- `bun run build` (typecheck) passes.
+- Manual: on a Monday in user tz, opening Fuel logs `[nutrition-trigger] result {status: "computed"|"already_computed"}` and the snapshot reloads; non-Monday returns `{status: "not_monday"}` without error.

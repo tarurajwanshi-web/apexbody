@@ -107,7 +107,7 @@ function Nutrition() {
   const deleteWater = useServerFn(deleteHydrationEvent);
 
   const restore = useServerFn(restoreMeal);
-  const triggerReview = useServerFn(triggerWeeklyMacroReview);
+  
   const mondayTriggerRef = useRef<string | null>(null);
 
 
@@ -199,7 +199,7 @@ function Nutrition() {
     mondayTriggerRef.current = guardKey;
 
     console.log("[nutrition-trigger] Monday detected, triggering review");
-    triggerReview()
+    triggerWeeklyMacroReview()
       .then((result) => {
         console.log("[nutrition-trigger] result", result);
         if (result.status === "computed" || result.status === "already_computed") {
