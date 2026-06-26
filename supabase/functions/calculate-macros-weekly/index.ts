@@ -249,15 +249,25 @@ async function processUser(supa: SupabaseClient, p: Profile, force: boolean): Pr
   // ── Training load metrics ────────────────────────────────────────────────
   const { data: workoutSets, error: setError } = await supa
     .from("workout_set_logs")
-    .select("strain_value")
+    .select("id")
     .eq("user_id", p.user_id)
     .gte("entry_date", week_start_date)
     .lt("entry_date", window_end_exclusive);
   if (setError) console.error("[calculate-macros-weekly] workout sets fetch failed", setError);
 
   const totalSets = workoutSets?.length ?? 0;
-  const avgStrain = workoutSets && workoutSets.length > 0
-    ? workoutSets.reduce((sum, s) => sum + Number(s.strain_value ?? 0), 0) / workoutSets.length
+
+  // Strain lives on shield_training_logs, not workout_set_logs.
+  const { data: trainingLogs, error: trainErr } = await supa
+    .from("shield_training_logs")
+    .select("strain_value")
+    .eq("user_id", p.user_id)
+    .gte("entry_date", week_start_date)
+    .lt("entry_date", window_end_exclusive);
+  if (trainErr) console.error("[calculate-macros-weekly] training logs fetch failed", trainErr);
+
+  const avgStrain = trainingLogs && trainingLogs.length > 0
+    ? trainingLogs.reduce((sum, t) => sum + Number(t.strain_value ?? 0), 0) / trainingLogs.length
     : 0;
 
   let trainingLoadIndex = 1.0;
@@ -265,6 +275,10 @@ async function processUser(supa: SupabaseClient, p: Profile, force: boolean): Pr
   else if (totalSets < 20) trainingLoadIndex = 1.0;
   else if (totalSets < 30) trainingLoadIndex = 1.1;
   else trainingLoadIndex = 1.15;
+
+  // Nudge by observed strain.
+  if (avgStrain >= 14) trainingLoadIndex += 0.1;
+  else if (avgStrain > 0 && avgStrain < 6) trainingLoadIndex -= 0.1;
 
   const { data: readinessDays, error: readinessError } = await supa
     .from("readiness_scores")
@@ -407,32 +421,77 @@ async function processUser(supa: SupabaseClient, p: Profile, force: boolean): Pr
 
   const adjustment_kcal = new_target_calories - (old_target_calories || blended_tdee);
 
-  await supa.from("nutrition_weekly_reviews").insert({
-    user_id: p.user_id,
-    week_start_date,
-    week_end_date,
-    weigh_in_count,
-    days_logged,
-    adherence_pct,
-    eligible: days_logged >= 3,
-    confidence_tier: confidenceTier,
-    abnormal_week: abnormal,
-    old_target_calories: old_target_calories || null,
-    old_observed_tdee,
-    new_observed_tdee,
-    blended_tdee,
-    raw_target_calories,
-    new_target_calories,
-    adjustment_kcal,
-    training_load_index: trainingLoadIndex,
-    weekly_sets_avg: weeklySetAvg,
-    avg_strain_value: avgStrain,
-    decision,
-    flag_reason: flagReason,
-    applied_target_id: null,
-    applied_at: null,
-    timezone_used: tz,
-  });
+  const review_id = crypto.randomUUID();
+  const macros = recomputeMacros(new_target_calories, current_weight_kg, goal);
+  const shouldApply = decision !== "hold" && confidenceTier !== "low" && !abnormal;
+
+  // Fallback / hold-path: direct insert (matches prior behaviour).
+  const directInsertReview = async (overrideFlag?: string | null) => {
+    await supa.from("nutrition_weekly_reviews").insert({
+      user_id: p.user_id,
+      week_start_date,
+      week_end_date,
+      weigh_in_count,
+      days_logged,
+      adherence_pct,
+      eligible: days_logged >= 3,
+      confidence_tier: confidenceTier,
+      abnormal_week: abnormal,
+      old_target_calories: old_target_calories || null,
+      old_observed_tdee,
+      new_observed_tdee,
+      blended_tdee,
+      raw_target_calories,
+      new_target_calories,
+      adjustment_kcal,
+      training_load_index: trainingLoadIndex,
+      weekly_sets_avg: weeklySetAvg,
+      avg_strain_value: avgStrain,
+      decision,
+      flag_reason: overrideFlag ?? flagReason,
+      applied_target_id: null,
+      applied_at: null,
+      timezone_used: tz,
+    });
+  };
+
+  if (shouldApply) {
+    const { error: rpcErr } = await supa.rpc("apply_weekly_macro_review", {
+      p_review_id: review_id,
+      p_user_id: p.user_id,
+      p_week_start_date: week_start_date,
+      p_week_end_date: week_end_date,
+      p_effective_start_date: new_effective_start_date,
+      p_weigh_in_count: weigh_in_count,
+      p_days_logged: days_logged,
+      p_adherence_pct: adherence_pct,
+      p_eligible: days_logged >= 3,
+      p_confidence_tier: confidenceTier,
+      p_abnormal_week: abnormal,
+      p_old_target_calories: old_target_calories,
+      p_old_observed_tdee: old_observed_tdee ?? 0,
+      p_new_observed_tdee: new_observed_tdee ?? 0,
+      p_blended_tdee: blended_tdee,
+      p_raw_target_calories: raw_target_calories,
+      p_new_target_calories: new_target_calories,
+      p_adjustment_kcal: adjustment_kcal,
+      p_decision: decision,
+      p_flag_reason: flagReason ?? "",
+      p_timezone_used: tz,
+      p_bmr: old_bmr,
+      p_target_protein_g: macros.target_protein_g,
+      p_target_carbs_g: macros.target_carbs_g,
+      p_target_fat_g: macros.target_fat_g,
+    });
+    if (rpcErr) {
+      const fallbackFlag = `apply_rpc_failed: ${rpcErr.message}`;
+      try { await directInsertReview(fallbackFlag); } catch (_e) { /* swallow — never throw */ }
+      return { user_id: p.user_id, status: "hold", decision, flag_reason: fallbackFlag };
+    }
+    return { user_id: p.user_id, status: "adjusted", decision, flag_reason: flagReason };
+  }
+
+  await directInsertReview();
 
   return {
     user_id: p.user_id,
