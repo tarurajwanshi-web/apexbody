@@ -316,7 +316,28 @@ export async function calculateMacrosForUser(
     if (days_logged < 3) flagReason = "insufficient_data";
   }
 
-  const abnormal = p.user_marked_abnormal_week_start === week_start_date;
+  // ── Abnormal week detection ───────────────────────────────────────────────
+  // Case 1: user explicitly marked this week abnormal in the app.
+  // Case 2 (floor-aware): user is at/near calorie floor AND eating <70% of
+  //   that minimal target. Prevents engine cutting further on a user who is
+  //   under-logging or already in a dangerous deficit. Without this guard,
+  //   a 55% adherence user at the 1200 kcal floor receives a −270 kcal
+  //   adjustment — derived from poor logging, not genuine TDEE signal.
+  //   Normal threshold: 45% adherence triggers hold.
+  //   Floor-aware threshold: 70% adherence when already at calorie floor.
+  const sex_floor_kcal = p.biological_sex === "male" ? 1500
+                       : p.biological_sex === "female" ? 1200
+                       : 1350;
+  const atCalorieFloor = old_target_calories <= sex_floor_kcal * 1.05;
+  const abnormalThreshold = atCalorieFloor ? 0.70 : 0.45;
+  const abnormal =
+    p.user_marked_abnormal_week_start === week_start_date ||
+    (adherence_pct / 100) < abnormalThreshold;
+  if (abnormal && p.user_marked_abnormal_week_start !== week_start_date) {
+    flagReason = atCalorieFloor
+      ? "floor_aware_low_adherence"
+      : "low_adherence";
+  }
   const goal = p.goal || "recomposition";
   const weightTrendPerWeek = trend_delta_kg;
   const raw_target_calories = blended_tdee * goalMultiplier(goal) * trainingLoadIndex;
