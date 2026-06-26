@@ -39,6 +39,7 @@ import {
   type HydrationEvent,
 } from "@/lib/shield.functions";
 import { debugReadMealById, debugListMealsForDate } from "@/lib/shield.functions";
+import { triggerWeeklyMacroReview } from "@/lib/nutrition.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { getBrowserTimezone } from "@/lib/dates";
 
@@ -106,6 +107,10 @@ function Nutrition() {
   const deleteWater = useServerFn(deleteHydrationEvent);
 
   const restore = useServerFn(restoreMeal);
+  const triggerReview = useServerFn(triggerWeeklyMacroReview);
+  const mondayTriggerRef = useRef<string | null>(null);
+
+
 
   const handleDeleteWater = async (id: string) => {
     setConfirmDeleteWaterId(null);
@@ -178,6 +183,35 @@ function Nutrition() {
 
 
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [selectedDate]);
+
+  // Monday-morning trigger: when the user opens Fuel on Monday in their local
+  // timezone, fire the weekly macro review immediately instead of waiting for
+  // the Mon 13:00 UTC cron safety net. Idempotent on the server via a UNIQUE
+  // (user_id, week_start_date) constraint. Guarded per (tz, date) so React
+  // StrictMode's double-invoke can't double-fire it.
+  useEffect(() => {
+    const userLocalDateISO = getLocalDateISO(userTz);
+    const dayOfWeek = new Date(`${userLocalDateISO}T00:00:00Z`).getUTCDay();
+    if (dayOfWeek !== 1) return; // not Monday
+
+    const guardKey = `${userTz}:${userLocalDateISO}`;
+    if (mondayTriggerRef.current === guardKey) return;
+    mondayTriggerRef.current = guardKey;
+
+    console.log("[nutrition-trigger] Monday detected, triggering review");
+    triggerReview()
+      .then((result) => {
+        console.log("[nutrition-trigger] result", result);
+        if (result.status === "computed" || result.status === "already_computed") {
+          reloadNutritionSnapshot();
+        }
+      })
+      .catch((e) => {
+        console.error("[nutrition-trigger] failed", e);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userTz]);
+
   useAutoRefreshOnVisible(reload, lastUpdatedAt);
 
   // ---- Diagnostics panel (gated by ?diag=1 or DEV) ----
