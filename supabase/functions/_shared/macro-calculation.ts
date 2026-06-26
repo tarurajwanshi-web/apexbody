@@ -402,6 +402,53 @@ export async function calculateMacrosForUser(
     new_target_calories = old_target_calories;
   }
 
+  // ── Muscle gain under-eat guard ──────────────────────────────────────────
+  // Compute raw adjustment first so the guard can inspect its direction.
+  // If a muscle gain user is eating below 75% of their target, the engine
+  // would read their low intake as a lower implied TDEE and reduce calories.
+  // This is the wrong direction — they need to eat MORE, not less.
+  // Override to hold and flag so UI can surface an adherence coaching note.
+  const adjustment_kcal_raw = Math.ceil(raw_target_calories) - old_target_calories;
+  if (
+    goal === "muscle_gain" &&
+    decision === "reduce" &&
+    adherence_pct < 75 &&
+    adjustment_kcal_raw < 0
+  ) {
+    decision = "hold";
+    flagReason = "low_adherence_muscle_gain";
+    new_target_calories = old_target_calories;
+  }
+
+  // ── Refeed candidate flag ─────────────────────────────────────────────────
+  // Floor trigger: 4+ consecutive deficit weeks AND already at calorie floor.
+  // Stall is implied — cannot cut further. Sets flag_reason for Engine 4
+  // coaching card. Does NOT change new_target_calories. Refeed logic = Phase 2.
+  const { data: priorDeficitRows } = await supa
+    .from("nutrition_weekly_reviews")
+    .select("id, adjustment_kcal")
+    .eq("user_id", user_id)
+    .lt("week_start_date", week_start_date)
+    .order("week_start_date", { ascending: false })
+    .limit(8);
+
+  let consecutiveDeficitWeeks = 0;
+  for (const row of priorDeficitRows ?? []) {
+    if (Number(row.adjustment_kcal ?? 0) < 0) consecutiveDeficitWeeks++;
+    else break;
+  }
+
+  const refeedCandidate =
+    goal === "fat_loss" && (
+      (consecutiveDeficitWeeks >= 8 && atCalorieFloor) ||
+      (consecutiveDeficitWeeks >= 4 && atCalorieFloor &&
+        old_target_calories <= sex_floor_kcal * 1.02)
+    );
+
+  if (refeedCandidate && !flagReason) {
+    flagReason = "refeed_candidate";
+  }
+
   const adjustment_kcal = new_target_calories - (old_target_calories || blended_tdee);
   const review_id = crypto.randomUUID();
   const macros = recomputeMacros(new_target_calories, current_weight_kg, goal);
