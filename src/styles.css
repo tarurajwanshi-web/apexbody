@@ -157,12 +157,12 @@
   50% { transform: scale(0.97); opacity: 0.92; }
 }
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 20px rgba(125, 249, 255, 0.22); }
-  50% { box-shadow: 0 0 40px rgba(125, 249, 255, 0.5); }
+  0%, 100% { box-shadow: 0 0 20px rgba(139, 127, 247, 0.22); }
+  50% { box-shadow: 0 0 40px rgba(139, 127, 247, 0.5); }
 }
 @keyframes pulse-ring {
-  0%, 100% { filter: drop-shadow(0 0 4px rgba(125, 249, 255, 0.22)); }
-  50% { filter: drop-shadow(0 0 12px rgba(125, 249, 255, 0.5)); }
+  0%, 100% { filter: drop-shadow(0 0 4px rgba(139, 127, 247, 0.22)); }
+  50% { filter: drop-shadow(0 0 12px rgba(139, 127, 247, 0.5)); }
 }
 .animate-pulse-ring { animation: pulse-ring 3s ease-in-out infinite; }
 @keyframes shimmer {
@@ -188,8 +188,8 @@
   to { transform: rotate(360deg); }
 }
 @keyframes ambient-pulse {
-  0%, 100% { opacity: 0.92; filter: drop-shadow(0 0 16px rgba(0, 229, 160, 0.28)); }
-  50% { opacity: 1; filter: drop-shadow(0 0 38px rgba(125, 249, 255, 0.55)); }
+  0%, 100% { opacity: 0.92; filter: drop-shadow(0 0 16px rgba(95, 227, 196, 0.28)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 38px rgba(139, 127, 247, 0.55)); }
 }
 @keyframes ambient-arc-breathe {
   0%, 100% { stroke-dasharray: 330 659; }
