@@ -1,22 +1,26 @@
-## Context
+## Notes on the spec
 
-The file already imports `calculateMacrosForUser` and loops sequentially — the structural refactor you described is largely in place. Before overwriting, three deltas in your spec are worth confirming, because each one is a behavior change, not a structural one:
+Two small things I'll adjust to keep the endpoint correct:
 
-1. **Profile filter.** Spec uses `.eq("deleted_at", null)`. PostgREST requires `.is("deleted_at", null)` for NULL comparisons (`.eq` with `null` matches zero rows). The current file uses `.not("profile_completed_at", "is", null)` to skip onboarding-incomplete users. Proposal: keep the `profile_completed_at` filter (works today, matches intent of "active profiles").
-2. **`experience_level`.** Spec adds it to the SELECT but not to the `Profile` type, and the shared `Profile` type in `_shared/macro-calculation.ts` doesn't include it either. Proposal: drop it from the SELECT unless you want me to also extend the shared `Profile` type.
-3. **Drop `force_recalculate` + single-user `user_id` body params?** Current shell accepts both (handy for manual re-runs and the "skipped" status for already-reviewed weeks). Spec removes them. Proposal: keep them — they don't affect the cron path and the trigger-weekly-macro-review function covers the single-user case but this is useful for ops.
+1. **No `requireJWT` helper exists.** `_shared/authorize.ts` exports `authorizeCaller(req, supa)` which already handles the JWT path and returns `{ ok: true, userId }`. I'll use it directly (no internal-secret accepted, since we want JWT-only) by treating a missing/internal-secret request as 401. Cleanest: call `authorizeCaller` and reject if `userId` is null (means internal-secret path was used).
+2. **"Is it Monday?" check in the spec is a no-op.** `userLocalMonday()` always returns the Monday date for the user's current week, so `dayOfWeek` derived from it is always 1. To actually gate on Monday I'll compute today's day-of-week in the user's tz via `Intl.DateTimeFormat({ timeZone: tz, weekday: 'short' })` and compare. Returning `not_monday` only when it really isn't Monday.
+3. **HTTP 204 with a body is invalid.** I'll return `200 { status: "not_monday" }` instead of 204-with-body.
+4. **`experience_level` is in the spec SELECT** but not in the shared `Profile` type. I'll omit it (consistent with the calculate-macros-weekly refactor we just shipped).
 
 ## Plan
 
-Rewrite `supabase/functions/calculate-macros-weekly/index.ts` to match your spec's shape (typed `ProcessResult`, explicit `adjusted/held/errors` summary, `timestamp`, `total_users`, console.error per-user, console.log summary), while:
+Create `supabase/functions/trigger-weekly-macro-review/index.ts`:
 
-- Using `.not("profile_completed_at", "is", null)` for the profile filter (fixes the `.eq(..., null)` bug).
-- Omitting `experience_level` from the SELECT (shared `Profile` type unchanged).
-- Preserving optional `{ user_id, force_recalculate }` body params and the `"skipped"` status for `review_exists:` errors.
-- Reusing existing `requireInternalSecret`, `corsAllowHeaders`, and the shared `calculateMacrosForUser` (no changes to `_shared/*`).
+- CORS preflight handler.
+- Service-role `createClient` (needed so `calculateMacrosForUser` can write via the RPC).
+- Auth: call `authorizeCaller(req, supa)`; require `userId` (reject internal-secret-only callers with 401).
+- Fetch profile by `user_id` with the same SELECT as the cron shell.
+- Compute user-local day-of-week via `Intl.DateTimeFormat`. If not Monday → return `200 { status: "not_monday" }`.
+- Compute `userLocalMonday(tz)` and check `nutrition_weekly_reviews` for `(user_id, week_start_date)`. If found → return `200 { status: "already_computed", review_id, decision, applied_target_id }`.
+- Otherwise call `calculateMacrosForUser(user_id, profile, supa)`; on success return `200 { status: "computed", user_id, decision, applied_target_id }`.
+- Catch `review_exists:` thrown by the shared engine and convert to the `already_computed` shape (race condition safety).
+- Other errors → `500 { error }` with `console.error`.
 
-No other files touched. Cron schedule unchanged.
+No DB migrations, no cron registration, no client wiring (that's a separate task). Only this one new file.
 
-## Confirm
-
-Reply "go" to proceed, or tell me to override any of the three deltas above (e.g. "use spec exactly, drop force/user_id, drop experience_level, fix `.is(null)`").
+Confirm and I'll build.
