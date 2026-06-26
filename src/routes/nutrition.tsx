@@ -107,6 +107,10 @@ function Nutrition() {
   const deleteWater = useServerFn(deleteHydrationEvent);
 
   const restore = useServerFn(restoreMeal);
+  const triggerReview = useServerFn(triggerWeeklyMacroReview);
+  const mondayTriggerRef = useRef<string | null>(null);
+
+
 
   const handleDeleteWater = async (id: string) => {
     setConfirmDeleteWaterId(null);
