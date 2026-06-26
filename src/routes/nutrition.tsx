@@ -39,6 +39,7 @@ import {
   type HydrationEvent,
 } from "@/lib/shield.functions";
 import { debugReadMealById, debugListMealsForDate } from "@/lib/shield.functions";
+import { triggerWeeklyMacroReview } from "@/lib/nutrition.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { getBrowserTimezone } from "@/lib/dates";
 
