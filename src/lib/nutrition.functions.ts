@@ -1,48 +1,63 @@
-// Nutrition server-fn wrappers. Thin RPC adapters for client code.
+// Nutrition client-side helpers.
 
-import { createServerFn } from "@tanstack/react-start";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { supabase } from "@/integrations/supabase/client";
 
-export type TriggerWeeklyMacroReviewResult =
-  | {
-      status: "computed";
-      user_id: string;
-      decision?: string;
-      applied_target_id?: string | null;
+export async function triggerWeeklyMacroReview(): Promise<{
+  status: "computed" | "already_computed" | "not_monday";
+  review_id?: string;
+  decision?: string;
+  applied_target_id?: string;
+  error?: string;
+}> {
+  try {
+    // Get auth session
+    const { data: session } = await supabase.auth.getSession();
+    const token = session?.session?.access_token;
+
+    if (!token) {
+      throw new Error("Not authenticated");
     }
-  | {
-      status: "already_computed";
-      review_id: string;
-      decision?: string;
-      applied_target_id?: string | null;
-    }
-  | { status: "not_monday" }
-  | { status: "error"; error: string };
 
-/**
- * Invoke the JWT-gated `trigger-weekly-macro-review` edge function as the
- * signed-in user. The middleware-bound `supabase` client carries the user's
- * bearer token, so `functions.invoke` forwards it automatically.
- */
-export const triggerWeeklyMacroReview = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<TriggerWeeklyMacroReviewResult> => {
-    try {
-      const { data, error } = await context.supabase.functions.invoke(
-        "trigger-weekly-macro-review",
-        { body: {} },
+    // Get Supabase URL from environment
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    if (!supabaseUrl) {
+      throw new Error("Supabase URL not configured");
+    }
+
+    // Call the edge function
+    const response = await fetch(
+      `${supabaseUrl}/functions/v1/trigger-weekly-macro-review`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({}),
+      },
+    );
+
+    // Handle 204 No Content (not Monday in user's timezone)
+    if (response.status === 204) {
+      return { status: "not_monday" };
+    }
+
+    // Parse JSON response
+    const data = await response.json();
+
+    // Check for errors
+    if (!response.ok) {
+      console.error(
+        "[triggerWeeklyMacroReview] HTTP error",
+        response.status,
+        data,
       );
-      if (error) {
-        return { status: "error", error: error.message ?? String(error) };
-      }
-      if (data && typeof data === "object" && "status" in data) {
-        return data as TriggerWeeklyMacroReviewResult;
-      }
-      return { status: "error", error: "unexpected response shape" };
-    } catch (e) {
-      return {
-        status: "error",
-        error: e instanceof Error ? e.message : String(e),
-      };
+      throw new Error(data.error || "Failed to trigger macro review");
     }
-  });
+
+    return data;
+  } catch (e) {
+    console.error("[triggerWeeklyMacroReview] exception", e);
+    throw e;
+  }
+}
