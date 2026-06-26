@@ -1,26 +1,22 @@
-## Notes on the spec
+## Findings
 
-Two small things I'll adjust to keep the endpoint correct:
-
-1. **No `requireJWT` helper exists.** `_shared/authorize.ts` exports `authorizeCaller(req, supa)` which already handles the JWT path and returns `{ ok: true, userId }`. I'll use it directly (no internal-secret accepted, since we want JWT-only) by treating a missing/internal-secret request as 401. Cleanest: call `authorizeCaller` and reject if `userId` is null (means internal-secret path was used).
-2. **"Is it Monday?" check in the spec is a no-op.** `userLocalMonday()` always returns the Monday date for the user's current week, so `dayOfWeek` derived from it is always 1. To actually gate on Monday I'll compute today's day-of-week in the user's tz via `Intl.DateTimeFormat({ timeZone: tz, weekday: 'short' })` and compare. Returning `not_monday` only when it really isn't Monday.
-3. **HTTP 204 with a body is invalid.** I'll return `200 { status: "not_monday" }` instead of 204-with-body.
-4. **`experience_level` is in the spec SELECT** but not in the shared `Profile` type. I'll omit it (consistent with the calculate-macros-weekly refactor we just shipped).
+- `src/lib/nutrition.functions.ts` does not exist; the spec imports from there. Existing nutrition server functions live in `src/lib/macros.functions.ts`.
+- No `triggerWeeklyMacroReview` server fn exists yet — needs to be created.
+- The edge function `trigger-weekly-macro-review` is JWT-gated. Easiest path is a thin `createServerFn` wrapper that uses `requireSupabaseAuth` and calls the edge function via the authenticated `context.supabase.functions.invoke("trigger-weekly-macro-review")` — that forwards the user's bearer.
+- `Nutrition()` already imports `useUserTimezone` and `getLocalDateISO`, has `reloadNutritionSnapshot`, and uses `useServerFn` for other calls.
+- The spec's effect body calls `useUserTimezone()` inside `useEffect` — that's an invalid hook call. The component already holds `userTz` in scope; the effect should reference it directly.
 
 ## Plan
 
-Create `supabase/functions/trigger-weekly-macro-review/index.ts`:
+1. **New file `src/lib/nutrition.functions.ts`**: export `triggerWeeklyMacroReview` as a `createServerFn({ method: "POST" }).middleware([requireSupabaseAuth]).handler(...)` that calls `context.supabase.functions.invoke("trigger-weekly-macro-review", { body: {} })` and returns a typed `{ status: "computed" | "already_computed" | "not_monday", decision?, applied_target_id?, review_id?, user_id? }`. Errors are returned as `{ status: "error", error }` so the client effect's catch is rarely needed but still wired.
 
-- CORS preflight handler.
-- Service-role `createClient` (needed so `calculateMacrosForUser` can write via the RPC).
-- Auth: call `authorizeCaller(req, supa)`; require `userId` (reject internal-secret-only callers with 401).
-- Fetch profile by `user_id` with the same SELECT as the cron shell.
-- Compute user-local day-of-week via `Intl.DateTimeFormat`. If not Monday → return `200 { status: "not_monday" }`.
-- Compute `userLocalMonday(tz)` and check `nutrition_weekly_reviews` for `(user_id, week_start_date)`. If found → return `200 { status: "already_computed", review_id, decision, applied_target_id }`.
-- Otherwise call `calculateMacrosForUser(user_id, profile, supa)`; on success return `200 { status: "computed", user_id, decision, applied_target_id }`.
-- Catch `review_exists:` thrown by the shared engine and convert to the `already_computed` shape (race condition safety).
-- Other errors → `500 { error }` with `console.error`.
+2. **`src/routes/nutrition.tsx`**: 
+   - Import `triggerWeeklyMacroReview` from `@/lib/nutrition.functions`.
+   - Inside `Nutrition()`, after the existing `useServerFn` setup, add `const triggerReview = useServerFn(triggerWeeklyMacroReview);`.
+   - Add a `useEffect(..., [userTz])` placed after state init that:
+     - Computes today's day-of-week from `getLocalDateISO(userTz)` (matches the spec's UTC-parse trick — for a YYYY-MM-DD anchored to `T00:00:00Z`, `getUTCDay()` returns the correct weekday).
+     - Returns early if not Monday (day 1).
+     - Calls `triggerReview()`; on `computed`/`already_computed`, calls `reloadNutritionSnapshot()`. Logs errors, doesn't throw.
+   - Uses a `useRef` guard so it doesn't double-fire under React StrictMode dev double-invoke.
 
-No DB migrations, no cron registration, no client wiring (that's a separate task). Only this one new file.
-
-Confirm and I'll build.
+No edge function, DB, or other route changes. Confirm and I'll build.
