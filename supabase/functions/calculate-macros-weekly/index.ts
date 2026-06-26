@@ -1,14 +1,14 @@
 // calculate-macros-weekly — Adaptive Macro Engine (Module 5) — HTTP shell.
 //
-// Runs once per week (Mon 13:00 UTC via pg_cron). For each profile, defers
-// all calculation work to the shared `calculateMacrosForUser` engine so the
-// same logic is reusable from the single-user HTTP trigger.
+// Runs once per week (Mon 13:00 UTC via pg_cron) as a safety net. For each
+// active profile, defers all calculation work to the shared
+// `calculateMacrosForUser` engine so the same logic is reusable from the
+// single-user HTTP trigger (`trigger-weekly-macro-review`).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { requireInternalSecret, corsAllowHeaders } from "../_shared/authorize.ts";
 import {
   calculateMacrosForUser,
-  type CalculationResult,
   type Profile,
 } from "../_shared/macro-calculation.ts";
 
@@ -18,6 +18,13 @@ const cors = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+type ProcessResult = {
+  user_id: string;
+  status: "hold" | "adjusted" | "skipped" | "error";
+  decision?: string;
+  error?: string;
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
@@ -25,6 +32,7 @@ Deno.serve(async (req) => {
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supa = createClient(url, key);
 
+  // Optional body params for manual ops re-runs (cron sends empty body).
   let body: { user_id?: string; force_recalculate?: boolean } = {};
   try { body = await req.json(); } catch { /* empty body OK for cron */ }
   const force = body.force_recalculate === true;
@@ -33,53 +41,74 @@ Deno.serve(async (req) => {
   const authz = await requireInternalSecret(req, supa);
   if (!authz.ok) {
     return new Response(JSON.stringify({ error: authz.error }), {
-      status: authz.status, headers: { ...cors, "Content-Type": "application/json" },
+      status: authz.status,
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
-  let profiles: Profile[];
+  // Fetch active profiles (onboarding-complete).
+  const select =
+    "user_id, timezone, goal, biological_sex, age, measurement_height_cm, measurement_weight_kg, body_data_type, dexa_lean_mass_kg, user_marked_abnormal_week_start";
+
+  let profiles: Profile[] = [];
   try {
-    const select = "user_id, timezone, goal, biological_sex, age, measurement_height_cm, measurement_weight_kg, body_data_type, dexa_lean_mass_kg, user_marked_abnormal_week_start";
-    if (body.user_id) {
-      const { data, error } = await supa.from("profiles").select(select).eq("user_id", body.user_id);
-      if (error) throw error;
-      profiles = (data ?? []) as Profile[];
-    } else {
-      const { data, error } = await supa.from("profiles").select(select).not("profile_completed_at", "is", null);
-      if (error) throw error;
-      profiles = (data ?? []) as Profile[];
-    }
+    const query = body.user_id
+      ? supa.from("profiles").select(select).eq("user_id", body.user_id)
+      : supa.from("profiles").select(select).not("profile_completed_at", "is", null);
+    const { data, error } = await query;
+    if (error) throw error;
+    profiles = (data ?? []) as Profile[];
   } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[calculate-macros-weekly] profile fetch failed", msg);
     return new Response(
-      JSON.stringify({ ok: false, error: String(e instanceof Error ? e.message : e) }),
+      JSON.stringify({ error: "Failed to fetch profiles", details: msg }),
       { status: 500, headers: { ...cors, "Content-Type": "application/json" } },
     );
   }
 
-  const results: CalculationResult[] = [];
-  for (const p of profiles) {
+  // Process each user sequentially to avoid overwhelming the database.
+  const results: ProcessResult[] = [];
+  for (const profile of profiles) {
     try {
-      results.push(await calculateMacrosForUser(p.user_id, p, supa, new Date(), { force }));
+      const result = await calculateMacrosForUser(
+        profile.user_id,
+        profile,
+        supa,
+        new Date(),
+        { force },
+      );
+      results.push({
+        user_id: profile.user_id,
+        status: result.status,
+        decision: result.decision,
+      });
     } catch (e) {
-      const msg = String(e instanceof Error ? e.message : e);
+      const msg = e instanceof Error ? e.message : String(e);
       if (msg.startsWith("review_exists:")) {
-        results.push({ user_id: p.user_id, status: "skipped" });
+        results.push({ user_id: profile.user_id, status: "skipped" });
       } else {
-        results.push({ user_id: p.user_id, status: "error", error: msg });
+        console.error(`[calculate-macros-weekly] user ${profile.user_id} failed`, msg);
+        results.push({ user_id: profile.user_id, status: "error", error: msg });
       }
     }
   }
 
-  return new Response(
-    JSON.stringify({
-      ok: true,
-      processed: results.length,
-      summary: results.reduce<Record<string, number>>((acc, r) => {
-        acc[r.status] = (acc[r.status] ?? 0) + 1;
-        return acc;
-      }, {}),
-      results,
-    }),
-    { headers: { ...cors, "Content-Type": "application/json" } },
-  );
+  const summary = {
+    timestamp: new Date().toISOString(),
+    total_users: profiles.length,
+    processed: results.length,
+    adjusted: results.filter((r) => r.status === "adjusted").length,
+    held: results.filter((r) => r.status === "hold").length,
+    skipped: results.filter((r) => r.status === "skipped").length,
+    errors: results.filter((r) => r.status === "error").length,
+    results,
+  };
+
+  console.log("[calculate-macros-weekly] summary", summary);
+
+  return new Response(JSON.stringify(summary), {
+    status: 200,
+    headers: { ...cors, "Content-Type": "application/json" },
+  });
 });
