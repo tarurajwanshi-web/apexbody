@@ -249,15 +249,25 @@ async function processUser(supa: SupabaseClient, p: Profile, force: boolean): Pr
   // ── Training load metrics ────────────────────────────────────────────────
   const { data: workoutSets, error: setError } = await supa
     .from("workout_set_logs")
-    .select("strain_value")
+    .select("id")
     .eq("user_id", p.user_id)
     .gte("entry_date", week_start_date)
     .lt("entry_date", window_end_exclusive);
   if (setError) console.error("[calculate-macros-weekly] workout sets fetch failed", setError);
 
   const totalSets = workoutSets?.length ?? 0;
-  const avgStrain = workoutSets && workoutSets.length > 0
-    ? workoutSets.reduce((sum, s) => sum + Number(s.strain_value ?? 0), 0) / workoutSets.length
+
+  // Strain lives on shield_training_logs, not workout_set_logs.
+  const { data: trainingLogs, error: trainErr } = await supa
+    .from("shield_training_logs")
+    .select("strain_value")
+    .eq("user_id", p.user_id)
+    .gte("entry_date", week_start_date)
+    .lt("entry_date", window_end_exclusive);
+  if (trainErr) console.error("[calculate-macros-weekly] training logs fetch failed", trainErr);
+
+  const avgStrain = trainingLogs && trainingLogs.length > 0
+    ? trainingLogs.reduce((sum, t) => sum + Number(t.strain_value ?? 0), 0) / trainingLogs.length
     : 0;
 
   let trainingLoadIndex = 1.0;
@@ -265,6 +275,10 @@ async function processUser(supa: SupabaseClient, p: Profile, force: boolean): Pr
   else if (totalSets < 20) trainingLoadIndex = 1.0;
   else if (totalSets < 30) trainingLoadIndex = 1.1;
   else trainingLoadIndex = 1.15;
+
+  // Nudge by observed strain.
+  if (avgStrain >= 14) trainingLoadIndex += 0.1;
+  else if (avgStrain > 0 && avgStrain < 6) trainingLoadIndex -= 0.1;
 
   const { data: readinessDays, error: readinessError } = await supa
     .from("readiness_scores")
