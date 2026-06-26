@@ -384,6 +384,7 @@ export type Database = {
           avg_strain_value: number | null
           blended_tdee: number | null
           confidence_tier: string | null
+          consecutive_deficit_weeks: number | null
           created_at: string
           days_logged: number
           decision: string
@@ -402,6 +403,8 @@ export type Database = {
           week_start_date: string
           weekly_sets_avg: number | null
           weigh_in_count: number
+          weight_stall_detected: boolean | null
+          weight_trend_kg_per_week: number | null
         }
         Insert: {
           abnormal_week?: boolean
@@ -413,6 +416,7 @@ export type Database = {
           avg_strain_value?: number | null
           blended_tdee?: number | null
           confidence_tier?: string | null
+          consecutive_deficit_weeks?: number | null
           created_at?: string
           days_logged?: number
           decision: string
@@ -431,6 +435,8 @@ export type Database = {
           week_start_date: string
           weekly_sets_avg?: number | null
           weigh_in_count?: number
+          weight_stall_detected?: boolean | null
+          weight_trend_kg_per_week?: number | null
         }
         Update: {
           abnormal_week?: boolean
@@ -442,6 +448,7 @@ export type Database = {
           avg_strain_value?: number | null
           blended_tdee?: number | null
           confidence_tier?: string | null
+          consecutive_deficit_weeks?: number | null
           created_at?: string
           days_logged?: number
           decision?: string
@@ -460,6 +467,8 @@ export type Database = {
           week_start_date?: string
           weekly_sets_avg?: number | null
           weigh_in_count?: number
+          weight_stall_detected?: boolean | null
+          weight_trend_kg_per_week?: number | null
         }
         Relationships: [
           {
