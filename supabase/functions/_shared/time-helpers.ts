@@ -1,0 +1,43 @@
+// Shared timezone / date helpers for weekly macro engine and friends.
+
+/** Compute the user-local Monday (YYYY-MM-DD) for "now" in IANA tz. */
+export function userLocalMonday(tz: string, now: Date = new Date()): string {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric", month: "2-digit", day: "2-digit",
+  });
+  const parts = fmt.formatToParts(now);
+  const get = (t: string) => parts.find((p) => p.type === t)!.value;
+  const localDateStr = `${get("year")}-${get("month")}-${get("day")}`;
+  const d = new Date(`${localDateStr}T00:00:00Z`);
+  const dayIdx = (d.getUTCDay() + 6) % 7; // Mon→0 .. Sun→6
+  d.setUTCDate(d.getUTCDate() - dayIdx);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Convert a UTC timestamp ISO string to the user-local YYYY-MM-DD. */
+export function tsToLocalDate(tsIso: string, tz: string): string {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  });
+  const parts = fmt.formatToParts(new Date(tsIso));
+  const get = (t: string) => parts.find((p) => p.type === t)!.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+/** Add N days to a YYYY-MM-DD date string; returns YYYY-MM-DD. */
+export function addDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** ISO 8601 week number (1–53). */
+export function getISOWeek(date: Date): number {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNum = (d.getUTCDay() + 6) % 7; // Mon=0
+  d.setUTCDate(d.getUTCDate() - dayNum + 3); // nearest Thursday
+  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const diff = (d.getTime() - firstThursday.getTime()) / 86400000;
+  return 1 + Math.round((diff - ((firstThursday.getUTCDay() + 6) % 7) + 3) / 7);
+}
