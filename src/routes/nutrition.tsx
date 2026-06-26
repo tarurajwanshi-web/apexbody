@@ -412,7 +412,7 @@ function Nutrition() {
                 value={Math.min(100, Math.round((cCal / (tCal as number)) * 100))}
                 size={44}
                 thickness={4}
-                color={cCal > (tCal as number) * 1.1 ? "#FF5A5F" : "#7DF9FF"}
+                color={cCal > (tCal as number) * 1.1 ? "#FF5A5F" : "#8B7FF7"}
                 suffix="%"
               />
             ) : null

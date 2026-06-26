@@ -54,26 +54,24 @@
 }
 
 :root {
-  /* Whoop Obsidian — near-black canvas, electric accents */
-  --bg-0: #0A0A0A;
-  --bg-1: #0A0A0A;
-  --bg-2: #141416;
-  --bg-3: #1C1C1F;
+  /* Midnight Bevel — premium violet accent on deep midnight canvas */
+  --bg-0: #0A0E1A;
+  --bg-1: #0A0E1A;
+  --bg-2: #10162A;
+  --bg-3: #161B2E;
 
   --text-primary: #F5F5F7;
-  --text-secondary: #A1A1A6;
-  --text-tertiary: #6E6E73;
-  /* Repurposed: was purple; now signal-cyan (AI / interactive). Lint still
-     restricts text-text-accent in dashboard/nutrition to keep helper text neutral. */
-  --text-accent: #7DF9FF;
+  --text-secondary: #A8ADBD;
+  --text-tertiary: #5E6478;
+  --text-accent: #8B7FF7;
 
-  --ai-signal: #7DF9FF;
-  --ai-signal-glow: rgba(125, 249, 255, 0.28);
-  --success: #00E5A0;
-  --warning: #FFB627;
-  --danger: #FF5A5F;
-  --sleep-blue: #7DF9FF;
-  --hrv-teal: #00E5A0;
+  --ai-signal: #8B7FF7;
+  --ai-signal-glow: rgba(139, 127, 247, 0.28);
+  --success: #5FE3C4;
+  --warning: #F5B544;
+  --danger: #F2727A;
+  --sleep-blue: #8B7FF7;
+  --hrv-teal: #5FE3C4;
 
   --background: var(--bg-0);
   --foreground: var(--text-primary);
@@ -81,8 +79,8 @@
   --card-foreground: var(--text-primary);
   --popover: var(--bg-3);
   --popover-foreground: var(--text-primary);
-  --primary: #7DF9FF;
-  --primary-foreground: #0A0A0A;
+  --primary: #8B7FF7;
+  --primary-foreground: #0A0E1A;
   --secondary: var(--bg-3);
   --secondary-foreground: var(--text-primary);
   --muted: var(--bg-3);
@@ -93,8 +91,8 @@
   --destructive-foreground: #ffffff;
   --border: rgba(255, 255, 255, 0.06);
   --input: rgba(255, 255, 255, 0.08);
-  --ring: rgba(125, 249, 255, 0.45);
-  --radius: 14px;
+  --ring: rgba(139, 127, 247, 0.45);
+  --radius: 16px;
 }
 
 @layer base {
@@ -124,10 +122,10 @@
 @utility pr-safe { padding-right: env(safe-area-inset-right, 0px); }
 
 @utility gradient-brand {
-  background-image: linear-gradient(90deg, #00E5A0 0%, #7DF9FF 100%);
+  background-image: linear-gradient(135deg, #8B7FF7 0%, #5FE3C4 100%);
 }
 @utility gradient-text {
-  background-image: linear-gradient(135deg, #00E5A0 0%, #7DF9FF 100%);
+  background-image: linear-gradient(135deg, #8B7FF7 0%, #5FE3C4 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -159,12 +157,12 @@
   50% { transform: scale(0.97); opacity: 0.92; }
 }
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 20px rgba(125, 249, 255, 0.22); }
-  50% { box-shadow: 0 0 40px rgba(125, 249, 255, 0.5); }
+  0%, 100% { box-shadow: 0 0 20px rgba(139, 127, 247, 0.22); }
+  50% { box-shadow: 0 0 40px rgba(139, 127, 247, 0.5); }
 }
 @keyframes pulse-ring {
-  0%, 100% { filter: drop-shadow(0 0 4px rgba(125, 249, 255, 0.22)); }
-  50% { filter: drop-shadow(0 0 12px rgba(125, 249, 255, 0.5)); }
+  0%, 100% { filter: drop-shadow(0 0 4px rgba(139, 127, 247, 0.22)); }
+  50% { filter: drop-shadow(0 0 12px rgba(139, 127, 247, 0.5)); }
 }
 .animate-pulse-ring { animation: pulse-ring 3s ease-in-out infinite; }
 @keyframes shimmer {
@@ -190,8 +188,8 @@
   to { transform: rotate(360deg); }
 }
 @keyframes ambient-pulse {
-  0%, 100% { opacity: 0.92; filter: drop-shadow(0 0 16px rgba(0, 229, 160, 0.28)); }
-  50% { opacity: 1; filter: drop-shadow(0 0 38px rgba(125, 249, 255, 0.55)); }
+  0%, 100% { opacity: 0.92; filter: drop-shadow(0 0 16px rgba(95, 227, 196, 0.28)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 38px rgba(139, 127, 247, 0.55)); }
 }
 @keyframes ambient-arc-breathe {
   0%, 100% { stroke-dasharray: 330 659; }

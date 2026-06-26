@@ -219,7 +219,7 @@ function WorkoutsPage() {
               brief={brief}
               confidence={sessionStarted ? "high" : isRest ? "medium" : "high"}
               actions={actions}
-              right={pct != null ? <MetricRing value={pct} size={44} thickness={4} color="#00E5A0" suffix="%" /> : null}
+              right={pct != null ? <MetricRing value={pct} size={44} thickness={4} color="#5FE3C4" suffix="%" /> : null}
             />
           </div>
         );
