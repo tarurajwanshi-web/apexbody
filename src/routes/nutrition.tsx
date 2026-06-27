@@ -109,7 +109,8 @@ function Nutrition() {
   const [weeklySheetOpen, setWeeklySheetOpen] = useState(false);
   const [openMeal, setOpenMeal] = useState<TodayMeal | null>(null);
   const [weekly, setWeekly] = useState<WeeklyNutritionInsight | null>(null);
-  const [macroReview, setMacroReview] = useState<MacroAdjustmentReview | null>(null);
+  const [weeklyReview, setWeeklyReview] = useState<WeeklyReviewRow | null>(null);
+  const [applyingReview, setApplyingReview] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [ptrDelta, setPtrDelta] = useState(0);
