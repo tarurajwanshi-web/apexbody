@@ -1,37 +1,56 @@
 ## Scope
 
-Single file edit: `supabase/functions/generate-plan/index.ts`. No other files touched.
+Single file: `src/routes/workouts.tsx`. Only `SetRow` and the `Exercise` type definition change. All other components untouched.
 
-## Change 1 — extend profiles select (line 86)
+## Change 1 — Exercise type (line 19)
 
-Add `experience_level` to the select list so the column is available downstream.
+Extend to include optional `muscle_group`:
 
-## Change 2 — add live signal queries (insert after line 97, before `equipRule`)
+```ts
+type Exercise = { name: string; sets: number; reps: string; rest_seconds: number; cue?: string; muscle_group?: string };
+```
 
-Three sequential queries scoped to the last 7 days:
+## Change 2 — SetRow state (after line 566)
 
-1. **Readiness** — `readiness_scores.final_score` averaged across `score_date >= sevenDaysAgoISO`. Yields `avgReadiness` and `lowReadiness = avgReadiness < 45`.
-2. **Target calories** — current active `daily_macro_targets` row (`effective_end_date IS NULL`) via `maybeSingle()`.
-3. **Average intake** — `shield_nutrition_logs.estimated_calories` filtered to `deleted=false` and `calorie_estimate_status IN ('estimated','manual_edited')` for the same window. Yields `avgIntake` and `underFuelled = avgIntake < targetCalories * 0.80`.
+Add RIR state alongside existing reps/weight:
 
-All three signals degrade to `null` when there's no data; flags only fire when both sides exist.
+```ts
+const [rir, setRir] = useState<number | null>(existing?.rir ?? null);
+```
 
-## Change 3 — enrich prompt + Claude schema
+Note: `SetLog` type (line 23) doesn't include `rir` today. To keep `existing?.rir` type-safe with strict TS, also extend `SetLog` with `rir?: number | null` (in-scope: workouts.tsx only; the DB column already exists as `smallint`). This is a one-line additive change inside the same file — no other component reads it.
 
-- Add `const experience = p.experience_level ?? "intermediate";` next to the other `const` declarations.
-- Extend the system-prompt schema comment so each exercise object includes `"muscle_group": string`.
-- Add `experienceRule` (beginner / intermediate / advanced branches).
-- Add conditional `readinessNote` (low readiness → drop 1 set per exercise, add session_note).
-- Add conditional `fuelNote` (under-fuelled → stop 2–3 reps short of failure, add session_note).
-- Rewrite the `prompt` template to include experience, the new rule, the muscle_group instruction, the two alert notes, and request `muscle_group` in each exercise tuple.
+## Change 3 — save() row object (lines 576–584)
+
+Add two fields to the upsert payload:
+
+```ts
+rir: rir,
+muscle_group: exercise.muscle_group ?? null,
+```
+
+`rest_seconds_actual` and `target_*` columns stay null — out of scope.
+
+## Change 4 — RIR stepper JSX in SetRow (between kg span and Check button)
+
+Insert the stepper block exactly as specified (with `ml-auto` to push it right), then strip `ml-auto` from the Check button so it sits flush after the stepper. Stepper:
+- `+` button: null → 3, else `Math.min(4, v+1)`
+- value display: `—` when null, otherwise the number
+- `−` button: null → null, else `Math.max(0, v-1)`
+
+Stepper layout uses existing tokens (`bg-bg-3`, `text-text-secondary`, `text-[10px]`/`[13px]`/`[14px]`, `tabular-nums`, `active:scale-95`) — no new design tokens.
+
+## Verification after build
+
+- Type-check passes (Exercise + SetLog additions).
+- Upsert payload still matches `onConflict: "user_id,entry_date,exercise_name,set_number"` (unchanged keys).
+- `lint:ui` passes — only allowed text sizes used (10/13/14 px); no `rounded-3xl`; no forbidden font weights.
 
 ## Explicitly untouched
 
-`authorizeCaller`, `upcomingMonday`, `addDays`, `stripFences`, `callClaude` (including retry), CORS, error handling, weekly_plans upsert, the `generated_by` tag.
+ExerciseLogger, DayCard, PreWorkoutCheckSheet, maybeWriteTrainingSummary, BodyScanSection, RestDaySwapCard, VolumeNudge, CueSheet, LockBanner, READINESS_OPTIONS, and every other component in the file.
 
 ## Risk notes
 
-- `readiness_scores.score_date` and `shield_nutrition_logs.entry_date` are the canonical date columns confirmed in earlier work — using them directly.
-- `daily_macro_targets` uses the active-row pattern (`effective_end_date IS NULL`) consistent with `apply_weekly_macro_review`.
-- Service-role client bypasses RLS, so no auth shape changes are required for the new reads.
-- Schema-comment change is additive; existing consumers of `plan_data` that ignore unknown keys remain compatible. If any client strictly validates exercise shape, it will need `muscle_group` tolerated — flagging for awareness, no code change here.
+- `muscle_group` arrives only on plans generated after the `generate-plan` change shipped; older cached `weekly_plans.plan_data` rows store `null` → save() writes null, no breakage.
+- DB columns `rir` (smallint) and `muscle_group` (text) already exist — no migration needed.

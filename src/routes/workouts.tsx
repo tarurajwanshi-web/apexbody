@@ -16,11 +16,11 @@ export const Route = createFileRoute("/workouts")({
   component: WorkoutsPage,
 });
 
-type Exercise = { name: string; sets: number; reps: string; rest_seconds: number; cue?: string };
+type Exercise = { name: string; sets: number; reps: string; rest_seconds: number; cue?: string; muscle_group?: string };
 type DayPlan = { day: number; day_name: string; session_name: string | null; rest: boolean; exercises: Exercise[] };
 type Plan = { days: DayPlan[] };
 type WeeklyPlan = { id: string; week_start_date: string; unlock_date: string; is_locked: boolean; plan_data: Plan };
-type SetLog = { id?: string; exercise_name: string; set_number: number; reps_completed: number | null; weight_kg: number | null; completed: boolean; entry_date?: string };
+type SetLog = { id?: string; exercise_name: string; set_number: number; reps_completed: number | null; weight_kg: number | null; completed: boolean; entry_date?: string; rir?: number | null };
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -564,6 +564,7 @@ function SetRow({
 }) {
   const [reps, setReps] = useState<string>(existing?.reps_completed?.toString() ?? "");
   const [weight, setWeight] = useState<string>(existing?.weight_kg?.toString() ?? "");
+  const [rir, setRir] = useState<number | null>(existing?.rir ?? null);
   const [saving, setSaving] = useState(false);
   const done = existing?.completed ?? false;
 
@@ -581,6 +582,8 @@ function SetRow({
         reps_completed: reps === "" ? null : Number(reps),
         weight_kg: weight === "" ? null : Number(weight),
         completed,
+        rir: rir,
+        muscle_group: exercise.muscle_group ?? null,
       };
       const { error } = await supabase
         .from("workout_set_logs")
@@ -610,10 +613,26 @@ function SetRow({
         className="w-16 bg-transparent text-[14px] text-right focus:outline-none"
       />
       <span className="text-[10px] text-text-tertiary">kg</span>
+      <div className="flex items-center gap-1 ml-auto">
+        <span className="text-[10px] text-text-tertiary">RIR</span>
+        <button
+          type="button"
+          onClick={() => setRir((v) => v === null ? 3 : Math.min(4, v + 1))}
+          className="h-6 w-6 rounded-md bg-bg-3 text-text-secondary flex items-center justify-center text-[14px] active:scale-95"
+        >+</button>
+        <span className="w-5 text-center text-[13px] tabular-nums text-text-primary">
+          {rir === null ? "—" : rir}
+        </span>
+        <button
+          type="button"
+          onClick={() => setRir((v) => v === null ? null : Math.max(0, v - 1))}
+          className="h-6 w-6 rounded-md bg-bg-3 text-text-secondary flex items-center justify-center text-[14px] active:scale-95"
+        >−</button>
+      </div>
       <button
         onClick={() => save(!done)}
         disabled={saving}
-        className={`ml-auto h-7 w-7 rounded-md flex items-center justify-center ${done ? "bg-success text-white" : "bg-bg-3 text-text-tertiary"}`}
+        className={`h-7 w-7 rounded-md flex items-center justify-center ${done ? "bg-success text-white" : "bg-bg-3 text-text-tertiary"}`}
       >
         <Check size={14} />
       </button>
