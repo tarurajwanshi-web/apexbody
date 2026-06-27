@@ -1561,98 +1561,89 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub?:
 
 
 // ---------------------------------------------------------------------------
-// Next target review — locked/unlocked card (review-only; no Apply in this patch)
+// Next target review — reads from nutrition_weekly_reviews; Apply uses
+// apply_weekly_macro_review RPC.
 // ---------------------------------------------------------------------------
 
-function MacroReviewCard({ review, compact = false }: { review: MacroAdjustmentReview | null; compact?: boolean }) {
+const FLAG_LABELS: Record<string, string> = {
+  floor_aware_low_adherence: "Low adherence at calorie floor",
+  low_adherence: "Low adherence last week",
+  low_adherence_muscle_gain: "Eat closer to target before adjusting",
+  refeed_candidate: "Refeed candidate — consider a recovery week",
+  deficit_capped_for_safety: "Capped for safety",
+  abnormal_week: "Abnormal week — held",
+};
+
+function WeeklyReviewCard({
+  review,
+  applying,
+  onApply,
+  compact = false,
+}: {
+  review: WeeklyReviewRow | null;
+  applying: boolean;
+  onApply: () => void;
+  compact?: boolean;
+}) {
   if (!review) return null;
-  const locked = review.decision === "Insufficient data";
-  const reqDays = review.required_logged_days;
-  const reqWeigh = review.required_weigh_ins;
-  const haveDays = Math.min(review.logged_days, reqDays);
-  const haveWeigh = Math.min(review.weigh_in_count, reqWeigh);
+
+  const decisionLabel =
+    review.decision === "reduce" ? "Reduce calories"
+    : review.decision === "increase" ? "Increase calories"
+    : review.decision === "capped" ? "Capped adjustment"
+    : "Hold";
+
+  const flagLine = review.flag_reason ? (FLAG_LABELS[review.flag_reason] ?? review.flag_reason) : null;
+  const delta = Math.round(review.adjustment_kcal);
+  const deltaStr = `${delta > 0 ? "+" : ""}${delta.toLocaleString()} kcal`;
+  const tier = review.confidence_tier ?? "low";
+  const disabled = applying || tier === "low" || review.abnormal_week;
 
   return (
     <section className={`${compact ? "" : "mx-5 mt-4"} rounded-2xl bg-bg-2 border border-white/5 p-4`}>
       <div className="flex items-center justify-between">
         <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Next target review</p>
         <span className="text-[12px] text-text-tertiary">
-          {formatRangeLabel(review.review_week_start, review.review_week_end)}
+          {formatRangeLabel(review.week_start_date, review.week_end_date)}
         </span>
       </div>
 
-      {locked ? (
-        <>
-          <p className="mt-2 text-[14px] font-medium text-white">🔒 Macro adjustment locked</p>
-          <p className="mt-1 text-[12px] text-text-secondary leading-snug">
-            Log {reqDays} nutrition days and {reqWeigh} weigh-ins in last week's review window to unlock a reliable adjustment.
-          </p>
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <p className="text-[14px] font-medium text-white">{decisionLabel}</p>
+        <span
+          className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+            tier === "high" ? "border-success/40 text-success"
+            : tier === "medium" ? "border-white/15 text-text-secondary"
+            : "border-white/10 text-text-tertiary"
+          }`}
+        >
+          {tier} confidence
+        </span>
+      </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <ProgressRow label="Nutrition logs" current={review.logged_days} required={reqDays} />
-            <ProgressRow label="Weigh-ins" current={review.weigh_in_count} required={reqWeigh} />
-          </div>
+      <p className="mt-2 text-[14px] text-white tabular-nums">
+        {Math.round(review.old_target_calories).toLocaleString()} kcal → {Math.round(review.new_target_calories).toLocaleString()} kcal
+      </p>
+      <p className="mt-1 text-[12px] text-text-secondary tabular-nums">{deltaStr}</p>
 
-          {/* 7-day streak — 🔥 = logged that day. */}
-          <div className="mt-4">
-            <p className="text-[10px] uppercase tracking-wider text-text-tertiary mb-2">Last 7 days</p>
-            <div className="flex items-center justify-between">
-              {review.last7_logged_days.map((on, i) => {
-                const isToday = i === review.last7_logged_days.length - 1;
-                return (
-                  <div key={i} className="flex flex-col items-center gap-1 flex-1">
-                    <span className="text-[16px] leading-none">{on ? "🔥" : "○"}</span>
-                    <span className={`text-[10px] ${isToday ? "text-white font-medium" : "text-text-tertiary"}`}>
-                      {isToday ? "Today" : ""}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <p className="mt-3 text-[12px] text-text-tertiary leading-snug">
-            {haveDays}/{reqDays} logged · {haveWeigh}/{reqWeigh} weigh-ins
-          </p>
-        </>
-      ) : (
-        <>
-          <p className="mt-2 text-[14px] font-medium text-white">
-            🔥 {review.decision === "Ready to adjust" ? "Review unlocked" : "Target review ready"}
-          </p>
-          <p className="mt-2 text-[12px] text-white">
-            {review.decision === "Ready to adjust"
-              ? `Recommended: ${review.calorie_delta > 0 ? "+" : ""}${review.calorie_delta} kcal`
-              : review.decision}
-          </p>
-          <p className="mt-1 text-[12px] text-text-secondary leading-snug">{review.reason}</p>
-          {review.recommended_target_calories != null && review.calorie_delta !== 0 && (
-            <p className="mt-2 text-[12px] text-text-tertiary tabular-nums">
-              {review.current_target_calories?.toLocaleString() ?? "—"} kcal → {review.recommended_target_calories.toLocaleString()} kcal
-            </p>
-          )}
-          <p className="mt-3 text-[10px] text-text-tertiary">
-            Review only · apply targets manually in Settings for now.
-          </p>
-        </>
+      {flagLine && (
+        <p className="mt-2 text-[12px] text-text-tertiary leading-snug">{flagLine}</p>
       )}
+
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <p className="text-[10px] text-text-tertiary">
+          {review.days_logged}/7 days · {review.weigh_in_count} weigh-ins
+        </p>
+        <button
+          type="button"
+          onClick={onApply}
+          disabled={disabled}
+          className="px-4 py-2 rounded-2xl text-[12px] font-medium bg-white text-black active:scale-95 transition disabled:opacity-40 disabled:active:scale-100"
+        >
+          {applying ? "Applying…" : "Apply"}
+        </button>
+      </div>
     </section>
   );
 }
 
-function ProgressRow({ label, current, required }: { label: string; current: number; required: number }) {
-  const done = current >= required;
-  const pct = Math.min(100, Math.round((current / required) * 100));
-  return (
-    <div className="rounded-2xl bg-white/[0.03] border border-white/5 px-3 py-2">
-      <p className="text-[12px] text-text-tertiary">{label}</p>
-      <p className="mt-0.5 text-[14px] font-medium tabular-nums text-white">
-        {current} <span className="text-text-tertiary text-[12px]">/ {required}</span>
-        {done && <span className="ml-1 text-success">✓</span>}
-      </p>
-      <div className="mt-1.5 h-1 rounded-full bg-white/5 overflow-hidden">
-        <div className="h-full" style={{ width: `${pct}%`, background: done ? "#10B981" : "#3B82F6" }} />
-      </div>
-    </div>
-  );
-}
