@@ -105,6 +105,14 @@ function WorkoutsPage() {
         .gte("entry_date", weekStartISO)
         .lte("entry_date", todayISO());
       setWeekLogs((wlogs as any) ?? []);
+
+      const { data: readinessRow } = await supabase
+        .from("readiness_scores")
+        .select("final_score")
+        .eq("user_id", uid)
+        .eq("score_date", todayISO())
+        .maybeSingle();
+      setTodayReadiness(readinessRow ? Number((readinessRow as any).final_score) : null);
     } finally {
       setLoading(false);
       setLastUpdatedAt(Date.now());
