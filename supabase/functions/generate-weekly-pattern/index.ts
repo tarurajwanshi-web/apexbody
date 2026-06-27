@@ -199,7 +199,7 @@ Deno.serve(async (req) => {
     // Training data
     const { data: trainingLogs } = await supa
       .from("shield_training_logs")
-      .select("entry_date, strain_value, workout_type")
+      .select("entry_date, strain_value, session_notes")
       .eq("user_id", profile.user_id)
       .gte("entry_date", weekStart)
       .lte("entry_date", today);
