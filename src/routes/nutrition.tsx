@@ -193,6 +193,55 @@ function Nutrition() {
   };
   const reload = reloadNutritionSnapshot;
 
+  const handleApplyReview = async () => {
+    if (!weeklyReview || applyingReview) return;
+    setApplyingReview(true);
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const uid = u.user?.id;
+      if (!uid) throw new Error("not_signed_in");
+      const today = getLocalDateISO(userTz);
+      const { data: newTargetId, error } = await supabase.rpc("apply_weekly_macro_review", {
+        p_review_id: crypto.randomUUID(),
+        p_user_id: uid,
+        p_week_start_date: weeklyReview.week_start_date,
+        p_week_end_date: weeklyReview.week_end_date,
+        p_effective_start_date: today,
+        p_weigh_in_count: weeklyReview.weigh_in_count,
+        p_days_logged: weeklyReview.days_logged,
+        p_adherence_pct: weeklyReview.adherence_pct,
+        p_eligible: weeklyReview.eligible,
+        p_confidence_tier: weeklyReview.confidence_tier,
+        p_abnormal_week: weeklyReview.abnormal_week,
+        p_old_target_calories: weeklyReview.old_target_calories,
+        p_old_observed_tdee: weeklyReview.old_observed_tdee ?? 0,
+        p_new_observed_tdee: weeklyReview.new_observed_tdee ?? 0,
+        p_blended_tdee: weeklyReview.blended_tdee,
+        p_raw_target_calories: weeklyReview.raw_target_calories,
+        p_new_target_calories: weeklyReview.new_target_calories,
+        p_adjustment_kcal: weeklyReview.adjustment_kcal,
+        p_decision: weeklyReview.decision,
+        p_flag_reason: weeklyReview.flag_reason ?? "",
+        p_timezone_used: weeklyReview.timezone_used,
+        p_bmr: weeklyReview.bmr,
+        p_target_protein_g: weeklyReview.target_protein_g,
+        p_target_carbs_g: weeklyReview.target_carbs_g,
+        p_target_fat_g: weeklyReview.target_fat_g,
+      });
+      if (error) throw error;
+      await supabase
+        .from("nutrition_weekly_reviews")
+        .update({ applied_target_id: newTargetId as string, applied_at: new Date().toISOString() })
+        .eq("id", weeklyReview.id);
+    } catch (e) {
+      console.error("[apply-weekly-review]", e);
+    } finally {
+      setApplyingReview(false);
+      await reloadNutritionSnapshot();
+    }
+  };
+
+
   // Delete a meal: optimistic UI update + verified soft-delete + immediate
   // snapshot reload so Daily Fuel / Weekly Preview / Macro Review subtract
   // the meal right away. Confirmation is now handled inline (no window.confirm).
