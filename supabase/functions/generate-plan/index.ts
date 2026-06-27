@@ -43,7 +43,8 @@ async function callClaude(apiKey: string, prompt: string) {
       system:
         "You are an expert evidence-based strength & conditioning coach. " +
         "Respond with ONLY a single JSON object, no prose, no markdown fences. " +
-        "Schema: { \"days\": [ { \"day\": 1-7, \"day_name\": \"Monday\"...\"Sunday\", \"session_name\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string } ] } ] }. " +
+        "Schema: { \"days\": [ { \"day\": 1-7, \"day_name\": \"Monday\"...\"Sunday\", \"session_name\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string, \"progression_note\": string } ] } ] }. " +
+        "progression_note is short (max ~8 words) guidance based on the user's recent history for that exercise — e.g. \"+2.5% from last week\", \"hold weight, +1 rep\", \"deload 10%\", or \"new exercise — start moderate\". " +
         "Always return exactly 7 days starting Monday. Rest days have rest=true, session_name=null, exercises=[]. " +
         "The 'cue' field is ONE sharp coaching correction — the single thing you'd shout mid-set to fix that exercise's most common failure point. " +
         "Not a checklist. Not a description of correct form. One real spoken sentence, max ~18 words, second person, lead with the action. " +
