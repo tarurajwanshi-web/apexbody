@@ -21,12 +21,39 @@ import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import {
   getTodayMacroSummary,
   getWeeklyNutritionInsight,
-  getMacroAdjustmentReview,
   type MacroSummary,
   type WeeklyNutritionInsight,
   type WeeklyDay,
-  type MacroAdjustmentReview,
 } from "@/lib/macros.functions";
+
+type WeeklyReviewRow = {
+  id: string;
+  decision: "reduce" | "increase" | "capped" | "hold";
+  confidence_tier: "high" | "medium" | "low" | null;
+  flag_reason: string | null;
+  new_target_calories: number;
+  old_target_calories: number;
+  adjustment_kcal: number;
+  applied_target_id: string | null;
+  applied_at: string | null;
+  week_start_date: string;
+  week_end_date: string;
+  days_logged: number;
+  weigh_in_count: number;
+  training_load_index: number | null;
+  bmr: number;
+  target_protein_g: number;
+  target_carbs_g: number;
+  target_fat_g: number;
+  blended_tdee: number;
+  new_observed_tdee: number | null;
+  old_observed_tdee: number | null;
+  raw_target_calories: number;
+  adherence_pct: number;
+  eligible: boolean;
+  abnormal_week: boolean;
+  timezone_used: string;
+};
 import {
   getTodayMeals,
   getTodayHydration,
