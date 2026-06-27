@@ -1201,12 +1201,16 @@ function WeeklyGraphSheet({
   open,
   onClose,
   initialAnchor,
-  macroReview,
+  review,
+  applying,
+  onApply,
 }: {
   open: boolean;
   onClose: () => void;
   initialAnchor: string;
-  macroReview: MacroAdjustmentReview | null;
+  review: WeeklyReviewRow | null;
+  applying: boolean;
+  onApply: () => void;
 }) {
   const [anchor, setAnchor] = useState(initialAnchor);
   const [data, setData] = useState<WeeklyNutritionInsight | null>(null);
