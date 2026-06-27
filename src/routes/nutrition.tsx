@@ -631,7 +631,7 @@ function Nutrition() {
 
       <WeeklyPreviewCard weekly={weekly} onOpen={() => setWeeklySheetOpen(true)} />
 
-      <MacroReviewCard review={macroReview} />
+      <WeeklyReviewCard review={weeklyReview} applying={applyingReview} onApply={handleApplyReview} />
 
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
