@@ -142,11 +142,11 @@ Deno.serve(async (req) => {
     // Get this week's readiness trend
     const { data: readiness } = await supa
       .from("readiness_scores")
-      .select("entry_date, final_score")
+      .select("score_date, final_score")
       .eq("user_id", profile.user_id)
-      .gte("entry_date", addDays(today, -7))
-      .lte("entry_date", today)
-      .order("entry_date", { ascending: false });
+      .gte("score_date", addDays(today, -7))
+      .lte("score_date", today)
+      .order("score_date", { ascending: false });
 
     const avgReadiness = readiness && readiness.length > 0
       ? Math.round(readiness.reduce((s, r) => s + (r.final_score || 0), 0) / readiness.length)
