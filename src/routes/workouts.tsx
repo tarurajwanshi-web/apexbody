@@ -164,9 +164,27 @@ function WorkoutsPage() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  // Apply readiness-driven volume reduction to today's session only.
+  const effectivePlan = useMemo(() => {
+    if (!plan) return plan;
+    if (!volumeChoice || volumeChoice === "full") return plan;
+    const factor = volumeChoice === "recovery" ? 0.5 : 0.7;
+    const days = (plan.plan_data?.days ?? []).map((d, i) => {
+      if (i !== todayIdx || d.rest) return d;
+      return {
+        ...d,
+        exercises: (d.exercises ?? []).map((ex) => ({
+          ...ex,
+          sets: Math.max(2, Math.ceil(ex.sets * factor)),
+        })),
+      };
+    });
+    return { ...plan, plan_data: { ...plan.plan_data, days } };
+  }, [plan, volumeChoice, todayIdx]);
+
   // Build display order: today first, then tomorrow..end-of-week, then earlier days of this week.
   const orderedDays = useMemo(() => {
-    const days = plan?.plan_data?.days ?? [];
+    const days = effectivePlan?.plan_data?.days ?? [];
     if (days.length === 0) return [] as { idx: number; day: DayPlan }[];
     const order: number[] = [];
     for (let offset = 0; offset < 7; offset++) {
@@ -174,7 +192,7 @@ function WorkoutsPage() {
       if (days[idx]) order.push(idx);
     }
     return order.map((idx) => ({ idx, day: days[idx] }));
-  }, [plan, todayIdx]);
+  }, [effectivePlan, todayIdx]);
 
   return (
     <div
