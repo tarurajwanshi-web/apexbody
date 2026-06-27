@@ -581,9 +581,14 @@ function ExerciseLogger({
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between rounded-xl bg-bg-3/40 px-3 py-2.5 text-left"
       >
-        <div className="flex items-center gap-2">
-          <Dumbbell size={14} className="text-text-tertiary" />
-          <span className="text-[12px] font-medium">{exercise.name}</span>
+        <div className="flex items-center gap-2 min-w-0">
+          <Dumbbell size={14} className="text-text-tertiary shrink-0" />
+          <div className="flex flex-col min-w-0">
+            <span className="text-[12px] font-medium truncate">{exercise.name}</span>
+            {exercise.progression_note && (
+              <span className="text-[10px] text-text-tertiary truncate">{exercise.progression_note}</span>
+            )}
+          </div>
         </div>
         <span className={`text-[12px] tabular-nums ${doneCount === exercise.sets ? "text-success" : "text-text-tertiary"}`}>
           {doneCount}/{exercise.sets}
