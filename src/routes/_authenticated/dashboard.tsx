@@ -346,6 +346,22 @@ function Dashboard() {
           </div>
         )}
         <CoachingFeed />
+
+        <div style={{ marginTop: 24, display: "flex", justifyContent: "center" }}>
+          <button
+            onClick={async () => {
+              const r = await fetch(
+                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/test-seed-10-users`,
+                { method: "POST" }
+              );
+              const d = await r.json();
+              alert(`${d.status}: ${d.message}`);
+            }}
+            className="px-4 py-2 bg-blue-600 text-white rounded"
+          >
+            Seed 10 Edge Cases (90 days)
+          </button>
+        </div>
       </div>
 
       <DashboardNav onLogged={onLogged} />
