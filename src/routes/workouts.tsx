@@ -276,6 +276,20 @@ function WorkoutsPage() {
             const todayDay = plan.plan_data?.days?.[todayIdx];
             if (!todayDay) return null;
             if (sessionStarted) return null;
+            // Readiness gate — only if score is low and user hasn't picked yet.
+            if (todayReadiness !== null && todayReadiness < 45 && volumeChoice === null && !todayDay.rest) {
+              return (
+                <div className="mx-5 mt-4 rounded-2xl border-l-4 border-amber-500 bg-amber-500/10 p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-amber-300">Low readiness</p>
+                  <p className="mt-1 text-[14px] text-text-primary">Readiness is {Math.round(todayReadiness)}. Consider scaling back.</p>
+                  <div className="mt-3 flex flex-col gap-2">
+                    <button onClick={() => setVolumeChoice('reduced')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Reduce volume (−30%)</button>
+                    <button onClick={() => setVolumeChoice('recovery')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Recovery session (−50%)</button>
+                    <button onClick={() => setVolumeChoice('full')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-secondary active:scale-[0.98] transition">Proceed as planned</button>
+                  </div>
+                </div>
+              );
+            }
             if (todayDay.rest) {
               return (
                 <RestDaySwapCard
@@ -298,6 +312,11 @@ function WorkoutsPage() {
                 >
                   Start workout →
                 </button>
+                {volumeChoice && volumeChoice !== 'full' && (
+                  <p className="mt-2 text-center text-[11px] text-amber-300">
+                    Volume scaled for low readiness ({volumeChoice === 'recovery' ? '−50%' : '−30%'})
+                  </p>
+                )}
               </div>
             );
           })()}
