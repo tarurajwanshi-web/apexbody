@@ -1,54 +1,17 @@
-## Fix nutrition Apply button to use new RPC
+## No changes needed — already fixed
 
-**File:** `src/routes/nutrition.tsx`
-
-**Scope:** Only `handleApplyReview` (lines 196–242). No UI, no fetch logic, no other changes.
-
-### Change
-
-Replace the 22-parameter `apply_weekly_macro_review` call and its follow-up manual review-row UPDATE with a single call to the new atomic RPC `apply_existing_weekly_macro_review`, passing only the review ID.
-
-### New handler shape (lines 196–242)
+`supabase/functions/generate-training-sync/index.ts` lines 142–152 already use `final_score` and `score_date`:
 
 ```ts
-const handleApplyReview = async () => {
-  if (!weeklyReview || applyingReview) return;
-  setApplyingReview(true);
-  try {
-    const { error } = await supabase.rpc(
-      "apply_existing_weekly_macro_review",
-      { p_review_id: weeklyReview.id },
-    );
-    if (error) throw error;
-  } catch (e) {
-    console.error("[apply-weekly-review]", e);
-  } finally {
-    setApplyingReview(false);
-    await reloadNutritionSnapshot();
-  }
-};
+.from("readiness_scores")
+.select("score_date, final_score")
+...
+.gte("score_date", addDays(today, -7))
+.lte("score_date", today)
+.order("score_date", { ascending: false });
+
+const avgReadiness = readiness && readiness.length > 0
+  ? Math.round(readiness.reduce((s, r) => s + (r.final_score || 0), 0) / readiness.length)
 ```
 
-### What's removed
-
-- `crypto.randomUUID()` review id generation.
-- All 22 `p_*` parameters reconstructed from `weeklyReview`.
-- Manual `supabase.from("nutrition_weekly_reviews").update({ applied_target_id, applied_at })` — the new RPC handles this atomically.
-- Unused locals (`u`, `uid`, `today`, `getLocalDateISO` call, `newTargetId` binding).
-
-### What's preserved
-
-- Guard against null/in-flight (`if (!weeklyReview || applyingReview) return`).
-- `setApplyingReview(true/false)` flow.
-- Error log channel `[apply-weekly-review]`.
-- `reloadNutritionSnapshot()` in `finally` (refreshes Fuel page to show new active target).
-
-### Verification
-
-After save, the Apply button:
-1. Reads existing `weeklyReview.id`.
-2. Calls `apply_existing_weekly_macro_review` with only that ID.
-3. Surfaces error via console; success falls through.
-4. Reloads snapshot to show new active target.
-
-No other file is touched. The trailing reference at line 1565 is a comment and stays as-is unless you want it updated too — flag if so.
+No `overall_score` or `entry_date` references remain in this file. The fix from the earlier turn is already in place; approving this plan is a no-op.
