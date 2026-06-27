@@ -1,17 +1,11 @@
-## No changes needed — already fixed
+## Fix invalid column in shield_training_logs query
 
-`supabase/functions/generate-training-sync/index.ts` lines 142–152 already use `final_score` and `score_date`:
+**File:** `supabase/functions/generate-weekly-pattern/index.ts`, line 202.
 
+**Change:**
 ```ts
-.from("readiness_scores")
-.select("score_date, final_score")
-...
-.gte("score_date", addDays(today, -7))
-.lte("score_date", today)
-.order("score_date", { ascending: false });
-
-const avgReadiness = readiness && readiness.length > 0
-  ? Math.round(readiness.reduce((s, r) => s + (r.final_score || 0), 0) / readiness.length)
+.select("entry_date, strain_value, session_notes")
 ```
+(swap `workout_type` → `session_notes`)
 
-No `overall_score` or `entry_date` references remain in this file. The fix from the earlier turn is already in place; approving this plan is a no-op.
+Nothing else in the function is touched. Downstream code only reads `strain_value`, so the rename is safe.
