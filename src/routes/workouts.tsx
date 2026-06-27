@@ -16,7 +16,7 @@ export const Route = createFileRoute("/workouts")({
   component: WorkoutsPage,
 });
 
-type Exercise = { name: string; sets: number; reps: string; rest_seconds: number; cue?: string; muscle_group?: string };
+type Exercise = { name: string; sets: number; reps: string; rest_seconds: number; cue?: string; muscle_group?: string; progression_note?: string };
 type DayPlan = { day: number; day_name: string; session_name: string | null; rest: boolean; exercises: Exercise[] };
 type Plan = { days: DayPlan[] };
 type WeeklyPlan = { id: string; week_start_date: string; unlock_date: string; is_locked: boolean; plan_data: Plan };
@@ -39,6 +39,8 @@ function WorkoutsPage() {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [preCheckOpen, setPreCheckOpen] = useState(false);
   const [sessionStarted, setSessionStarted] = useState(false);
+  const [todayReadiness, setTodayReadiness] = useState<number | null>(null);
+  const [volumeChoice, setVolumeChoice] = useState<"full" | "reduced" | "recovery" | null>(null);
   
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
@@ -103,6 +105,14 @@ function WorkoutsPage() {
         .gte("entry_date", weekStartISO)
         .lte("entry_date", todayISO());
       setWeekLogs((wlogs as any) ?? []);
+
+      const { data: readinessRow } = await supabase
+        .from("readiness_scores")
+        .select("final_score")
+        .eq("user_id", uid)
+        .eq("score_date", todayISO())
+        .maybeSingle();
+      setTodayReadiness(readinessRow ? Number((readinessRow as any).final_score) : null);
     } finally {
       setLoading(false);
       setLastUpdatedAt(Date.now());
@@ -154,9 +164,27 @@ function WorkoutsPage() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  // Apply readiness-driven volume reduction to today's session only.
+  const effectivePlan = useMemo(() => {
+    if (!plan) return plan;
+    if (!volumeChoice || volumeChoice === "full") return plan;
+    const factor = volumeChoice === "recovery" ? 0.5 : 0.7;
+    const days = (plan.plan_data?.days ?? []).map((d, i) => {
+      if (i !== todayIdx || d.rest) return d;
+      return {
+        ...d,
+        exercises: (d.exercises ?? []).map((ex) => ({
+          ...ex,
+          sets: Math.max(2, Math.ceil(ex.sets * factor)),
+        })),
+      };
+    });
+    return { ...plan, plan_data: { ...plan.plan_data, days } };
+  }, [plan, volumeChoice, todayIdx]);
+
   // Build display order: today first, then tomorrow..end-of-week, then earlier days of this week.
   const orderedDays = useMemo(() => {
-    const days = plan?.plan_data?.days ?? [];
+    const days = effectivePlan?.plan_data?.days ?? [];
     if (days.length === 0) return [] as { idx: number; day: DayPlan }[];
     const order: number[] = [];
     for (let offset = 0; offset < 7; offset++) {
@@ -164,7 +192,7 @@ function WorkoutsPage() {
       if (days[idx]) order.push(idx);
     }
     return order.map((idx) => ({ idx, day: days[idx] }));
-  }, [plan, todayIdx]);
+  }, [effectivePlan, todayIdx]);
 
   return (
     <div
@@ -248,6 +276,20 @@ function WorkoutsPage() {
             const todayDay = plan.plan_data?.days?.[todayIdx];
             if (!todayDay) return null;
             if (sessionStarted) return null;
+            // Readiness gate — only if score is low and user hasn't picked yet.
+            if (todayReadiness !== null && todayReadiness < 45 && volumeChoice === null && !todayDay.rest) {
+              return (
+                <div className="mx-5 mt-4 rounded-2xl border-l-4 border-amber-500 bg-amber-500/10 p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-amber-300">Low readiness</p>
+                  <p className="mt-1 text-[14px] text-text-primary">Readiness is {Math.round(todayReadiness)}. Consider scaling back.</p>
+                  <div className="mt-3 flex flex-col gap-2">
+                    <button onClick={() => setVolumeChoice('reduced')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Reduce volume (−30%)</button>
+                    <button onClick={() => setVolumeChoice('recovery')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Recovery session (−50%)</button>
+                    <button onClick={() => setVolumeChoice('full')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-secondary active:scale-[0.98] transition">Proceed as planned</button>
+                  </div>
+                </div>
+              );
+            }
             if (todayDay.rest) {
               return (
                 <RestDaySwapCard
@@ -270,6 +312,11 @@ function WorkoutsPage() {
                 >
                   Start workout →
                 </button>
+                {volumeChoice && volumeChoice !== 'full' && (
+                  <p className="mt-2 text-center text-[11px] text-amber-300">
+                    Volume scaled for low readiness ({volumeChoice === 'recovery' ? '−50%' : '−30%'})
+                  </p>
+                )}
               </div>
             );
           })()}
@@ -482,11 +529,11 @@ function DayCard({
               <button
                 type="button"
                 onClick={() => onShowCue(ex)}
-                className="w-full text-[12px] text-text-secondary flex justify-between items-center py-1 active:opacity-70"
+                className="w-full text-[12px] text-text-secondary flex justify-between items-start py-1 active:opacity-70"
               >
-                <span className="flex items-center gap-2 text-left">
+                <span className="flex items-start gap-2 text-left">
                   <span
-                    className="inline-flex items-center justify-center h-5 w-5 rounded-full shrink-0"
+                    className="inline-flex items-center justify-center h-5 w-5 rounded-full shrink-0 mt-0.5"
                     style={{
                       background: "linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%)",
                       boxShadow: "0 0 8px rgba(124,58,237,0.35)",
@@ -495,7 +542,12 @@ function DayCard({
                   >
                     <Zap size={11} className="text-white" fill="white" strokeWidth={2.5} />
                   </span>
-                  <span>{ex.name}</span>
+                  <span className="flex flex-col">
+                    <span>{ex.name}</span>
+                    {ex.progression_note && (
+                      <span className="text-[10px] text-text-tertiary">{ex.progression_note}</span>
+                    )}
+                  </span>
                 </span>
                 <span className="text-text-tertiary tabular-nums">{ex.sets}×{ex.reps}</span>
               </button>
@@ -529,9 +581,14 @@ function ExerciseLogger({
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between rounded-xl bg-bg-3/40 px-3 py-2.5 text-left"
       >
-        <div className="flex items-center gap-2">
-          <Dumbbell size={14} className="text-text-tertiary" />
-          <span className="text-[12px] font-medium">{exercise.name}</span>
+        <div className="flex items-center gap-2 min-w-0">
+          <Dumbbell size={14} className="text-text-tertiary shrink-0" />
+          <div className="flex flex-col min-w-0">
+            <span className="text-[12px] font-medium truncate">{exercise.name}</span>
+            {exercise.progression_note && (
+              <span className="text-[10px] text-text-tertiary truncate">{exercise.progression_note}</span>
+            )}
+          </div>
         </div>
         <span className={`text-[12px] tabular-nums ${doneCount === exercise.sets ? "text-success" : "text-text-tertiary"}`}>
           {doneCount}/{exercise.sets}

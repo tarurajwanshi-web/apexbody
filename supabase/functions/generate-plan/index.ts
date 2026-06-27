@@ -43,7 +43,8 @@ async function callClaude(apiKey: string, prompt: string) {
       system:
         "You are an expert evidence-based strength & conditioning coach. " +
         "Respond with ONLY a single JSON object, no prose, no markdown fences. " +
-        "Schema: { \"days\": [ { \"day\": 1-7, \"day_name\": \"Monday\"...\"Sunday\", \"session_name\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string } ] } ] }. " +
+        "Schema: { \"days\": [ { \"day\": 1-7, \"day_name\": \"Monday\"...\"Sunday\", \"session_name\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string, \"progression_note\": string } ] } ] }. " +
+        "progression_note is short (max ~8 words) guidance based on the user's recent history for that exercise — e.g. \"+2.5% from last week\", \"hold weight, +1 rep\", \"deload 10%\", or \"new exercise — start moderate\". " +
         "Always return exactly 7 days starting Monday. Rest days have rest=true, session_name=null, exercises=[]. " +
         "The 'cue' field is ONE sharp coaching correction — the single thing you'd shout mid-set to fix that exercise's most common failure point. " +
         "Not a checklist. Not a description of correct form. One real spoken sentence, max ~18 words, second person, lead with the action. " +
@@ -110,6 +111,43 @@ Deno.serve(async (req) => {
       ? readinessRows.reduce((s: number, r: any) => s + Number(r.final_score ?? 0), 0) / readinessRows.length
       : null;
 
+    // Workout history: last 30 days, group by exercise for progressive overload.
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
+    const thirtyDaysAgoISO = thirtyDaysAgo.toISOString().slice(0, 10);
+    const { data: workoutHistory } = await supa
+      .from("workout_set_logs")
+      .select("exercise_name, weight_kg, reps_completed, rir, entry_date")
+      .eq("user_id", user_id)
+      .eq("completed", true)
+      .gte("entry_date", thirtyDaysAgoISO)
+      .order("entry_date", { ascending: false });
+
+    const exerciseHistory: Record<string, {
+      lastWeight: number; lastReps: number; lastRIR: number;
+      maxVolumeSet: string; avgRIR: number;
+    }> = {};
+    const rirAcc: Record<string, { sum: number; n: number }> = {};
+    for (const log of workoutHistory ?? []) {
+      const name = (log as any).exercise_name as string;
+      const w = Number((log as any).weight_kg ?? 0);
+      const r = Number((log as any).reps_completed ?? 0);
+      const rir = Number((log as any).rir ?? 2);
+      if (!exerciseHistory[name]) {
+        exerciseHistory[name] = {
+          lastWeight: w, lastReps: r, lastRIR: rir,
+          maxVolumeSet: `${w}×${r}`, avgRIR: rir,
+        };
+        rirAcc[name] = { sum: rir, n: 1 };
+      } else {
+        const cur = exerciseHistory[name];
+        const [cw, cr] = cur.maxVolumeSet.split("×").map(parseFloat);
+        if (w * r > (cw || 0) * (cr || 0)) cur.maxVolumeSet = `${w}×${r}`;
+        rirAcc[name].sum += rir; rirAcc[name].n += 1;
+        cur.avgRIR = Math.round((rirAcc[name].sum / rirAcc[name].n) * 10) / 10;
+      }
+    }
+
     // Fuelling: current target vs avg intake last 7 days
     const { data: macroTarget } = await supa
       .from("daily_macro_targets")
@@ -169,6 +207,12 @@ Deno.serve(async (req) => {
       ? `\nFUELLING ALERT: User is averaging ${Math.round(avgIntake!)} kcal/day vs ${Math.round(targetCalories!)} kcal target — under-fuelled. Do not programme to failure. Add a session_note: "Under-fuelled this week — stop 2-3 reps short of failure on all sets."`
       : "";
 
+    const historyNote = Object.keys(exerciseHistory).length > 0
+      ? `\nRecent exercise history (last 30 days, best sets and avg RIR):\n${JSON.stringify(exerciseHistory, null, 2)}\n` +
+        `Progression rule: if lastRIR 0-1 → +2.5–5% weight; RIR 2-3 → hold weight or +1 rep; RIR 4+ → deload or reduce volume. ` +
+        `For unfamiliar exercises, progression_note should be "new exercise — start moderate".`
+      : `\nNo recent workout history. For every exercise set progression_note to "new exercise — start moderate".`;
+
     const prompt =
       `Build a 7-day workout plan.\n` +
       `Goal: ${goal}. Training days per week: ${days}. Equipment: ${equip}. Experience: ${experience}.\n` +
@@ -176,9 +220,9 @@ Deno.serve(async (req) => {
       `Equipment rule: ${equipRule}\n` +
       `Experience rule: ${experienceRule}\n` +
       `Include muscle_group for each exercise (e.g. "chest", "quads", "back", "shoulders", "hamstrings", "glutes", "biceps", "triceps", "full_body", "cardio").` +
-      `${readinessNote}${fuelNote}\n` +
+      `${readinessNote}${fuelNote}${historyNote}\n` +
       `Exactly ${days} training days with named sessions (e.g. Push/Pull/Legs, Upper/Lower, or Full Body depending on frequency), ` +
-      `each with 4-6 exercises (name, sets, reps, rest_seconds, cue, muscle_group). The remaining ${7 - days} days are rest. ` +
+      `each with 4-6 exercises (name, sets, reps, rest_seconds, cue, muscle_group, progression_note). The remaining ${7 - days} days are rest. ` +
       `Return JSON matching the schema.`;
 
     let plan: any;
