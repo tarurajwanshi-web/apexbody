@@ -43,7 +43,7 @@ async function callClaude(apiKey: string, prompt: string) {
       system:
         "You are an expert evidence-based strength & conditioning coach. " +
         "Respond with ONLY a single JSON object, no prose, no markdown fences. " +
-        "Schema: { \"days\": [ { \"day\": 1-7, \"day_name\": \"Monday\"...\"Sunday\", \"session_name\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string } ] } ] }. " +
+        "Schema: { \"days\": [ { \"day\": 1-7, \"day_name\": \"Monday\"...\"Sunday\", \"session_name\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string } ] } ] }. " +
         "Always return exactly 7 days starting Monday. Rest days have rest=true, session_name=null, exercises=[]. " +
         "The 'cue' field is ONE sharp coaching correction — the single thing you'd shout mid-set to fix that exercise's most common failure point. " +
         "Not a checklist. Not a description of correct form. One real spoken sentence, max ~18 words, second person, lead with the action. " +
@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
 
     const { data: p, error } = await supa
       .from("profiles")
-      .select("goal, training_days_per_week, equipment_access")
+      .select("goal, training_days_per_week, equipment_access, experience_level")
       .eq("user_id", user_id)
       .maybeSingle();
     if (error || !p) {
@@ -95,6 +95,43 @@ Deno.serve(async (req) => {
     const goal = p.goal ?? "recomposition";
     const days = p.training_days_per_week ?? 3;
     const equip = p.equipment_access ?? "commercial_gym";
+    const experience = p.experience_level ?? "intermediate";
+
+    // Readiness: avg final_score last 7 days
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7);
+    const sevenDaysAgoISO = sevenDaysAgo.toISOString().slice(0, 10);
+    const { data: readinessRows } = await supa
+      .from("readiness_scores")
+      .select("final_score")
+      .eq("user_id", user_id)
+      .gte("score_date", sevenDaysAgoISO);
+    const avgReadiness = readinessRows && readinessRows.length > 0
+      ? readinessRows.reduce((s: number, r: any) => s + Number(r.final_score ?? 0), 0) / readinessRows.length
+      : null;
+
+    // Fuelling: current target vs avg intake last 7 days
+    const { data: macroTarget } = await supa
+      .from("daily_macro_targets")
+      .select("target_calories")
+      .eq("user_id", user_id)
+      .is("effective_end_date", null)
+      .maybeSingle();
+    const targetCalories = macroTarget ? Number(macroTarget.target_calories) : null;
+
+    const { data: nutritionRows } = await supa
+      .from("shield_nutrition_logs")
+      .select("estimated_calories")
+      .eq("user_id", user_id)
+      .eq("deleted", false)
+      .in("calorie_estimate_status", ["estimated", "manual_edited"])
+      .gte("entry_date", sevenDaysAgoISO);
+    const avgIntake = nutritionRows && nutritionRows.length > 0
+      ? nutritionRows.reduce((s: number, r: any) => s + Number(r.estimated_calories ?? 0), 0) / nutritionRows.length
+      : null;
+
+    const underFuelled = targetCalories != null && avgIntake != null && avgIntake < targetCalories * 0.80;
+    const lowReadiness = avgReadiness != null && avgReadiness < 45;
 
     const equipRule = equip === "bodyweight_only"
       ? "STRICTLY bodyweight only. Do NOT prescribe any dumbbell, barbell, machine, or cable exercises."
@@ -111,13 +148,31 @@ Deno.serve(async (req) => {
       goal === "athletic_performance" ? "Mixed: power/explosive lifts (3-5 reps), accessories (6-10), include conditioning blocks." :
       "Recomposition: balanced hypertrophy 6-12 reps with some heavier 4-6 sets, 75-120s rest.";
 
+    const experienceRule =
+      experience === "beginner"
+        ? "Beginner: 3 sets max per exercise, compound movements only, no exercise requiring advanced technique (no Olympic lifts, no deficit deadlifts). 10-15 reps."
+        : experience === "advanced"
+        ? "Advanced: 4-5 sets, include periodisation variety (heavy compounds + isolation accessories), RIR-based intensity — note target RIR 2-3 for working sets."
+        : "Intermediate: 3-4 sets, balanced compound + accessory split, standard rep ranges for the goal.";
+
+    const readinessNote = lowReadiness
+      ? `\nREADINESS ALERT: User's avg readiness score this week is ${Math.round(avgReadiness!)}. Reduce total weekly volume by ~20% (drop 1 set per exercise). Add a session_note: "Low readiness detected — keeping volume conservative this week."`
+      : "";
+
+    const fuelNote = underFuelled
+      ? `\nFUELLING ALERT: User is averaging ${Math.round(avgIntake!)} kcal/day vs ${Math.round(targetCalories!)} kcal target — under-fuelled. Do not programme to failure. Add a session_note: "Under-fuelled this week — stop 2-3 reps short of failure on all sets."`
+      : "";
+
     const prompt =
       `Build a 7-day workout plan.\n` +
-      `Goal: ${goal}. Training days per week: ${days}. Equipment: ${equip}.\n` +
+      `Goal: ${goal}. Training days per week: ${days}. Equipment: ${equip}. Experience: ${experience}.\n` +
       `Programming rule: ${goalRule}\n` +
       `Equipment rule: ${equipRule}\n` +
+      `Experience rule: ${experienceRule}\n` +
+      `Include muscle_group for each exercise (e.g. "chest", "quads", "back", "shoulders", "hamstrings", "glutes", "biceps", "triceps", "full_body", "cardio").` +
+      `${readinessNote}${fuelNote}\n` +
       `Exactly ${days} training days with named sessions (e.g. Push/Pull/Legs, Upper/Lower, or Full Body depending on frequency), ` +
-      `each with 4-6 exercises (name, sets, reps, rest_seconds). The remaining ${7 - days} days are rest. ` +
+      `each with 4-6 exercises (name, sets, reps, rest_seconds, cue, muscle_group). The remaining ${7 - days} days are rest. ` +
       `Return JSON matching the schema.`;
 
     let plan: any;
