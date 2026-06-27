@@ -111,6 +111,43 @@ Deno.serve(async (req) => {
       ? readinessRows.reduce((s: number, r: any) => s + Number(r.final_score ?? 0), 0) / readinessRows.length
       : null;
 
+    // Workout history: last 30 days, group by exercise for progressive overload.
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
+    const thirtyDaysAgoISO = thirtyDaysAgo.toISOString().slice(0, 10);
+    const { data: workoutHistory } = await supa
+      .from("workout_set_logs")
+      .select("exercise_name, weight_kg, reps_completed, rir, entry_date")
+      .eq("user_id", user_id)
+      .eq("completed", true)
+      .gte("entry_date", thirtyDaysAgoISO)
+      .order("entry_date", { ascending: false });
+
+    const exerciseHistory: Record<string, {
+      lastWeight: number; lastReps: number; lastRIR: number;
+      maxVolumeSet: string; avgRIR: number;
+    }> = {};
+    const rirAcc: Record<string, { sum: number; n: number }> = {};
+    for (const log of workoutHistory ?? []) {
+      const name = (log as any).exercise_name as string;
+      const w = Number((log as any).weight_kg ?? 0);
+      const r = Number((log as any).reps_completed ?? 0);
+      const rir = Number((log as any).rir ?? 2);
+      if (!exerciseHistory[name]) {
+        exerciseHistory[name] = {
+          lastWeight: w, lastReps: r, lastRIR: rir,
+          maxVolumeSet: `${w}×${r}`, avgRIR: rir,
+        };
+        rirAcc[name] = { sum: rir, n: 1 };
+      } else {
+        const cur = exerciseHistory[name];
+        const [cw, cr] = cur.maxVolumeSet.split("×").map(parseFloat);
+        if (w * r > (cw || 0) * (cr || 0)) cur.maxVolumeSet = `${w}×${r}`;
+        rirAcc[name].sum += rir; rirAcc[name].n += 1;
+        cur.avgRIR = Math.round((rirAcc[name].sum / rirAcc[name].n) * 10) / 10;
+      }
+    }
+
     // Fuelling: current target vs avg intake last 7 days
     const { data: macroTarget } = await supa
       .from("daily_macro_targets")
