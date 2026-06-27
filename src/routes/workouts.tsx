@@ -281,7 +281,7 @@ function WorkoutsPage() {
               return (
                 <div className="mx-5 mt-4 rounded-2xl border-l-4 border-amber-500 bg-amber-500/10 p-4">
                   <p className="text-[10px] uppercase tracking-wider text-amber-300">Low readiness</p>
-                  <p className="mt-1 text-[14px] text-text-primary">Readiness is {Math.round(todayReadiness)}. Consider scaling back.</p>
+                  <p className="mt-1 text-[14px] text-text-primary">Readiness is {Math.round(todayReadiness ?? 50)}. Consider scaling back.</p>
                   <div className="mt-3 flex flex-col gap-2">
                     <button onClick={() => setVolumeChoice('reduced')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Reduce volume (−30%)</button>
                     <button onClick={() => setVolumeChoice('recovery')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Recovery session (−50%)</button>
