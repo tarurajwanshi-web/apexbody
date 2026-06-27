@@ -16,7 +16,7 @@ export const Route = createFileRoute("/workouts")({
   component: WorkoutsPage,
 });
 
-type Exercise = { name: string; sets: number; reps: string; rest_seconds: number; cue?: string; muscle_group?: string };
+type Exercise = { name: string; sets: number; reps: string; rest_seconds: number; cue?: string; muscle_group?: string; progression_note?: string };
 type DayPlan = { day: number; day_name: string; session_name: string | null; rest: boolean; exercises: Exercise[] };
 type Plan = { days: DayPlan[] };
 type WeeklyPlan = { id: string; week_start_date: string; unlock_date: string; is_locked: boolean; plan_data: Plan };
