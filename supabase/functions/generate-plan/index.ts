@@ -207,6 +207,12 @@ Deno.serve(async (req) => {
       ? `\nFUELLING ALERT: User is averaging ${Math.round(avgIntake!)} kcal/day vs ${Math.round(targetCalories!)} kcal target — under-fuelled. Do not programme to failure. Add a session_note: "Under-fuelled this week — stop 2-3 reps short of failure on all sets."`
       : "";
 
+    const historyNote = Object.keys(exerciseHistory).length > 0
+      ? `\nRecent exercise history (last 30 days, best sets and avg RIR):\n${JSON.stringify(exerciseHistory, null, 2)}\n` +
+        `Progression rule: if lastRIR 0-1 → +2.5–5% weight; RIR 2-3 → hold weight or +1 rep; RIR 4+ → deload or reduce volume. ` +
+        `For unfamiliar exercises, progression_note should be "new exercise — start moderate".`
+      : `\nNo recent workout history. For every exercise set progression_note to "new exercise — start moderate".`;
+
     const prompt =
       `Build a 7-day workout plan.\n` +
       `Goal: ${goal}. Training days per week: ${days}. Equipment: ${equip}. Experience: ${experience}.\n` +
@@ -214,9 +220,9 @@ Deno.serve(async (req) => {
       `Equipment rule: ${equipRule}\n` +
       `Experience rule: ${experienceRule}\n` +
       `Include muscle_group for each exercise (e.g. "chest", "quads", "back", "shoulders", "hamstrings", "glutes", "biceps", "triceps", "full_body", "cardio").` +
-      `${readinessNote}${fuelNote}\n` +
+      `${readinessNote}${fuelNote}${historyNote}\n` +
       `Exactly ${days} training days with named sessions (e.g. Push/Pull/Legs, Upper/Lower, or Full Body depending on frequency), ` +
-      `each with 4-6 exercises (name, sets, reps, rest_seconds, cue, muscle_group). The remaining ${7 - days} days are rest. ` +
+      `each with 4-6 exercises (name, sets, reps, rest_seconds, cue, muscle_group, progression_note). The remaining ${7 - days} days are rest. ` +
       `Return JSON matching the schema.`;
 
     let plan: any;
