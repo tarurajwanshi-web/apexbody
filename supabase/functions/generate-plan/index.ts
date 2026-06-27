@@ -121,13 +121,19 @@ Deno.serve(async (req) => {
 
     const { data: nutritionRows } = await supa
       .from("shield_nutrition_logs")
-      .select("estimated_calories")
+      .select("entry_date, estimated_calories")
       .eq("user_id", user_id)
       .eq("deleted", false)
       .in("calorie_estimate_status", ["estimated", "manual_edited"])
       .gte("entry_date", sevenDaysAgoISO);
-    const avgIntake = nutritionRows && nutritionRows.length > 0
-      ? nutritionRows.reduce((s: number, r: any) => s + Number(r.estimated_calories ?? 0), 0) / nutritionRows.length
+    const intakeByDate: Record<string, number> = {};
+    for (const r of nutritionRows ?? []) {
+      const d = (r as any).entry_date as string;
+      intakeByDate[d] = (intakeByDate[d] ?? 0) + Number((r as any).estimated_calories ?? 0);
+    }
+    const dailyTotals = Object.values(intakeByDate);
+    const avgIntake = dailyTotals.length > 0
+      ? dailyTotals.reduce((a, b) => a + b, 0) / dailyTotals.length
       : null;
 
     const underFuelled = targetCalories != null && avgIntake != null && avgIntake < targetCalories * 0.80;
