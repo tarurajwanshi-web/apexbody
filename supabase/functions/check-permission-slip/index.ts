@@ -89,13 +89,13 @@ Deno.serve(async (req) => {
   // Get latest readiness score
   const { data: readiness } = await supa
     .from("readiness_scores")
-    .select("overall_score, entry_date")
+    .select("final_score, score_date")
     .eq("user_id", user_id)
-    .order("entry_date", { ascending: false })
+    .order("score_date", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  const readinessScore = readiness?.overall_score || 0;
+  const readinessScore = readiness?.final_score || 0;
 
   // Get training load from nutrition_weekly_reviews
   const { data: weeklyReview } = await supa
