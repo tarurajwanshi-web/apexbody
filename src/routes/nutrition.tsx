@@ -211,7 +211,7 @@ function Nutrition() {
         p_days_logged: weeklyReview.days_logged,
         p_adherence_pct: weeklyReview.adherence_pct,
         p_eligible: weeklyReview.eligible,
-        p_confidence_tier: weeklyReview.confidence_tier,
+        p_confidence_tier: weeklyReview.confidence_tier ?? "low",
         p_abnormal_week: weeklyReview.abnormal_week,
         p_old_target_calories: weeklyReview.old_target_calories,
         p_old_observed_tdee: weeklyReview.old_observed_tdee ?? 0,
