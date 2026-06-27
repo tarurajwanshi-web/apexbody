@@ -346,6 +346,7 @@ function WorkoutsPage() {
 
       {preCheckOpen && (
         <PreWorkoutCheckSheet
+          volumeChoice={volumeChoice}
           onClose={() => setPreCheckOpen(false)}
           onSaved={() => { setPreCheckOpen(false); setSessionStarted(true); }}
         />
