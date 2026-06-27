@@ -487,6 +487,7 @@ export type Database = {
           id: string
           session_readiness: number
           user_id: string
+          volume_adjustment: string | null
         }
         Insert: {
           created_at?: string
@@ -494,6 +495,7 @@ export type Database = {
           id?: string
           session_readiness: number
           user_id: string
+          volume_adjustment?: string | null
         }
         Update: {
           created_at?: string
@@ -501,6 +503,7 @@ export type Database = {
           id?: string
           session_readiness?: number
           user_id?: string
+          volume_adjustment?: string | null
         }
         Relationships: []
       }
