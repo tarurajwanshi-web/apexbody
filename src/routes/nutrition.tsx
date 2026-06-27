@@ -129,7 +129,7 @@ function Nutrition() {
   const fetchHydration = useServerFn(getTodayHydration);
   const fetchHydrationEvents = useServerFn(getTodayHydrationEvents);
   const fetchWeekly = useServerFn(getWeeklyNutritionInsight);
-  const fetchMacroReview = null; // removed — replaced by direct supabase query
+  const softDelete = useServerFn(softDeleteMeal);
 
   const debugReadMeal = useServerFn(debugReadMealById);
   const deleteWater = useServerFn(deleteHydrationEvent);
