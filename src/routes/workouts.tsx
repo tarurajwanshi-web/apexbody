@@ -277,11 +277,11 @@ function WorkoutsPage() {
             if (!todayDay) return null;
             if (sessionStarted) return null;
             // Readiness gate — only if score is low and user hasn't picked yet.
-            if (todayReadiness !== null && todayReadiness < 45 && volumeChoice === null && !todayDay.rest) {
+            if ((todayReadiness ?? 50) < 45 && volumeChoice === null && !todayDay.rest) {
               return (
                 <div className="mx-5 mt-4 rounded-2xl border-l-4 border-amber-500 bg-amber-500/10 p-4">
                   <p className="text-[10px] uppercase tracking-wider text-amber-300">Low readiness</p>
-                  <p className="mt-1 text-[14px] text-text-primary">Readiness is {Math.round(todayReadiness)}. Consider scaling back.</p>
+                  <p className="mt-1 text-[14px] text-text-primary">Readiness is {Math.round(todayReadiness ?? 50)}. Consider scaling back.</p>
                   <div className="mt-3 flex flex-col gap-2">
                     <button onClick={() => setVolumeChoice('reduced')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Reduce volume (−30%)</button>
                     <button onClick={() => setVolumeChoice('recovery')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Recovery session (−50%)</button>
@@ -346,6 +346,7 @@ function WorkoutsPage() {
 
       {preCheckOpen && (
         <PreWorkoutCheckSheet
+          volumeChoice={volumeChoice}
           onClose={() => setPreCheckOpen(false)}
           onSaved={() => { setPreCheckOpen(false); setSessionStarted(true); }}
         />
@@ -756,7 +757,7 @@ const READINESS_OPTIONS: { value: number; emoji: string; label: string }[] = [
   { value: 5, emoji: "🤩", label: "Great" },
 ];
 
-function PreWorkoutCheckSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function PreWorkoutCheckSheet({ onClose, onSaved, volumeChoice }: { onClose: () => void; onSaved: () => void; volumeChoice: "full" | "reduced" | "recovery" | null }) {
   const [saving, setSaving] = useState(false);
 
   const save = async (value: number) => {
@@ -769,6 +770,7 @@ function PreWorkoutCheckSheet({ onClose, onSaved }: { onClose: () => void; onSav
         user_id: uid,
         entry_date: todayISO(),
         session_readiness: value,
+        volume_adjustment: volumeChoice ?? 'full',
       });
       if (error) throw error;
       toast.success("Logged - let's go.");
