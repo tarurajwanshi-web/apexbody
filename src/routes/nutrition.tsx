@@ -698,7 +698,9 @@ function Nutrition() {
         open={weeklySheetOpen}
         onClose={() => setWeeklySheetOpen(false)}
         initialAnchor={selectedDate}
-        macroReview={macroReview}
+        review={weeklyReview}
+        applying={applyingReview}
+        onApply={handleApplyReview}
       />
 
     </div>
