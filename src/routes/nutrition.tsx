@@ -170,7 +170,23 @@ function Nutrition() {
         : Promise.resolve(setHydration(null)),
       fetchHydrationEvents(dateArg).then(setHydrationEvents).catch(() => setHydrationEvents([])),
       fetchWeekly(weeklyArg).then(setWeekly).catch(() => setWeekly(null)),
-      fetchMacroReview().then(setMacroReview).catch(() => setMacroReview(null)),
+      (async () => {
+        try {
+          const { data: u } = await supabase.auth.getUser();
+          const uid = u.user?.id;
+          if (!uid) { setWeeklyReview(null); return; }
+          const { data } = await supabase
+            .from("nutrition_weekly_reviews")
+            .select("id, decision, confidence_tier, flag_reason, new_target_calories, old_target_calories, adjustment_kcal, applied_target_id, applied_at, week_start_date, week_end_date, days_logged, weigh_in_count, training_load_index, bmr, target_protein_g, target_carbs_g, target_fat_g, blended_tdee, new_observed_tdee, old_observed_tdee, raw_target_calories, adherence_pct, eligible, abnormal_week, timezone_used")
+            .eq("user_id", uid)
+            .is("applied_target_id", null)
+            .in("decision", ["reduce", "increase", "capped"])
+            .order("week_start_date", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          setWeeklyReview((data as WeeklyReviewRow | null) ?? null);
+        } catch { setWeeklyReview(null); }
+      })(),
     ]);
     setLastUpdatedAt(Date.now());
     setRefreshing(false);
