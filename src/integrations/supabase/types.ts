@@ -956,6 +956,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      apply_existing_weekly_macro_review: {
+        Args: { p_effective_start_date?: string; p_review_id: string }
+        Returns: string
+      }
       apply_onboarding_macros: {
         Args: {
           p_bmr: number
@@ -967,36 +971,6 @@ export type Database = {
           p_target_protein_g: number
           p_tdee: number
           p_user_id: string
-        }
-        Returns: string
-      }
-      apply_weekly_macro_review: {
-        Args: {
-          p_abnormal_week: boolean
-          p_adherence_pct: number
-          p_adjustment_kcal: number
-          p_blended_tdee: number
-          p_bmr: number
-          p_confidence_tier: string
-          p_days_logged: number
-          p_decision: string
-          p_effective_start_date: string
-          p_eligible: boolean
-          p_flag_reason: string
-          p_new_observed_tdee: number
-          p_new_target_calories: number
-          p_old_observed_tdee: number
-          p_old_target_calories: number
-          p_raw_target_calories: number
-          p_review_id: string
-          p_target_carbs_g: number
-          p_target_fat_g: number
-          p_target_protein_g: number
-          p_timezone_used: string
-          p_user_id: string
-          p_week_end_date: string
-          p_week_start_date: string
-          p_weigh_in_count: number
         }
         Returns: string
       }
