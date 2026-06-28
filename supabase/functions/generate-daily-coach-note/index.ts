@@ -286,6 +286,10 @@ Instructions:
       const response = await anthropic.messages.create({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 400,
+        system: buildApexSystemPrompt({
+          proficiency: (profile as any).experience_level,
+          name: (profile as any).name,
+        }),
         messages: [{ role: "user", content: haikuPrompt }],
       });
       coachNote = response.content[0].type === "text"
