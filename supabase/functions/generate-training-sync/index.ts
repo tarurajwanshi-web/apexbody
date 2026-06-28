@@ -196,6 +196,10 @@ Output: Plain text, 150-200 words. Start with 🏋️`;
       const response = await anthropic.messages.create({
         model: "claude-sonnet-4-6",
         max_tokens: 400,
+        system: buildApexSystemPrompt({
+          proficiency: (profile as any).experience_level,
+          name: (profile as any).name,
+        }),
         messages: [{ role: "user", content: sonnetPrompt }],
       });
       trainingCard = response.content[0].type === "text"
