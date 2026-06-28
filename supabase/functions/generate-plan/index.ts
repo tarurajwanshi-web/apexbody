@@ -43,7 +43,7 @@ async function callClaude(apiKey: string, prompt: string) {
       system:
         "You are an expert evidence-based strength & conditioning coach. " +
         "Respond with ONLY a single JSON object, no prose, no markdown fences. " +
-        "Schema: { \"days\": [ { \"day\": 1-7, \"day_name\": \"Monday\"...\"Sunday\", \"session_name\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string, \"progression_note\": string } ] } ] }. " +
+        "Schema: { \"days\": [ { \"day\": 1-7, \"day_name\": \"Monday\"...\"Sunday\", \"session_name\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string, \"progression_note\": string } ] } ], \"volume_gate_alert\": string|null }. " +
         "progression_note is short (max ~8 words) guidance based on the user's recent history for that exercise — e.g. \"+2.5% from last week\", \"hold weight, +1 rep\", \"deload 10%\", or \"new exercise — start moderate\". " +
         "Always return exactly 7 days starting Monday. Rest days have rest=true, session_name=null, exercises=[]. " +
         "The 'cue' field is ONE sharp coaching correction — the single thing you'd shout mid-set to fix that exercise's most common failure point. " +
@@ -200,8 +200,8 @@ Deno.serve(async (req) => {
         : "Intermediate: 3-4 sets, balanced compound + accessory split, standard rep ranges for the goal.";
 
     const readinessNote = lowReadiness
-      ? `\nREADINESS ALERT: User's avg readiness score this week is ${Math.round(avgReadiness!)}. Reduce total weekly volume by ~20% (drop 1 set per exercise). Add a session_note: "Low readiness detected — keeping volume conservative this week."`
-      : "";
+      ? `\nREADINESS ALERT: User's avg readiness score this week is ${Math.round(avgReadiness!)}. Reduce total weekly volume by ~20% (drop 1 set per exercise). Set "volume_gate_alert" to exactly: "Low readiness detected — keeping volume conservative this week. Reduce to 3 sets per exercise instead of 4-5 if needed."`
+      : `\nReadiness is adequate. Set "volume_gate_alert" to null.`;
 
     const fuelNote = underFuelled
       ? `\nFUELLING ALERT: User is averaging ${Math.round(avgIntake!)} kcal/day vs ${Math.round(targetCalories!)} kcal target — under-fuelled. Do not programme to failure. Add a session_note: "Under-fuelled this week — stop 2-3 reps short of failure on all sets."`
@@ -241,6 +241,16 @@ Deno.serve(async (req) => {
     const week_start_date = upcomingMonday();
     const unlock_date = addDays(week_start_date, 7);
 
+    const { days: planDays, volume_gate_alert: planAlert } = plan ?? {};
+    const normalized = {
+      days: planDays ?? [],
+      volume_gate_alert: lowReadiness
+        ? (typeof planAlert === "string" && planAlert.trim().length > 0
+            ? planAlert
+            : "Low readiness detected — keeping volume conservative this week. Reduce to 3 sets per exercise instead of 4-5 if needed.")
+        : null,
+    };
+
     const { error: upErr } = await supa
       .from("weekly_plans")
       .upsert({
@@ -248,12 +258,12 @@ Deno.serve(async (req) => {
         week_start_date,
         unlock_date,
         is_locked: true,
-        plan_data: plan,
+        plan_data: normalized,
         generated_by: "claude-plan-v1",
       }, { onConflict: "user_id,week_start_date" });
     if (upErr) throw upErr;
 
-    return new Response(JSON.stringify({ ok: true, week_start_date, unlock_date, plan }), {
+    return new Response(JSON.stringify({ ok: true, week_start_date, unlock_date, plan: normalized }), {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {
