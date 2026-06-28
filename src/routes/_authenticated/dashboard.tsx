@@ -364,6 +364,9 @@ function Dashboard() {
             </div>
           </div>
         )}
+        <Suspense fallback={null}>
+          <ContradictionCard />
+        </Suspense>
         <CoachingFeed />
 
         <SectionLabel>Training history</SectionLabel>
