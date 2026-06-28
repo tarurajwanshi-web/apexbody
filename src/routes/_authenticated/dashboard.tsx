@@ -351,6 +351,18 @@ function Dashboard() {
         )}
         <CoachingFeed />
 
+        <SectionLabel>Training history</SectionLabel>
+        <Suspense fallback={<SkeletonBlock />}><ExerciseHistoryPanel /></Suspense>
+
+        <SectionLabel>This week's volume</SectionLabel>
+        <Suspense fallback={<SkeletonBlock />}><MuscleGroupVolumeGrid /></Suspense>
+
+        <SectionLabel>Weight trend</SectionLabel>
+        <Suspense fallback={<SkeletonBlock />}><WeightTrendChart /></Suspense>
+
+        <SectionLabel>TDEE trend</SectionLabel>
+        <Suspense fallback={<SkeletonBlock />}><TDEETrendChart /></Suspense>
+
         <div style={{ marginTop: 24, display: "flex", justifyContent: "center" }}>
           <button
             onClick={async () => {
