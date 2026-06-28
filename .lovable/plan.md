@@ -1,108 +1,159 @@
-# Plan: Coach Dashboard — 4 Panels (Single Build)
+# Plan: Contradiction Detection Card
 
-No schema changes. Reads only. All auth-gated via `requireSupabaseAuth`.
+No schema changes. Reads only. Auth-gated.
 
 ## Files
 
-**New (4)**
-- `src/components/dashboard/ExerciseHistoryPanel.tsx`
-- `src/components/dashboard/MuscleGroupVolumeGrid.tsx`
-- `src/components/dashboard/WeightTrendChart.tsx`
-- `src/components/dashboard/TDEETrendChart.tsx`
+**New (1)**
 
-**Modified (2)**
-- `src/lib/coach.functions.ts` — add 4 server fns
-- `src/routes/_authenticated/dashboard.tsx` — mount panels with Suspense
+- `src/components/dashboard/ContradictionCard.tsx`
 
-**Dependency check**: `recharts` is already used in repo (per `MetricCards`/`Sparkline` ecosystem). I'll verify on build; if missing, `bun add recharts`.
+**Modified (3)**
 
----
+- `src/lib/coach.functions.ts` — add `getContradictions()`
+- `supabase/functions/generate-daily-coach-note/index.ts` — detect contradictions, inject into Haiku prompt
+- `src/routes/_authenticated/dashboard.tsx` — mount card above `CoachingFeed`
 
-## Server functions (`src/lib/coach.functions.ts`)
+The Edge Function can't import `src/lib/coach.functions.ts` (Deno vs Node), so the detection logic gets factored into a small pure helper used by both surfaces:
 
-All four use `.middleware([requireSupabaseAuth])`, no input validator (or empty z.object).
+- `supabase/functions/_shared/contradictions.ts` (new) — pure `detectContradictions(ctx)` function
+- The server fn duplicates the same rules in TS (small enough, ~40 lines)
 
-### `getExerciseHistory()`
-- Query `workout_set_logs` for `user_id = context.userId`, `entry_date >= today-30d`, `completed = true`
-- Cols: `exercise_name, entry_date, weight_kg, reps_completed, rir, muscle_group`
-- JS aggregate:
-  - Top 5 exercises by set count
-  - Per exercise: last 5 sessions (max weight×reps per date), best set this month, 4-week volume & RIR series (ISO week bucket), `rirTrend = week4 - week1`, `deloadSuggested = rirTrend < -1.0`
-- Returns `{ exercises: [{ name, lastFiveSessions, bestSet, volumeSeries, rirSeries, rirTrend, deloadSuggested }] }`
+Actually cleaner: keep the rules in **one** place — `supabase/functions/_shared/contradictions.ts` is Deno-only. So:
 
-### `getMuscleGroupWeeklyVolume()`
-- Resolve TZ via `resolveUserTimezone` + `getLocalDateISO`; compute Mon–Sun in user TZ
-- Query `workout_set_logs` for current week (completed=true), select `muscle_group`
-- Normalize to 6 buckets: chest, back, shoulders, legs (glutes/quads/hamstrings/calves), arms (biceps/triceps/forearms), core (abs/obliques/core)
-- Returns `{ groups: { chest, back, shoulders, legs, arms, core } }`
-
-### `getWeightTrend()`
-- Query `body_measurement_events` for last 30 days where `weight_kg IS NOT NULL`, ASC
-- JS: 7-day rolling avg (use available window for early days); `weightDelta = latest - oldest (≤4wk back)`; `trendArrow` string ("↓ 1.2 kg in 4 weeks", "→ Stable", "↑ 0.5 kg")
-- Returns `{ rawWeight, smoothedTrend, weightDelta, trendArrow }`
-
-### `getTDEETrend()`
-- Query `nutrition_weekly_reviews` for last 12 weeks; select `week_start_date, blended_tdee`, ASC
-- Compute `trendDirection`: compare first-4-weeks avg vs last-4-weeks avg (Δ > +100 → positive; |Δ| ≤ 100 → flat; Δ < -100 → negative)
-- Build annotation strings per direction
-- Returns `{ weeks, trendDirection, annotation }`
+- New shared module: `src/lib/contradictions.ts` (pure, no imports) — used by the server fn
+- The Edge Function inlines the same `detectContradictions()` function (or imports via relative path from `supabase/functions/_shared/contradictions.ts` — Deno-safe). I'll create **two** files with identical logic since the runtimes don't share modules. The pure function is ~50 lines; drift risk is acceptable and called out in a header comment in both files.
 
 ---
 
-## Components
+## Detection rules (`detectContradictions`)
 
-All four:
-- `useSuspenseQuery` + `useServerFn`
-- `staleTime: 1h`, `gcTime: 2h`
-- APEX tokens (`T.surface`, `T.border`, `T.text1/2`)
-- Allowed font sizes only: 10/12/14/16/18/20px; no bold variants; no `rounded-3xl`; avoid `text-text-accent` in dashboard scope (lint compliance)
+Input shape:
 
-### `ExerciseHistoryPanel.tsx`
-Per-exercise card: name + volume sparkline (right) → last 5 sessions list (`date · Xkg × Y @ RIR Z`) → "Best: …" → RIR sparkline (green if `rirTrend ≥ 0`, red if `< 0`) → amber callout if `deloadSuggested`.
-Empty state: "Log a few sessions to see your exercise history."
-
-### `MuscleGroupVolumeGrid.tsx`
-Fixed order [Chest, Back, Shoulders, Legs, Arms, Core].
-Grid: `grid-cols-3 md:grid-cols-6`.
-Color: green `#10B981` (10–20), yellow `#D97706` (5–9 or 21–25), red `#EF4444` (<5 or >25).
-Cell: muscle label (10px uppercase tracked) · set count (20px) · "sets" (10px).
-
-### `WeightTrendChart.tsx`
-Recharts `LineChart`: smoothed line (bold, `T.primary`), raw line (light, dotted). XAxis `date`, YAxis weight. Trend arrow caption beneath.
-Empty state: "Log weight measurements to see trends."
-
-### `TDEETrendChart.tsx`
-Recharts `LineChart` of `blendedTDEE` per week. Line color from `trendDirection` (green/amber/red). Annotation caption beneath.
-Empty state: "Track your nutrition to see TDEE trends."
-
----
-
-## Dashboard mount (`src/routes/_authenticated/dashboard.tsx`)
-
-After existing `CoachingFeed` block, before the debug seed button:
-
-```tsx
-<SectionLabel>Training history</SectionLabel>
-<Suspense fallback={<SkeletonRow />}><ExerciseHistoryPanel /></Suspense>
-
-<SectionLabel>This week's volume</SectionLabel>
-<Suspense fallback={<SkeletonRow />}><MuscleGroupVolumeGrid /></Suspense>
-
-<SectionLabel>Weight trend</SectionLabel>
-<Suspense fallback={<SkeletonRow />}><WeightTrendChart /></Suspense>
-
-<SectionLabel>TDEE trend</SectionLabel>
-<Suspense fallback={<SkeletonRow />}><TDEETrendChart /></Suspense>
+```ts
+{
+  goal: string | null,                  // muscle_gain | fat_loss | recomposition | strength | athletic_performance
+  adjustmentKcal: number | null,        // from latest nutrition_weekly_reviews
+  adherencePct: number | null,
+  avgStrain7d: number | null,
+  avgRir7d: number | null,
+  sets7d: number,
+  readinessToday: number | null,
+}
 ```
 
-Add imports + `Suspense` from React. `SkeletonRow` = lightweight placeholder div using `T.surface`.
+Output:
 
----
+```ts
+{
+  detected: boolean,
+  contradictions: Array<{
+    type: 'muscle_gain_deficit' | 'overreaching' | 'fat_loss_collapse' | 'volume_readiness',
+    severity: 'high' | 'medium',
+    message: string,        // 2 sentences max
+    actionTitle: string,
+    actionBody: string,     // 1 sentence
+  }>
+}
+```
 
-## Risks / notes
+Rules (in order):
 
-- Container is `max-w-[480px]`; muscle grid's `md:grid-cols-6` will still render 6 cells but compressed. Acceptable per spec (mobile-first dashboard).
-- `nutrition_weekly_reviews.blended_tdee` confirmed in schema (RPC references it).
-- `workout_set_logs.muscle_group` present (RIR task added it).
-- `body_measurement_events.weight_kg` + `entry_date` confirmed.
-- All queries scoped by RLS via `requireSupabaseAuth` context.supabase.
+1. `muscle_gain_deficit` — goal=muscle_gain && adjustmentKcal < -200 → high
+2. `overreaching` — avgStrain7d > 10 && readinessToday < 45 && avgRir7d < 1.5 → high
+3. `fat_loss_collapse` — goal=fat_loss && adherencePct < 50 && adjustmentKcal < -200 → high
+4. `volume_readiness` — sets7d > 20 && readinessToday < 40 → high (medium if readiness 40–50)
+
+Each rule emits the exact message/action copy from the spec, parameterized with the user's numbers where helpful (e.g. "250 kcal deficit").
+
+## `getContradictions()` server fn
+
+In `src/lib/coach.functions.ts`, `.middleware([requireSupabaseAuth])`, no input. Inside handler:
+
+- Resolve TZ via `resolveUserTimezone` + `getLocalDateISO` for today
+- Parallel queries (all RLS-scoped via `context.supabase`):
+  - `profiles.goal`
+  - latest `nutrition_weekly_reviews` row (order desc, limit 1): `adjustment_kcal, adherence_pct, confidence_tier`
+  - `readiness_scores` for today: `final_score`
+  - `shield_training_logs` last 7 days: `strain_value` → JS avg
+  - `workout_set_logs` last 7 days completed=true → count
+  - `workout_set_logs` last 7 days `rir` → JS avg (non-null)
+- Build input ctx, call `detectContradictions(ctx)` from `@/lib/contradictions`
+- Return result; sort `contradictions` so `severity:'high'` first
+- Cached 1h via TanStack Query on client
+
+## Component `ContradictionCard.tsx`
+
+- `useSuspenseQuery` w/ `queryKey: ['coach','contradictions']`, 1h stale / 2h gc
+- Returns `null` if `!data.detected`
+- Renders an amber/red-bordered card using APEX tokens:
+  - Header: small "!" badge (red bg if high, amber if medium) + label "Your plan has a contradiction"
+  - Message (text1, 14px, 2 lines)
+  - Action block (nested surface2 panel): `actionTitle` (12px uppercase tracked, label color) + `actionBody` (text2, 13px)
+  - Footer: severity pill ("High confidence" red / "Medium confidence" amber) — no emoji per project markdown-stripping convention
+  - If `contradictions.length > 1`: small "+N other signal(s)" line at bottom
+- Allowed font sizes only: 10/12/13/14/20. No bold variants. No `rounded-3xl`. No `text-text-accent`. Inline colors via `T.red`, `T.amber`, `T.surface`, `T.surface2`, `T.text1/2/3`, `T.label`, `T.border`.
+
+## Dashboard mount
+
+In `src/routes/_authenticated/dashboard.tsx` Coach section, just **before** `<CoachingFeed />`:
+
+```tsx
+<Suspense fallback={null}>
+  <ContradictionCard />
+</Suspense>
+```
+
+Add the import alongside the existing dashboard component imports.
+
+## Edge function integration (`generate-daily-coach-note`)
+
+After the macro target / meal aggregation block and before building `haikuPrompt`:
+
+1. Query the same signals as the server fn (latest weekly review, today's readiness, last-7-day strain avg, last-7-day sets count, last-7-day RIR avg)
+2. Call inlined `detectContradictions(...)` (copied into the file from the shared spec, or imported from `_shared/contradictions.ts` — I'll go with `_shared/contradictions.ts` to keep one Deno source of truth)
+3. If `detected`, take highest-severity contradiction and prepend a `CONTRADICTION ALERT:` block to `haikuPrompt`:
+
+```
+CONTRADICTION ALERT:
+{message}
+
+Action: {actionBody}
+Severity: {severity}
+
+Override your generic coaching today. Lead with this contradiction in your first sentence. Then provide your normal nutrition observations briefly.
+```
+
+Existing instruction list and 150–200 word target stay intact. No changes to storage / idempotency / cron. No model change.
+
+## File layout summary
+
+- `src/lib/contradictions.ts` — pure rule fn (TS, no deps)
+- `supabase/functions/_shared/contradictions.ts` — Deno copy with identical rules + comment "keep in sync with src/lib/contradictions.ts"
+- `src/lib/coach.functions.ts` — append `getContradictions()`
+- `src/components/dashboard/ContradictionCard.tsx` — new
+- `src/routes/_authenticated/dashboard.tsx` — import + Suspense mount before `<CoachingFeed />`
+- `supabase/functions/generate-daily-coach-note/index.ts` — import shared rule, query signals, prepend alert to prompt
+
+## Action  
+
+
+✅ Integrate contradiction detection INTO the daily coaching note generation — not as separate card logic
+
+Single Haiku inference per user per day (contradiction context + coaching in one prompt)
+
+User sees unified response, not "contradiction card" + "generic coaching"
+
+Saves 50% token cost
+
+✅ Output format: NO MARKDOWN, plain prose
+
+Card renders as clean prose blocks, not formatted text
+
+Message: 2 sentences, plain English
+
+Action: 1 sentence, directive
+
+No emojis, no bold, no bullet points
+
+5-second scan time max

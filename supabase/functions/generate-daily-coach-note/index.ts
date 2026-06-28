@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import Anthropic from "https://esm.sh/@anthropic-ai/sdk@0.24.0";
 import { requireInternalSecret, corsAllowHeaders } from "../_shared/authorize.ts";
+import { detectContradictions } from "../_shared/contradictions.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -178,8 +179,58 @@ Deno.serve(async (req) => {
     const weekFlags = (weekMeals ?? []).flatMap(m => m.flags || []);
     const weekInsights = (weekMeals ?? []).map(m => m.coach_insight).filter(Boolean);
 
+    // ---------- Contradiction detection ----------
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const sevenAgoStr = sevenDaysAgo.toISOString().slice(0, 10);
+
+    const [reviewRes, readinessRes, strainRes, setsRes] = await Promise.all([
+      supa.from("nutrition_weekly_reviews")
+        .select("adjustment_kcal, adherence_pct, week_start_date")
+        .eq("user_id", profile.user_id)
+        .order("week_start_date", { ascending: false }).limit(1).maybeSingle(),
+      supa.from("readiness_scores").select("final_score")
+        .eq("user_id", profile.user_id).eq("score_date", today).maybeSingle(),
+      supa.from("shield_training_logs").select("strain_value")
+        .eq("user_id", profile.user_id)
+        .gte("entry_date", sevenAgoStr).lte("entry_date", today),
+      supa.from("workout_set_logs").select("rir")
+        .eq("user_id", profile.user_id).eq("completed", true)
+        .gte("entry_date", sevenAgoStr).lte("entry_date", today),
+    ]);
+
+    const strains = (strainRes.data ?? [])
+      .map((r: { strain_value: number | null }) => r.strain_value)
+      .filter((v: number | null): v is number => typeof v === "number");
+    const avgStrain7d = strains.length ? strains.reduce((s: number, v: number) => s + v, 0) / strains.length : null;
+    const setRows = (setsRes.data ?? []) as { rir: number | null }[];
+    const sets7d = setRows.length;
+    const rirs = setRows.map((r) => r.rir).filter((v): v is number => typeof v === "number");
+    const avgRir7d = rirs.length ? rirs.reduce((s, v) => s + v, 0) / rirs.length : null;
+
+    const contradictionResult = detectContradictions({
+      goal: profile.goal ?? null,
+      adjustmentKcal: reviewRes.data?.adjustment_kcal == null ? null : Number(reviewRes.data.adjustment_kcal),
+      adherencePct: reviewRes.data?.adherence_pct == null ? null : Number(reviewRes.data.adherence_pct),
+      avgStrain7d,
+      avgRir7d,
+      sets7d,
+      readinessToday: readinessRes.data?.final_score == null ? null : Number(readinessRes.data.final_score),
+    });
+
+    const contradictionBlock = contradictionResult.detected
+      ? `CONTRADICTION ALERT (HIGHEST PRIORITY — lead with this):
+Message: ${contradictionResult.contradictions[0].message}
+Action: ${contradictionResult.contradictions[0].actionBody}
+Severity: ${contradictionResult.contradictions[0].severity}
+
+Open your note by stating this contradiction in plain prose (no markdown, no emojis, no bullets), then give the corrective action, then briefly cover today's nutrition observations.
+
+`
+      : "";
+
     // Build Haiku prompt
-    const haikuPrompt = `You are a personal nutrition coach reviewing your client's eating for today.
+    const haikuPrompt = `${contradictionBlock}You are a personal nutrition coach reviewing your client's eating for today.
 
 User profile:
 - Goal: ${profile.goal || "fat_loss"}

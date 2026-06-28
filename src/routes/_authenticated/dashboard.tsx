@@ -4,6 +4,7 @@ import { ExerciseHistoryPanel } from "@/components/dashboard/ExerciseHistoryPane
 import { MuscleGroupVolumeGrid } from "@/components/dashboard/MuscleGroupVolumeGrid";
 import { WeightTrendChart } from "@/components/dashboard/WeightTrendChart";
 import { TDEETrendChart } from "@/components/dashboard/TDEETrendChart";
+import { ContradictionCard } from "@/components/dashboard/ContradictionCard";
 
 function SkeletonBlock() {
   return (
@@ -363,6 +364,9 @@ function Dashboard() {
             </div>
           </div>
         )}
+        <Suspense fallback={null}>
+          <ContradictionCard />
+        </Suspense>
         <CoachingFeed />
 
         <SectionLabel>Training history</SectionLabel>
