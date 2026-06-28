@@ -5,6 +5,7 @@ import { MuscleGroupVolumeGrid } from "@/components/dashboard/MuscleGroupVolumeG
 import { WeightTrendChart } from "@/components/dashboard/WeightTrendChart";
 import { TDEETrendChart } from "@/components/dashboard/TDEETrendChart";
 import { ContradictionCard } from "@/components/dashboard/ContradictionCard";
+import { BodyCompCard } from "@/components/dashboard/BodyCompCard";
 
 function SkeletonBlock() {
   return (
@@ -371,6 +372,9 @@ function Dashboard() {
 
         <SectionLabel>Training history</SectionLabel>
         <Suspense fallback={<SkeletonBlock />}><ExerciseHistoryPanel /></Suspense>
+
+        <SectionLabel>Body composition</SectionLabel>
+        <Suspense fallback={<SkeletonBlock />}><BodyCompCard /></Suspense>
 
         <SectionLabel>This week's volume</SectionLabel>
         <Suspense fallback={<SkeletonBlock />}><MuscleGroupVolumeGrid /></Suspense>
