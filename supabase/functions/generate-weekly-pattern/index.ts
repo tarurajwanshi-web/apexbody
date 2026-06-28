@@ -239,7 +239,7 @@ Deno.serve(async (req) => {
 
   const profileQuery = supa
     .from("profiles")
-    .select("user_id, timezone, goal, measurement_weight_kg, biological_sex, age")
+    .select("user_id, timezone, goal, measurement_weight_kg, biological_sex, age, name, experience_level")
     .not("profile_completed_at", "is", null);
   if (body.user_id) profileQuery.eq("user_id", body.user_id);
   const { data: profiles, error: profileErr } = await profileQuery;
