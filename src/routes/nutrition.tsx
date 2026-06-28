@@ -1192,6 +1192,7 @@ function WeeklyGraphSheet({
   onClose,
   initialAnchor,
   review,
+  daysLogged,
   applying,
   onApply,
 }: {
@@ -1199,6 +1200,7 @@ function WeeklyGraphSheet({
   onClose: () => void;
   initialAnchor: string;
   review: WeeklyReviewRow | null;
+  daysLogged: number;
   applying: boolean;
   onApply: () => void;
 }) {
