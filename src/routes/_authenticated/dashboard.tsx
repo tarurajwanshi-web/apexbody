@@ -1,5 +1,23 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { ExerciseHistoryPanel } from "@/components/dashboard/ExerciseHistoryPanel";
+import { MuscleGroupVolumeGrid } from "@/components/dashboard/MuscleGroupVolumeGrid";
+import { WeightTrendChart } from "@/components/dashboard/WeightTrendChart";
+import { TDEETrendChart } from "@/components/dashboard/TDEETrendChart";
+
+function SkeletonBlock() {
+  return (
+    <div
+      style={{
+        height: 120,
+        borderRadius: 12,
+        background: T.surface,
+        opacity: 0.5,
+        animation: "apex-pulse 1.6s ease-in-out infinite",
+      }}
+    />
+  );
+}
 import { useProfile } from "@/lib/store";
 import { supabase } from "@/integrations/supabase/client";
 import { useUserTimezone, getLocalDateISO, addDaysISO } from "@/lib/dates";
@@ -346,6 +364,18 @@ function Dashboard() {
           </div>
         )}
         <CoachingFeed />
+
+        <SectionLabel>Training history</SectionLabel>
+        <Suspense fallback={<SkeletonBlock />}><ExerciseHistoryPanel /></Suspense>
+
+        <SectionLabel>This week's volume</SectionLabel>
+        <Suspense fallback={<SkeletonBlock />}><MuscleGroupVolumeGrid /></Suspense>
+
+        <SectionLabel>Weight trend</SectionLabel>
+        <Suspense fallback={<SkeletonBlock />}><WeightTrendChart /></Suspense>
+
+        <SectionLabel>TDEE trend</SectionLabel>
+        <Suspense fallback={<SkeletonBlock />}><TDEETrendChart /></Suspense>
 
         <div style={{ marginTop: 24, display: "flex", justifyContent: "center" }}>
           <button

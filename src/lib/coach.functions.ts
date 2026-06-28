@@ -183,3 +183,236 @@ export const analyzePhoto = createServerFn({ method: "POST" })
     });
     return { content };
   });
+
+// =============== Coach dashboard data fns ===============
+import { addDaysISO, getLocalWeekRange } from "@/lib/dates";
+
+type SetRow = {
+  exercise_name: string | null;
+  entry_date: string;
+  weight_kg: number | null;
+  reps_completed: number | null;
+  rir: number | null;
+  muscle_group: string | null;
+};
+
+function isoWeekKey(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1));
+  const dayNum = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((dt.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${dt.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+export const getExerciseHistory = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tz = await resolveUserTimezone(context.supabase, context.userId);
+    const today = getLocalDateISO(tz);
+    const start = addDaysISO(today, -30);
+
+    const { data: rows } = await context.supabase
+      .from("workout_set_logs")
+      .select("exercise_name, entry_date, weight_kg, reps_completed, rir, muscle_group")
+      .eq("user_id", context.userId)
+      .eq("completed", true)
+      .gte("entry_date", start)
+      .lte("entry_date", today);
+
+    const all: SetRow[] = (rows as SetRow[] | null) ?? [];
+
+    // Top 5 by set count
+    const counts = new Map<string, number>();
+    for (const r of all) {
+      if (!r.exercise_name) continue;
+      counts.set(r.exercise_name, (counts.get(r.exercise_name) ?? 0) + 1);
+    }
+    const topNames = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([n]) => n);
+
+    // 4 ISO weeks ending this week
+    const weekKeys: string[] = [];
+    for (let i = 3; i >= 0; i--) weekKeys.push(isoWeekKey(addDaysISO(today, -7 * i)));
+
+    const exercises = topNames.map((name) => {
+      const sets = all.filter((r) => r.exercise_name === name);
+
+      // Group by date — pick top set per date
+      const byDate = new Map<string, SetRow>();
+      for (const s of sets) {
+        const score = (s.weight_kg ?? 0) * (s.reps_completed ?? 0);
+        const cur = byDate.get(s.entry_date);
+        const curScore = cur ? (cur.weight_kg ?? 0) * (cur.reps_completed ?? 0) : -1;
+        if (!cur || score > curScore) byDate.set(s.entry_date, s);
+      }
+      const lastFiveSessions = [...byDate.entries()]
+        .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+        .slice(0, 5)
+        .map(([date, s]) => ({
+          date,
+          weight: Number(s.weight_kg ?? 0),
+          reps: Number(s.reps_completed ?? 0),
+          rir: s.rir == null ? null : Number(s.rir),
+        }));
+
+      // Best set this month
+      let bestSet: { weight: number; reps: number; date: string } | null = null;
+      let bestScore = -1;
+      for (const s of sets) {
+        const score = (s.weight_kg ?? 0) * (s.reps_completed ?? 0);
+        if (score > bestScore) {
+          bestScore = score;
+          bestSet = {
+            weight: Number(s.weight_kg ?? 0),
+            reps: Number(s.reps_completed ?? 0),
+            date: s.entry_date,
+          };
+        }
+      }
+
+      // 4-week volume + RIR series
+      const volBuckets = new Map<string, number>();
+      const rirBuckets = new Map<string, { sum: number; n: number }>();
+      for (const s of sets) {
+        const wk = isoWeekKey(s.entry_date);
+        volBuckets.set(wk, (volBuckets.get(wk) ?? 0) + (s.weight_kg ?? 0) * (s.reps_completed ?? 0));
+        if (s.rir != null) {
+          const cur = rirBuckets.get(wk) ?? { sum: 0, n: 0 };
+          cur.sum += Number(s.rir);
+          cur.n += 1;
+          rirBuckets.set(wk, cur);
+        }
+      }
+      const volumeSeries = weekKeys.map((k) => Math.round(volBuckets.get(k) ?? 0));
+      const rirSeries = weekKeys.map((k) => {
+        const b = rirBuckets.get(k);
+        return b && b.n ? Number((b.sum / b.n).toFixed(2)) : 0;
+      });
+
+      // RIR trend: last non-zero week vs first non-zero week
+      const nonZero = rirSeries.filter((v) => v > 0);
+      const rirTrend =
+        nonZero.length >= 2 ? Number((nonZero[nonZero.length - 1] - nonZero[0]).toFixed(2)) : 0;
+      const deloadSuggested = rirTrend < -1.0;
+
+      return { name, lastFiveSessions, bestSet, volumeSeries, rirSeries, rirTrend, deloadSuggested };
+    });
+
+    return { exercises };
+  });
+
+export const getMuscleGroupWeeklyVolume = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tz = await resolveUserTimezone(context.supabase, context.userId);
+    const today = getLocalDateISO(tz);
+    const { start, end } = getLocalWeekRange(today);
+
+    const { data: rows } = await context.supabase
+      .from("workout_set_logs")
+      .select("muscle_group")
+      .eq("user_id", context.userId)
+      .eq("completed", true)
+      .gte("entry_date", start)
+      .lte("entry_date", end);
+
+    const groups = { chest: 0, back: 0, shoulders: 0, legs: 0, arms: 0, core: 0 };
+    for (const r of (rows as { muscle_group: string | null }[] | null) ?? []) {
+      const g = (r.muscle_group ?? "").toLowerCase().trim();
+      if (!g) continue;
+      if (g === "chest") groups.chest++;
+      else if (g === "back" || g === "lats") groups.back++;
+      else if (g === "shoulders" || g === "delts" || g === "deltoids") groups.shoulders++;
+      else if (["legs", "glutes", "quads", "quadriceps", "hamstrings", "calves"].includes(g)) groups.legs++;
+      else if (["arms", "biceps", "triceps", "forearms"].includes(g)) groups.arms++;
+      else if (["core", "abs", "obliques"].includes(g)) groups.core++;
+    }
+    return { groups };
+  });
+
+export const getWeightTrend = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tz = await resolveUserTimezone(context.supabase, context.userId);
+    const today = getLocalDateISO(tz);
+    const start = addDaysISO(today, -30);
+
+    const { data: rows } = await context.supabase
+      .from("body_measurement_events")
+      .select("entry_date, weight_kg")
+      .eq("user_id", context.userId)
+      .not("weight_kg", "is", null)
+      .gte("entry_date", start)
+      .lte("entry_date", today)
+      .order("entry_date", { ascending: true });
+
+    const raw = ((rows as { entry_date: string; weight_kg: number }[] | null) ?? []).map((r) => ({
+      date: r.entry_date,
+      weight: Number(r.weight_kg),
+    }));
+
+    // 7-day rolling avg over series
+    const smoothed = raw.map((_, i) => {
+      const window = raw.slice(Math.max(0, i - 6), i + 1);
+      const avg = window.reduce((s, p) => s + p.weight, 0) / window.length;
+      return { date: raw[i].date, weight: Number(avg.toFixed(2)) };
+    });
+
+    let weightDelta = 0;
+    let trendArrow = "→ Stable";
+    if (smoothed.length >= 2) {
+      const latest = smoothed[smoothed.length - 1].weight;
+      const oldest = smoothed[0].weight;
+      weightDelta = Number((latest - oldest).toFixed(1));
+      const abs = Math.abs(weightDelta);
+      if (abs < 0.2) trendArrow = "→ Stable";
+      else if (weightDelta < 0) trendArrow = `↓ ${abs.toFixed(1)} kg in ${smoothed.length} days`;
+      else trendArrow = `↑ ${abs.toFixed(1)} kg in ${smoothed.length} days`;
+    }
+
+    return { rawWeight: raw, smoothedTrend: smoothed, weightDelta, trendArrow };
+  });
+
+export const getTDEETrend = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tz = await resolveUserTimezone(context.supabase, context.userId);
+    const today = getLocalDateISO(tz);
+    const start = addDaysISO(today, -7 * 12);
+
+    const { data: rows } = await context.supabase
+      .from("nutrition_weekly_reviews")
+      .select("week_start_date, blended_tdee")
+      .eq("user_id", context.userId)
+      .gte("week_start_date", start)
+      .not("blended_tdee", "is", null)
+      .order("week_start_date", { ascending: true });
+
+    const weeks = ((rows as { week_start_date: string; blended_tdee: number }[] | null) ?? []).map((r) => ({
+      weekStartDate: r.week_start_date,
+      blendedTDEE: Math.round(Number(r.blended_tdee)),
+    }));
+
+    let trendDirection: "positive" | "flat" | "negative" = "flat";
+    let annotation = "TDEE stable. Training load balanced.";
+    if (weeks.length >= 8) {
+      const first4 = weeks.slice(0, 4).reduce((s, w) => s + w.blendedTDEE, 0) / 4;
+      const last4 = weeks.slice(-4).reduce((s, w) => s + w.blendedTDEE, 0) / 4;
+      const delta = last4 - first4;
+      if (delta > 100) {
+        trendDirection = "positive";
+        annotation = `Your metabolism adapted — burning ~${Math.round(delta)} more kcal/day on average.`;
+      } else if (delta < -100) {
+        trendDirection = "negative";
+        annotation = "TDEE declining. Training load increasing or deficit deepening.";
+      }
+    } else if (weeks.length === 0) {
+      annotation = "Not enough weekly data yet.";
+    }
+
+    return { weeks, trendDirection, annotation };
+  });
