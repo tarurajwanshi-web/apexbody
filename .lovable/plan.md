@@ -1,97 +1,81 @@
-# Pattern Memory Explanation Layer
 
-Wrap existing `generate-weekly-pattern` correlations with a Mini AI explanation step, persist alongside patterns, and surface on the dashboard as "Your Recovery Signature".
+# Plan: Fuelling Adequacy Evaluation + Gemini → OpenAI Migration
 
-## 1. Database — new migration
+## Part 1 — Fuelling Adequacy Evaluation
 
-Create `user_recovery_patterns` table (doesn't exist yet):
+### 1a. New table `user_fuelling_evaluations` (migration)
+Columns:
+- `id uuid pk default gen_random_uuid()`
+- `user_id uuid not null references auth.users(id) on delete cascade`
+- `evaluation_date date not null`
+- `total_sets int`, `avg_rir numeric`
+- `calories_consumed numeric`, `calories_target numeric`, `shortfall numeric`
+- `bmr numeric`, `training_cost numeric`
+- `severity text check in ('underfuelled','marginal','adequate')`
+- `severity_score int` (1/2/3)
+- `message text`, `action text`, `mini_explanation text`
+- `created_at timestamptz default now()`
+- Unique `(user_id, evaluation_date)`
 
-```sql
-CREATE TABLE public.user_recovery_patterns (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  pattern_type text NOT NULL,         -- 'exercise_lag' | 'sleep_effect' | ...
-  pattern_key text NOT NULL,          -- e.g. 'deadlift' — for upsert dedup
-  description text NOT NULL,          -- short observation line
-  explanation text,                   -- Mini physiology blurb
-  protocol text,                      -- Mini actionable protocol
-  data_points int NOT NULL DEFAULT 0,
-  correlation_coeff numeric,
-  metadata jsonb DEFAULT '{}'::jsonb, -- raw pattern fields (rir_impact, days, etc.)
-  detected_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (user_id, pattern_type, pattern_key)
-);
+Standard grants (authenticated select own, service_role all), RLS enabled, policy `user_id = auth.uid()` for SELECT.
 
-GRANT SELECT ON public.user_recovery_patterns TO authenticated;
-GRANT ALL ON public.user_recovery_patterns TO service_role;
+### 1b. New Edge Function `supabase/functions/evaluate-fuelling/index.ts`
+- Service-role client, CORS headers.
+- Iterates all users (or accepts `{ user_id }` for targeted runs).
+- For each user, resolves "yesterday" in their local timezone (from `profiles.timezone`), so cron can run hourly and only act at local 6am.
+- Queries yesterday's `workout_set_logs` (sum sets where `completed=true`, avg `rir`), `shield_nutrition_logs` (sum kcal + macros), active `daily_macro_targets` (BMR), `profiles` (goal, experience).
+- Computes top-20% volume tier from trailing 30-day total sets across all users (cached per run).
+- Filter: skip if `total_sets < 15` or user not in top 20%.
+- Decision tree as spec'd → severity / message / action.
+- If `severity_score >= 2`: call OpenAI (`gpt-5-mini` via Lovable Gateway) for `{explanation, protocol}` JSON.
+- Upsert into `user_fuelling_evaluations` on `(user_id, evaluation_date)`.
 
-ALTER TABLE public.user_recovery_patterns ENABLE ROW LEVEL SECURITY;
+### 1c. Cron registration
+`cron.schedule` every hour calling the function with empty body; function handles per-user 6am-local gating.
 
-CREATE POLICY "users read own patterns"
-ON public.user_recovery_patterns FOR SELECT TO authenticated
-USING (auth.uid() = user_id);
-```
+### 1d. `src/lib/fuelling.functions.ts` (NEW)
+`getFuellingAdequacy` server fn with `requireSupabaseAuth`:
+- Selects most recent `user_fuelling_evaluations` row for user where `severity_score >= 2` AND `evaluation_date >= today - 2`.
+- Returns row or `null`.
 
-No insert/update policies — writes only from edge function via service role.
+### 1e. `src/components/dashboard/FuellingAdequacyCard.tsx` (NEW)
+- `useSuspenseQuery` with 6h staleTime.
+- Returns `null` when no row.
+- Renders card with title, metric line, message (red for underfuelled, yellow for marginal), italic mini_explanation, bold action — APEX tokens, sanitized text via `cleanCardText`.
 
-## 2. `supabase/functions/generate-weekly-pattern/index.ts`
+### 1f. `src/routes/_authenticated/dashboard.tsx`
+- Import + mount `<Suspense fallback={null}><FuellingAdequacyCard /></Suspense>` after `HydrationCorrelationCard` (if present) else after `PatternMemoryCard`.
 
-After existing pattern detection block:
+## Part 2 — Migrate Gemini AI calls to OpenAI
 
-- Iterate detected patterns; keep only those with `data_points >= 4`.
-- For each, call new helper `generatePatternExplanation(pattern, { age, goal, proficiency })` that hits Lovable AI Gateway (`google/gemini-3-flash-preview`) with the system + user prompts from the spec, expecting JSON `{ explanation, protocol }`.
-- Upsert into `user_recovery_patterns` on `(user_id, pattern_type, pattern_key)` with description, explanation, protocol, data_points, correlation_coeff, metadata.
-- Wrap each Mini call in try/catch; on failure still upsert pattern without explanation so detection isn't blocked.
+Audit and switch every Edge Function currently calling `google/gemini-*` (Lovable AI Gateway) to OpenAI equivalents:
 
-Helper lives inline in the function file (no shared module needed for one caller).
+| Current | Replacement |
+|---|---|
+| `google/gemini-3-flash-preview` | `openai/gpt-5-mini` |
+| `google/gemini-3-flash-preview` (heavy reasoning) | `openai/gpt-5` |
+| `google/gemini-3.1-flash-lite` / `gemini-2.5-flash-lite` | `openai/gpt-5-nano` |
 
-## 3. `src/lib/pattern-memory.functions.ts` (new)
+Files to scan and update (known callers):
+- `supabase/functions/generate-weekly-pattern/index.ts` (pattern explanation) → `openai/gpt-5-mini`
+- Any other `gemini-*` reference under `supabase/functions/**`
 
-`createServerFn` with `requireSupabaseAuth`:
+For each:
+1. Swap the `model` string.
+2. Keep Lovable Gateway base URL + `LOVABLE_API_KEY` header (still OpenAI-compatible).
+3. Drop Gemini-only fields (e.g., `response_mime_type`); use OpenAI `response_format: { type: "json_object" }` where JSON is required.
+4. Verify token/param shape per OpenAI chat API.
 
-```ts
-export const getRecoveryPatterns = createServerFn(...)
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { data } = await context.supabase
-      .from('user_recovery_patterns')
-      .select('pattern_type, pattern_key, description, explanation, protocol, data_points, correlation_coeff')
-      .gte('data_points', 4)
-      .order('correlation_coeff', { ascending: false, nullsFirst: false })
-      .limit(3);
-    return data ?? [];
-  });
-```
-
-## 4. `src/components/dashboard/PatternMemoryCard.tsx` (new)
-
-- `useSuspenseQuery({ queryKey: ['recovery-patterns'], queryFn: getRecoveryPatterns, staleTime: 3600_000 })`.
-- If empty → render nothing (parent gates section visibility).
-- Map up to 3 patterns to APEX-token cards with:
-  - Title 14px (pattern key humanized, e.g. "Deadlift Recovery Lag")
-  - Observation 13px secondary
-  - Explanation 12px tertiary
-  - Protocol 12px medium-weight accent
-  - Confidence chip 10px: `High (${data_points} observations)`
-- Plain text only —  reuse existing `cleanText` util to strip any markdown/emoji from Mini output.
-
-## 5. `src/routes/_authenticated/dashboard.tsx`
-
-- Import `PatternMemoryCard` and existing `SectionLabel` / `SkeletonRow`.
-- In Coach section, after `BodyCompCard`:
-
-```tsx
-<SectionLabel>Your Recovery Signature</SectionLabel>
-<Suspense fallback={<SkeletonRow />}>
-  <PatternMemoryCard />
-</Suspense>
-```
-
-- Visibility gate handled by the card itself (renders null when no qualifying patterns), which also covers the "30+ days" requirement implicitly since 4+ observations require multi-week history.
+Out of scope: `score-nutrition` already uses `gpt-4o-mini` — leave; Claude-based functions (`generate-daily-coach-note`, etc.) — leave.
 
 ## Technical notes
+- Top-20% threshold computed via a single SQL `percentile_cont(0.8)` over 30-day per-user set totals.
+- Use `Intl.DateTimeFormat` with the user's timezone to derive their local hour for the 6am gate.
+- All new Supabase access via service role inside the function; client surface read-only with RLS.
+- No client-side schema changes beyond the new table.
 
-- Lovable AI call uses `LOVABLE_API_KEY` already present; model `google/gemini-3-flash-preview`, `Output.object({ explanation, protocol })` for structured JSON.
-- Upsert key `(user_id, pattern_type, pattern_key)` lets weekly runs refresh `data_points`/`correlation_coeff` without duplicating rows.
-- Cache: server query is cheap; 1h React Query staleTime client-side, matching other Coach panels.
-- No changes to existing pattern detection logic or schema beyond the new table.
+## Verification
+- `supabase--migration` for table.
+- Deploy function, hit `supabase--curl_edge_functions` with a known high-volume test user to confirm row insert + mini explanation.
+- `supabase--read_query` to confirm severity rows visible.
+- Dashboard render check via preview.
