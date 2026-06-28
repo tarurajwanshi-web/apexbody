@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import Anthropic from "https://esm.sh/@anthropic-ai/sdk@0.24.0";
 import { requireInternalSecret, corsAllowHeaders } from "../_shared/authorize.ts";
 import { detectContradictions } from "../_shared/contradictions.ts";
+import { buildApexSystemPrompt } from "../_shared/apex-voice.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
