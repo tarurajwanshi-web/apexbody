@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
   // Get profile
   const { data: profile } = await supa
     .from("profiles")
-    .select("user_id, timezone, goal, measurement_weight_kg")
+    .select("user_id, timezone, goal, measurement_weight_kg, name, experience_level")
     .eq("user_id", user_id)
     .maybeSingle();
 
