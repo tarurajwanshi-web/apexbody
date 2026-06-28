@@ -64,7 +64,7 @@ export const getBodyCompState = createServerFn({ method: "GET" })
     // Strength: top 3 exercises by set count in window
     const { data: sets } = await supabase
       .from("workout_set_logs")
-      .select("exercise_id, weight_kg, reps_completed, entry_date")
+      .select("exercise_name, weight_kg, reps_completed, entry_date")
       .eq("user_id", userId)
       .eq("completed", true)
       .gte("entry_date", startDate)
@@ -72,15 +72,15 @@ export const getBodyCompState = createServerFn({ method: "GET" })
       .order("entry_date", { ascending: true });
 
     const setRows = (sets ?? []).filter(
-      (r) => r.exercise_id && r.weight_kg != null && r.reps_completed != null,
-    );
+      (r: any) => r.exercise_name && r.weight_kg != null && r.reps_completed != null,
+    ) as Array<{ exercise_name: string; weight_kg: number; reps_completed: number; entry_date: string }>;
 
     const byExercise = new Map<
       string,
       Array<{ vol: number; date: string }>
     >();
     for (const r of setRows) {
-      const key = String(r.exercise_id);
+      const key = String(r.exercise_name);
       const vol = Number(r.weight_kg) * Number(r.reps_completed);
       if (!byExercise.has(key)) byExercise.set(key, []);
       byExercise.get(key)!.push({ vol, date: r.entry_date as string });
