@@ -7,6 +7,7 @@ import { TDEETrendChart } from "@/components/dashboard/TDEETrendChart";
 import { ContradictionCard } from "@/components/dashboard/ContradictionCard";
 import { BodyCompCard } from "@/components/dashboard/BodyCompCard";
 import { PatternMemoryCard } from "@/components/dashboard/PatternMemoryCard";
+import { FuellingAdequacyCard } from "@/components/dashboard/FuellingAdequacyCard";
 
 function SkeletonBlock() {
   return (
@@ -379,6 +380,9 @@ function Dashboard() {
 
         <SectionLabel>Your Recovery Signature</SectionLabel>
         <Suspense fallback={<SkeletonBlock />}><PatternMemoryCard /></Suspense>
+
+        <Suspense fallback={null}><FuellingAdequacyCard /></Suspense>
+
 
 
         <SectionLabel>This week's volume</SectionLabel>
