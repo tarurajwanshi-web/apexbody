@@ -16,8 +16,12 @@ import {
   supplementDeviceRhr,
   reassignDeviceUploadDate,
   logBodyMeasurement,
+  upsertPostSessionEnergy,
+  upsertSleepQuality,
+  validateEatingWindow,
   type DeviceUploadStatus,
   type ConfirmedMealItem,
+  type EatingWindowValidation,
 } from "@/lib/shield.functions";
 
 
