@@ -84,7 +84,7 @@ async function generatePatternExplanation(
         "X-Lovable-AIG-SDK": "vercel-ai-sdk",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "openai/gpt-5-mini",
         messages: [
           { role: "system", content: sys },
           { role: "user", content: user },

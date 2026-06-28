@@ -870,6 +870,63 @@ export type Database = {
         }
         Relationships: []
       }
+      user_fuelling_evaluations: {
+        Row: {
+          action: string | null
+          avg_rir: number | null
+          bmr: number | null
+          calories_consumed: number | null
+          calories_target: number | null
+          created_at: string
+          evaluation_date: string
+          id: string
+          message: string | null
+          mini_explanation: string | null
+          severity: string | null
+          severity_score: number | null
+          shortfall: number | null
+          total_sets: number | null
+          training_cost: number | null
+          user_id: string
+        }
+        Insert: {
+          action?: string | null
+          avg_rir?: number | null
+          bmr?: number | null
+          calories_consumed?: number | null
+          calories_target?: number | null
+          created_at?: string
+          evaluation_date: string
+          id?: string
+          message?: string | null
+          mini_explanation?: string | null
+          severity?: string | null
+          severity_score?: number | null
+          shortfall?: number | null
+          total_sets?: number | null
+          training_cost?: number | null
+          user_id: string
+        }
+        Update: {
+          action?: string | null
+          avg_rir?: number | null
+          bmr?: number | null
+          calories_consumed?: number | null
+          calories_target?: number | null
+          created_at?: string
+          evaluation_date?: string
+          id?: string
+          message?: string | null
+          mini_explanation?: string | null
+          severity?: string | null
+          severity_score?: number | null
+          shortfall?: number | null
+          total_sets?: number | null
+          training_cost?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_recovery_patterns: {
         Row: {
           correlation_coeff: number | null
