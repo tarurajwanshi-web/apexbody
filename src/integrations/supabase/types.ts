@@ -703,9 +703,11 @@ export type Database = {
           hydration_ml: number
           id: string
           mood_emoji: string | null
+          post_session_energy_rating: number | null
           recovery_self_rating: number | null
           recovery_source: string | null
           sleep_hours: number | null
+          sleep_quality_rating: number | null
           user_id: string
         }
         Insert: {
@@ -714,9 +716,11 @@ export type Database = {
           hydration_ml?: number
           id?: string
           mood_emoji?: string | null
+          post_session_energy_rating?: number | null
           recovery_self_rating?: number | null
           recovery_source?: string | null
           sleep_hours?: number | null
+          sleep_quality_rating?: number | null
           user_id: string
         }
         Update: {
@@ -725,9 +729,11 @@ export type Database = {
           hydration_ml?: number
           id?: string
           mood_emoji?: string | null
+          post_session_energy_rating?: number | null
           recovery_self_rating?: number | null
           recovery_source?: string | null
           sleep_hours?: number | null
+          sleep_quality_rating?: number | null
           user_id?: string
         }
         Relationships: []
