@@ -471,9 +471,95 @@ Output: Plain text, 250-300 words. Start with 📊`;
       content: weeklyCard,
     }, { onConflict: "user_id,card_date,card_type" });
 
+    // --- Recovery pattern memory: detect + explain + persist (30d window) ---
+    let patternsStored = 0;
+    try {
+      const patternStart = addDays(today, -30);
+
+      const { data: setRows30 } = await supa
+        .from("workout_set_logs")
+        .select("exercise_name, entry_date")
+        .eq("user_id", profile.user_id)
+        .eq("completed", true)
+        .gte("entry_date", patternStart)
+        .lte("entry_date", today);
+
+      const { data: readiness30 } = await supa
+        .from("readiness_scores")
+        .select("score_date, final_score")
+        .eq("user_id", profile.user_id)
+        .gte("score_date", patternStart)
+        .lte("score_date", today);
+
+      const { data: sleep30 } = await supa
+        .from("shield_manual_inputs")
+        .select("entry_date, sleep_hours")
+        .eq("user_id", profile.user_id)
+        .gte("entry_date", patternStart)
+        .lte("entry_date", today)
+        .not("sleep_hours", "is", null);
+
+      const readinessByDate = new Map<string, number>();
+      for (const r of readiness30 ?? []) {
+        if (r.score_date && typeof r.final_score === "number") {
+          readinessByDate.set(r.score_date, Number(r.final_score));
+        }
+      }
+      const sleepByDate = new Map<string, number>();
+      for (const r of sleep30 ?? []) {
+        if (r.entry_date && r.sleep_hours != null) {
+          sleepByDate.set(r.entry_date, Number(r.sleep_hours));
+        }
+      }
+
+      const detected: DetectedPattern[] = [];
+      detected.push(
+        ...detectExerciseLagPatterns(
+          (setRows30 ?? []) as Array<{ exercise_name: string; entry_date: string }>,
+          readinessByDate,
+        ),
+      );
+      const sleepPattern = detectSleepEffectPattern(sleepByDate, readinessByDate);
+      if (sleepPattern) detected.push(sleepPattern);
+
+      const proficiency =
+        (profile as { experience_level?: string }).experience_level ?? null;
+
+      for (const p of detected) {
+        if (p.data_points < 4) continue;
+        const explained = await generatePatternExplanation(lovableKey, p, {
+          age: (profile.age as number | null) ?? null,
+          goal: (profile.goal as string | null) ?? null,
+          proficiency,
+        });
+        const { error: upsertErr } = await supa
+          .from("user_recovery_patterns")
+          .upsert(
+            {
+              user_id: profile.user_id,
+              pattern_type: p.pattern_type,
+              pattern_key: p.pattern_key,
+              description: p.description,
+              explanation: explained?.explanation ?? null,
+              protocol: explained?.protocol ?? null,
+              data_points: p.data_points,
+              correlation_coeff: p.correlation_coeff,
+              metadata: p.metadata,
+              detected_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id,pattern_type,pattern_key" },
+          );
+        if (!upsertErr) patternsStored += 1;
+        else console.error("pattern upsert error:", upsertErr);
+      }
+    } catch (e) {
+      console.error("pattern memory phase error:", e);
+    }
+
     results.push({
       user_id: profile.user_id,
       status: "generated",
+      patterns_stored: patternsStored,
       preview: weeklyCard.slice(0, 150) + "...",
     });
   }
