@@ -175,18 +175,36 @@ function Nutrition() {
         try {
           const { data: u } = await supabase.auth.getUser();
           const uid = u.user?.id;
-          if (!uid) { setWeeklyReview(null); return; }
-          const { data } = await supabase
+          if (!uid) { setWeeklyReview(null); setDaysLoggedThisWeek(0); return; }
+          const { data: review } = await supabase
             .from("nutrition_weekly_reviews")
             .select("id, decision, confidence_tier, flag_reason, new_target_calories, old_target_calories, adjustment_kcal, applied_target_id, applied_at, week_start_date, week_end_date, days_logged, weigh_in_count, training_load_index, bmr, target_protein_g, target_carbs_g, target_fat_g, blended_tdee, new_observed_tdee, old_observed_tdee, raw_target_calories, adherence_pct, eligible, abnormal_week, timezone_used")
             .eq("user_id", uid)
-            .is("applied_target_id", null)
-            .in("decision", ["reduce", "increase", "capped"])
             .order("week_start_date", { ascending: false })
             .limit(1)
             .maybeSingle();
-          setWeeklyReview((data as WeeklyReviewRow | null) ?? null);
-        } catch { setWeeklyReview(null); }
+          const row = (review as WeeklyReviewRow | null) ?? null;
+          setWeeklyReview(row);
+
+          // Count distinct entry_dates with food logs in current local week
+          // (Mon→Sun) so the low-tier "Collecting data" progress bar can show
+          // day X of 7. Independent of review.days_logged, which only updates
+          // when a review is computed.
+          const now = new Date(`${todayLocal}T00:00:00`);
+          const dow = (now.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+          const weekStart = new Date(now);
+          weekStart.setUTCDate(now.getUTCDate() - dow);
+          const weekStartISO = weekStart.toISOString().slice(0, 10);
+          const { data: logs } = await supabase
+            .from("shield_nutrition_logs")
+            .select("entry_date")
+            .eq("user_id", uid)
+            .gte("entry_date", weekStartISO)
+            .lte("entry_date", todayLocal)
+            .eq("deleted", false);
+          const uniqDays = new Set((logs ?? []).map((l: any) => l.entry_date));
+          setDaysLoggedThisWeek(uniqDays.size);
+        } catch { setWeeklyReview(null); setDaysLoggedThisWeek(0); }
       })(),
     ]);
     setLastUpdatedAt(Date.now());
