@@ -1312,7 +1312,7 @@ function WeeklyGraphSheet({
             <>
               <WeeklyGraphContent data={data} />
               <div className="mt-5">
-                <WeeklyReviewCard review={review} applying={applying} onApply={onApply} compact />
+                <WeeklyReviewCard review={review} daysLogged={daysLogged} applying={applying} onApply={onApply} compact />
               </div>
             </>
           ) : (
