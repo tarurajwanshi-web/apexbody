@@ -110,6 +110,7 @@ function Nutrition() {
   const [openMeal, setOpenMeal] = useState<TodayMeal | null>(null);
   const [weekly, setWeekly] = useState<WeeklyNutritionInsight | null>(null);
   const [weeklyReview, setWeeklyReview] = useState<WeeklyReviewRow | null>(null);
+  const [daysLoggedThisWeek, setDaysLoggedThisWeek] = useState<number>(0);
   const [applyingReview, setApplyingReview] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
@@ -174,18 +175,36 @@ function Nutrition() {
         try {
           const { data: u } = await supabase.auth.getUser();
           const uid = u.user?.id;
-          if (!uid) { setWeeklyReview(null); return; }
-          const { data } = await supabase
+          if (!uid) { setWeeklyReview(null); setDaysLoggedThisWeek(0); return; }
+          const { data: review } = await supabase
             .from("nutrition_weekly_reviews")
             .select("id, decision, confidence_tier, flag_reason, new_target_calories, old_target_calories, adjustment_kcal, applied_target_id, applied_at, week_start_date, week_end_date, days_logged, weigh_in_count, training_load_index, bmr, target_protein_g, target_carbs_g, target_fat_g, blended_tdee, new_observed_tdee, old_observed_tdee, raw_target_calories, adherence_pct, eligible, abnormal_week, timezone_used")
             .eq("user_id", uid)
-            .is("applied_target_id", null)
-            .in("decision", ["reduce", "increase", "capped"])
             .order("week_start_date", { ascending: false })
             .limit(1)
             .maybeSingle();
-          setWeeklyReview((data as WeeklyReviewRow | null) ?? null);
-        } catch { setWeeklyReview(null); }
+          const row = (review as WeeklyReviewRow | null) ?? null;
+          setWeeklyReview(row);
+
+          // Count distinct entry_dates with food logs in current local week
+          // (Mon→Sun) so the low-tier "Collecting data" progress bar can show
+          // day X of 7. Independent of review.days_logged, which only updates
+          // when a review is computed.
+          const now = new Date(`${todayLocal}T00:00:00`);
+          const dow = (now.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+          const weekStart = new Date(now);
+          weekStart.setUTCDate(now.getUTCDate() - dow);
+          const weekStartISO = weekStart.toISOString().slice(0, 10);
+          const { data: logs } = await supabase
+            .from("shield_nutrition_logs")
+            .select("entry_date")
+            .eq("user_id", uid)
+            .gte("entry_date", weekStartISO)
+            .lte("entry_date", todayLocal)
+            .eq("deleted", false);
+          const uniqDays = new Set((logs ?? []).map((l: any) => l.entry_date));
+          setDaysLoggedThisWeek(uniqDays.size);
+        } catch { setWeeklyReview(null); setDaysLoggedThisWeek(0); }
       })(),
     ]);
     setLastUpdatedAt(Date.now());
@@ -600,7 +619,7 @@ function Nutrition() {
 
       <WeeklyPreviewCard weekly={weekly} onOpen={() => setWeeklySheetOpen(true)} />
 
-      <WeeklyReviewCard review={weeklyReview} applying={applyingReview} onApply={handleApplyReview} />
+      <WeeklyReviewCard review={weeklyReview} daysLogged={daysLoggedThisWeek} applying={applyingReview} onApply={handleApplyReview} />
 
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
@@ -668,9 +687,11 @@ function Nutrition() {
         onClose={() => setWeeklySheetOpen(false)}
         initialAnchor={selectedDate}
         review={weeklyReview}
+        daysLogged={daysLoggedThisWeek}
         applying={applyingReview}
         onApply={handleApplyReview}
       />
+
 
     </div>
   );
@@ -1171,6 +1192,7 @@ function WeeklyGraphSheet({
   onClose,
   initialAnchor,
   review,
+  daysLogged,
   applying,
   onApply,
 }: {
@@ -1178,6 +1200,7 @@ function WeeklyGraphSheet({
   onClose: () => void;
   initialAnchor: string;
   review: WeeklyReviewRow | null;
+  daysLogged: number;
   applying: boolean;
   onApply: () => void;
 }) {
@@ -1289,7 +1312,7 @@ function WeeklyGraphSheet({
             <>
               <WeeklyGraphContent data={data} />
               <div className="mt-5">
-                <WeeklyReviewCard review={review} applying={applying} onApply={onApply} compact />
+                <WeeklyReviewCard review={review} daysLogged={daysLogged} applying={applying} onApply={onApply} compact />
               </div>
             </>
           ) : (
@@ -1545,55 +1568,111 @@ const FLAG_LABELS: Record<string, string> = {
 
 function WeeklyReviewCard({
   review,
+  daysLogged,
   applying,
   onApply,
   compact = false,
 }: {
   review: WeeklyReviewRow | null;
+  daysLogged: number;
   applying: boolean;
   onApply: () => void;
   compact?: boolean;
 }) {
-  if (!review) return null;
+  if (!review) {
+    // No review row yet — still surface the collecting-data progress so users
+    // see why no adjustment is showing up.
+    const pct = Math.min(100, Math.round((daysLogged / 7) * 100));
+    return (
+      <section className={`${compact ? "" : "mx-5 mt-4"} rounded-2xl bg-bg-2 border border-white/5 p-4`}>
+        <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Next target review</p>
+        <p className="mt-2 text-[14px] font-medium text-white">Collecting data — day {daysLogged} of 7</p>
+        <div className="mt-2 h-1.5 rounded-full bg-white/5 overflow-hidden">
+          <div className="h-full bg-white/40" style={{ width: `${pct}%` }} />
+        </div>
+        <p className="mt-2 text-[12px] text-text-tertiary leading-snug">
+          Log at least 3 days this week to unlock a calorie review.
+        </p>
+      </section>
+    );
+  }
 
+  const tier = review.confidence_tier ?? "low";
+  const isApplied = !!review.applied_target_id;
   const decisionLabel =
     review.decision === "reduce" ? "Reduce calories"
     : review.decision === "increase" ? "Increase calories"
     : review.decision === "capped" ? "Capped adjustment"
     : "Hold";
-
   const flagLine = review.flag_reason ? (FLAG_LABELS[review.flag_reason] ?? review.flag_reason) : null;
   const delta = Math.round(review.adjustment_kcal);
   const deltaStr = `${delta > 0 ? "+" : ""}${delta.toLocaleString()} kcal`;
-  const tier = review.confidence_tier ?? "low";
-  const disabled = applying || tier === "low" || review.abnormal_week;
+
+  // Training load note (high tier only). >=1.1 = heavy, <=0.9 = light, else omit.
+  const tli = review.training_load_index;
+  const trainingNote =
+    tli != null
+      ? tli >= 1.1 ? "Heavy training load this week — extra calories support recovery."
+      : tli <= 0.9 ? "Light training week — smaller adjustment keeps you on track."
+      : null
+      : null;
+
+  const headerRow = (
+    <div className="flex items-center justify-between">
+      <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Next target review</p>
+      <span className="text-[12px] text-text-tertiary">
+        {formatRangeLabel(review.week_start_date, review.week_end_date)}
+      </span>
+    </div>
+  );
+
+  // LOW tier — collecting-data progress only. Suppress synthesis + Apply.
+  if (tier === "low") {
+    const pct = Math.min(100, Math.round((daysLogged / 7) * 100));
+    return (
+      <section className={`${compact ? "" : "mx-5 mt-4"} rounded-2xl bg-bg-2 border border-white/5 p-4`}>
+        {headerRow}
+        <p className="mt-2 text-[14px] font-medium text-white">Collecting data — day {daysLogged} of 7</p>
+        <div className="mt-2 h-1.5 rounded-full bg-white/5 overflow-hidden">
+          <div className="h-full bg-white/40" style={{ width: `${pct}%` }} />
+        </div>
+        <p className="mt-2 text-[12px] text-text-tertiary leading-snug">
+          Keep logging meals and weigh-ins. A reliable adjustment unlocks once we have enough signal.
+        </p>
+      </section>
+    );
+  }
+
+  const disabled = applying || review.abnormal_week || isApplied;
 
   return (
     <section className={`${compact ? "" : "mx-5 mt-4"} rounded-2xl bg-bg-2 border border-white/5 p-4`}>
-      <div className="flex items-center justify-between">
-        <p className="text-[10px] uppercase tracking-wider text-text-tertiary">Next target review</p>
-        <span className="text-[12px] text-text-tertiary">
-          {formatRangeLabel(review.week_start_date, review.week_end_date)}
-        </span>
-      </div>
+      {headerRow}
 
       <div className="mt-2 flex items-center justify-between gap-3">
         <p className="text-[14px] font-medium text-white">{decisionLabel}</p>
         <span
           className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border ${
             tier === "high" ? "border-success/40 text-success"
-            : tier === "medium" ? "border-white/15 text-text-secondary"
-            : "border-white/10 text-text-tertiary"
+            : "border-white/15 text-text-secondary"
           }`}
         >
           {tier} confidence
         </span>
       </div>
 
+      {tier === "medium" && (
+        <p className="mt-1 text-[12px] text-text-tertiary">±150 kcal adjustment available</p>
+      )}
+
       <p className="mt-2 text-[14px] text-white tabular-nums">
         {Math.round(review.old_target_calories).toLocaleString()} kcal → {Math.round(review.new_target_calories).toLocaleString()} kcal
       </p>
       <p className="mt-1 text-[12px] text-text-secondary tabular-nums">{deltaStr}</p>
+
+      {tier === "high" && trainingNote && (
+        <p className="mt-2 text-[12px] text-text-tertiary leading-snug">{trainingNote}</p>
+      )}
 
       {flagLine && (
         <p className="mt-2 text-[12px] text-text-tertiary leading-snug">{flagLine}</p>
@@ -1603,15 +1682,22 @@ function WeeklyReviewCard({
         <p className="text-[10px] text-text-tertiary">
           {review.days_logged}/7 days · {review.weigh_in_count} weigh-ins
         </p>
-        <button
-          type="button"
-          onClick={onApply}
-          disabled={disabled}
-          className="px-4 py-2 rounded-2xl text-[12px] font-medium bg-white text-black active:scale-95 transition disabled:opacity-40 disabled:active:scale-100"
-        >
-          {applying ? "Applying…" : "Apply"}
-        </button>
+        {isApplied ? (
+          <span className="px-3 py-1.5 rounded-full text-[10px] uppercase tracking-wider border border-success/40 text-success">
+            Applied
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={onApply}
+            disabled={disabled}
+            className="px-4 py-2 rounded-2xl text-[12px] font-medium bg-white text-black active:scale-95 transition disabled:opacity-40 disabled:active:scale-100"
+          >
+            {applying ? "Applying…" : "Apply"}
+          </button>
+        )}
       </div>
+
     </section>
   );
 }
