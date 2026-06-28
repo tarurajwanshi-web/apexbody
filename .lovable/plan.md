@@ -1,86 +1,97 @@
-# Plan: Three optional logging modals (energy, sleep quality, eating window)
+# Pattern Memory Explanation Layer
 
-Pure user-driven input. No AI. All three follow the existing `Sheet` modal pattern in `LogModals.tsx`.
+Wrap existing `generate-weekly-pattern` correlations with a Mini AI explanation step, persist alongside patterns, and surface on the dashboard as "Your Recovery Signature".
 
-## 1. Migration — `add_recovery_inputs.sql`
+## 1. Database — new migration
+
+Create `user_recovery_patterns` table (doesn't exist yet):
 
 ```sql
-ALTER TABLE public.shield_manual_inputs
-  ADD COLUMN IF NOT EXISTS post_session_energy_rating int
-    CHECK (post_session_energy_rating BETWEEN 1 AND 5);
+CREATE TABLE public.user_recovery_patterns (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  pattern_type text NOT NULL,         -- 'exercise_lag' | 'sleep_effect' | ...
+  pattern_key text NOT NULL,          -- e.g. 'deadlift' — for upsert dedup
+  description text NOT NULL,          -- short observation line
+  explanation text,                   -- Mini physiology blurb
+  protocol text,                      -- Mini actionable protocol
+  data_points int NOT NULL DEFAULT 0,
+  correlation_coeff numeric,
+  metadata jsonb DEFAULT '{}'::jsonb, -- raw pattern fields (rir_impact, days, etc.)
+  detected_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, pattern_type, pattern_key)
+);
 
-ALTER TABLE public.shield_manual_inputs
-  ADD COLUMN IF NOT EXISTS sleep_quality_rating int
-    CHECK (sleep_quality_rating BETWEEN 1 AND 5);
+GRANT SELECT ON public.user_recovery_patterns TO authenticated;
+GRANT ALL ON public.user_recovery_patterns TO service_role;
 
-ALTER TABLE public.profiles
-  ADD COLUMN IF NOT EXISTS eating_pattern varchar(20) DEFAULT NULL;
+ALTER TABLE public.user_recovery_patterns ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "users read own patterns"
+ON public.user_recovery_patterns FOR SELECT TO authenticated
+USING (auth.uid() = user_id);
 ```
 
-No new tables — no GRANT/RLS changes needed (existing policies on `shield_manual_inputs` and `profiles` already cover these columns).
+No insert/update policies — writes only from edge function via service role.
 
-## 2. `src/lib/shield.functions.ts` — three new server fns
+## 2. `supabase/functions/generate-weekly-pattern/index.ts`
 
-All `.middleware([requireSupabaseAuth])`, Zod-validated, RLS-scoped via `context.supabase`. All use `userTodayWithHint` for the `entry_date`.
+After existing pattern detection block:
 
-### `upsertPostSessionEnergy`
-Input: `{ energy_rating: 1..5, client_timezone?: string }`
-Upsert on `shield_manual_inputs (user_id, entry_date)` with `post_session_energy_rating`.
+- Iterate detected patterns; keep only those with `data_points >= 4`.
+- For each, call new helper `generatePatternExplanation(pattern, { age, goal, proficiency })` that hits Lovable AI Gateway (`google/gemini-3-flash-preview`) with the system + user prompts from the spec, expecting JSON `{ explanation, protocol }`.
+- Upsert into `user_recovery_patterns` on `(user_id, pattern_type, pattern_key)` with description, explanation, protocol, data_points, correlation_coeff, metadata.
+- Wrap each Mini call in try/catch; on failure still upsert pattern without explanation so detection isn't blocked.
 
-### `upsertSleepQuality`
-Input: `{ sleep_quality_rating: 1..5, client_timezone?: string }`
-Same upsert pattern, column `sleep_quality_rating`.
+Helper lives inline in the function file (no shared module needed for one caller).
 
-### `validateEatingWindow`
-Input: `{ meal_time_iso: string, client_timezone?: string }`
+## 3. `src/lib/pattern-memory.functions.ts` (new)
 
-Behavior:
-- Read `profiles.eating_pattern`. If null → return `{ enabled: false }`.
-- Parse pattern. Initial support: `"16:8"` → window 12:00–20:00 local; `"18:6"` → 14:00–20:00; `"OMAD"` → 17:00–19:00; `"flexible"` → no window (return `{ enabled: false }`). Unknown strings → `{ enabled: false }`.
-- Compute meal hour in user TZ from `meal_time_iso`. Return `{ enabled: true, in_window: boolean, window_start: "12:00", window_end: "20:00", pattern: "16:8" }`.
+`createServerFn` with `requireSupabaseAuth`:
 
-Adherence query (separate fn `getEatingWindowAdherence`):
-- Last 15 logged meals from `shield_nutrition_logs` (ordered desc by created_at).
-- For each, project meal hour into user TZ and check against the resolved window.
-- Return `{ pattern, window_start, window_end, in_window_count, total_count, adherence_pct }`.
+```ts
+export const getRecoveryPatterns = createServerFn(...)
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data } = await context.supabase
+      .from('user_recovery_patterns')
+      .select('pattern_type, pattern_key, description, explanation, protocol, data_points, correlation_coeff')
+      .gte('data_points', 4)
+      .order('correlation_coeff', { ascending: false, nullsFirst: false })
+      .limit(3);
+    return data ?? [];
+  });
+```
 
-(Spec calls this "calculate adherence" inside `validateEatingWindow`; splitting it keeps the validator cheap to call before every meal log and the adherence fn callable from the adherence display only.)
+## 4. `src/components/dashboard/PatternMemoryCard.tsx` (new)
 
-## 3. `src/components/LogModals.tsx` — three new modal components
+- `useSuspenseQuery({ queryKey: ['recovery-patterns'], queryFn: getRecoveryPatterns, staleTime: 3600_000 })`.
+- If empty → render nothing (parent gates section visibility).
+- Map up to 3 patterns to APEX-token cards with:
+  - Title 14px (pattern key humanized, e.g. "Deadlift Recovery Lag")
+  - Observation 13px secondary
+  - Explanation 12px tertiary
+  - Protocol 12px medium-weight accent
+  - Confidence chip 10px: `High (${data_points} observations)`
+- Plain text only —  reuse existing `cleanText` util to strip any markdown/emoji from Mini output.
 
-Style: reuse `Sheet`, plain text, 1–5 button rows mirroring the existing `ManualRecoveryForm` rating row (numbered tiles with labels under). No markdown.
+## 5. `src/routes/_authenticated/dashboard.tsx`
 
-### `PostSessionEnergyModal`
-- Props: `{ open, onClose, onSaved? }`.
-- Question: "How energized did that session leave you?"
-- Buttons 1–5 with labels: Drained / Tired / Neutral / Good / Pumped.
-- Footer: primary "Save" (disabled until selected) + secondary "Skip" (closes without writing).
-- Calls `upsertPostSessionEnergy` then `onSaved?.()` + `onClose()`.
+- Import `PatternMemoryCard` and existing `SectionLabel` / `SkeletonRow`.
+- In Coach section, after `BodyCompCard`:
 
-### `SleepQualityModal`
-- Same shape, question: "How was your sleep quality?"
-- Labels: Terrible / Poor / Okay / Good / Excellent.
-- Calls `upsertSleepQuality`.
+```tsx
+<SectionLabel>Your Recovery Signature</SectionLabel>
+<Suspense fallback={<SkeletonRow />}>
+  <PatternMemoryCard />
+</Suspense>
+```
 
-### `EatingWindowValidator`
-- Props: `{ open, onClose, mealTimeISO, onConfirm, onSkip }`.
-- On open: call `validateEatingWindow` once; if `enabled === false` or `in_window === true`, auto-call `onConfirm()` and close (no UI flash).
-- If outside window: render plain text:
-  - "Your window is {window_start}–{window_end} ({pattern})."
-  - "This meal at {meal_local_time} is outside."
-- Buttons: "Log anyway" (calls `onConfirm()`) | "Skip" (calls `onSkip()`).
-- This component does not write to the DB itself — caller persists via existing `logMeal`. (Adherence is recomputed on demand by `getEatingWindowAdherence`, not stored per-meal.)
+- Visibility gate handled by the card itself (renders null when no qualifying patterns), which also covers the "30+ days" requirement implicitly since 4+ observations require multi-week history.
 
-## Wiring (out-of-scope but noted for the next prompt)
+## Technical notes
 
-The spec asks for the modals to "show after" workout / sleep / meal logging. Hookup points exist but aren't modified in this prompt:
-- Workout save in `src/routes/workouts.tsx` (after `SetRow.save()` finishes the last set of a session).
-- Sleep slider in `ManualRecoveryForm` (`LogModals.tsx`) — surface `SleepQualityModal` after `Save recovery`.
-- Meal submit in the meal logging flow (`LogModals.tsx`) — wrap with `EatingWindowValidator` before `logMeal`.
-
-Wiring is intentionally deferred so this prompt only ships migration + functions + modal components.
-
-## Out of scope
-- No changes to scoring engines (the new columns aren't read by `calculate-score` yet).
-- No new RLS policies, no new tables, no `service_role` operations.
-- No AI calls.
+- Lovable AI call uses `LOVABLE_API_KEY` already present; model `google/gemini-3-flash-preview`, `Output.object({ explanation, protocol })` for structured JSON.
+- Upsert key `(user_id, pattern_type, pattern_key)` lets weekly runs refresh `data_points`/`correlation_coeff` without duplicating rows.
+- Cache: server query is cheap; 1h React Query staleTime client-side, matching other Coach panels.
+- No changes to existing pattern detection logic or schema beyond the new table.

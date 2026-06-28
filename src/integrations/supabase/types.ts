@@ -870,6 +870,51 @@ export type Database = {
         }
         Relationships: []
       }
+      user_recovery_patterns: {
+        Row: {
+          correlation_coeff: number | null
+          data_points: number
+          description: string
+          detected_at: string
+          explanation: string | null
+          id: string
+          metadata: Json
+          pattern_key: string
+          pattern_type: string
+          protocol: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          correlation_coeff?: number | null
+          data_points?: number
+          description: string
+          detected_at?: string
+          explanation?: string | null
+          id?: string
+          metadata?: Json
+          pattern_key: string
+          pattern_type: string
+          protocol?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          correlation_coeff?: number | null
+          data_points?: number
+          description?: string
+          detected_at?: string
+          explanation?: string | null
+          id?: string
+          metadata?: Json
+          pattern_key?: string
+          pattern_type?: string
+          protocol?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       weekly_plans: {
         Row: {
           created_at: string
