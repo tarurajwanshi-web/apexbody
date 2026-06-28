@@ -454,6 +454,10 @@ Output: Plain text, 250-300 words. Start with 📊`;
       const response = await anthropic.messages.create({
         model: "claude-sonnet-4-6",
         max_tokens: 600,
+        system: buildApexSystemPrompt({
+          proficiency: (profile as any).experience_level,
+          name: (profile as any).name,
+        }),
         messages: [{ role: "user", content: sonnetPrompt }],
       });
       weeklyCard = response.content[0].type === "text"
