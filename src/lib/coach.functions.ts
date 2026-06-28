@@ -416,3 +416,54 @@ export const getTDEETrend = createServerFn({ method: "GET" })
 
     return { weeks, trendDirection, annotation };
   });
+
+import { detectContradictions } from "@/lib/contradictions";
+
+export const getContradictions = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tz = await resolveUserTimezone(context.supabase, context.userId);
+    const today = getLocalDateISO(tz);
+    const sevenAgo = addDaysISO(today, -7);
+
+    const [profileRes, reviewRes, readinessRes, strainRes, setsRes] = await Promise.all([
+      context.supabase
+        .from("profiles").select("goal")
+        .eq("user_id", context.userId).maybeSingle(),
+      context.supabase
+        .from("nutrition_weekly_reviews")
+        .select("adjustment_kcal, adherence_pct, week_start_date")
+        .eq("user_id", context.userId)
+        .order("week_start_date", { ascending: false }).limit(1).maybeSingle(),
+      context.supabase
+        .from("readiness_scores").select("final_score")
+        .eq("user_id", context.userId).eq("score_date", today).maybeSingle(),
+      context.supabase
+        .from("shield_training_logs").select("strain_value")
+        .eq("user_id", context.userId)
+        .gte("entry_date", sevenAgo).lte("entry_date", today),
+      context.supabase
+        .from("workout_set_logs").select("rir")
+        .eq("user_id", context.userId).eq("completed", true)
+        .gte("entry_date", sevenAgo).lte("entry_date", today),
+    ]);
+
+    const strains = ((strainRes.data as { strain_value: number | null }[] | null) ?? [])
+      .map((r) => r.strain_value).filter((v): v is number => typeof v === "number");
+    const avgStrain7d = strains.length ? strains.reduce((s, v) => s + v, 0) / strains.length : null;
+
+    const setRows = (setsRes.data as { rir: number | null }[] | null) ?? [];
+    const sets7d = setRows.length;
+    const rirs = setRows.map((r) => r.rir).filter((v): v is number => typeof v === "number");
+    const avgRir7d = rirs.length ? rirs.reduce((s, v) => s + v, 0) / rirs.length : null;
+
+    return detectContradictions({
+      goal: (profileRes.data?.goal as string | null) ?? null,
+      adjustmentKcal: reviewRes.data?.adjustment_kcal == null ? null : Number(reviewRes.data.adjustment_kcal),
+      adherencePct: reviewRes.data?.adherence_pct == null ? null : Number(reviewRes.data.adherence_pct),
+      avgStrain7d,
+      avgRir7d,
+      sets7d,
+      readinessToday: readinessRes.data?.final_score == null ? null : Number(readinessRes.data.final_score),
+    });
+  });
