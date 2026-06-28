@@ -1,5 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { ExerciseHistoryPanel } from "@/components/dashboard/ExerciseHistoryPanel";
+import { MuscleGroupVolumeGrid } from "@/components/dashboard/MuscleGroupVolumeGrid";
+import { WeightTrendChart } from "@/components/dashboard/WeightTrendChart";
+import { TDEETrendChart } from "@/components/dashboard/TDEETrendChart";
 import { useProfile } from "@/lib/store";
 import { supabase } from "@/integrations/supabase/client";
 import { useUserTimezone, getLocalDateISO, addDaysISO } from "@/lib/dates";
