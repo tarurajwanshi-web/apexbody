@@ -1,40 +1,24 @@
-## Findings
+# Plan: Verify macro-calculation.ts alignment (no changes needed)
 
-The actual logic isn't in `calculate-macros-weekly/index.ts` — that file is a thin HTTP shell that delegates to `supabase/functions/_shared/macro-calculation.ts`. Both reported bugs map to that shared module.
+## Finding
 
-### Bug 1 — strain query (already fixed, no change needed)
+After reading `supabase/functions/_shared/macro-calculation.ts` (lines 440–526), the requested refactor is already in place from a prior turn. Specifically:
 
-`macro-calculation.ts` lines 213–234 currently:
+- **Line 452**: No `crypto.randomUUID()` — `review_id` is not generated in the function; DB assigns the id.
+- **Lines 456–495 (`directInsertReview`)**: Inserts the review row with `.select("id").single()` and returns the new `id: string`.
+- **Lines 497–516 (`shouldApply` branch)**:
+  1. `const reviewId = await directInsertReview();`
+  2. `await supa.rpc("apply_existing_weekly_macro_review", { p_review_id: reviewId, p_effective_start_date: new_effective_start_date })`
+  3. On RPC error → `throw new Error('apply_rpc_failed: ...')`
+  4. Returns `{ user_id, status: "adjusted", decision, flag_reason, applied_target_id }`
+- **Line 518 (hold branch)**: Same `directInsertReview()` path, no RPC call.
 
-- queries `workout_set_logs` only for `id` (set count), and
-- queries `shield_training_logs.strain_value` filtered by `user_id` + `entry_date` BETWEEN week_start and window_end.
+The 22-param `apply_weekly_macro_review` call referenced at "lines 486–525" no longer exists in this file.
 
-That is exactly the shape requested. The only earlier code that read `workout_set_logs.strain_value` no longer exists. **Skip — already correct.**
+## Minor deviation from your spec
 
-### Bug 2 — apply RPC after insert
+The current code returns `applied_target_id: (appliedTargetId as string | null) ?? null` (the RPC returns the new target id directly as a uuid scalar), whereas your spec wrote `applied?.id || review.id`. The current shape is correct given the RPC returns a uuid, not an object — `applied?.id` would be undefined and fall back to the review id (wrong column semantically).
 
-Current shape (lines 486–525, the `shouldApply` branch) calls a 22-parameter `apply_weekly_macro_review(...)` RPC that both inserts and applies in one go. That parallel monolithic RPC is the same one we already removed from the client in `nutrition.tsx`, where we switched to the atomic `apply_existing_weekly_macro_review(p_review_id)` flow.
+## Action
 
-We should align the engine with the same pattern, so insert + apply happen via the canonical row-then-RPC path that already exists in the database.
-
-## Change
-
-File: `supabase/functions/_shared/macro-calculation.ts`
-
-Replace lines 486–525 (the `if (shouldApply) { ... }` block) with:
-
-1. Insert the review row via `directInsertReview()` (the same path "hold" uses). Capture the returned `id` by switching `directInsertReview` to `.insert({...}).select("id").single()` and returning that id.
-2. Call `await supa.rpc("apply_existing_weekly_macro_review", { p_review_id: <id>, p_effective_start_date: new_effective_start_date })`.
-3. On RPC error, throw `apply_rpc_failed: <msg>` (preserve current error surface).
-4. Return `{ user_id, status: "adjusted", decision, flag_reason: flagReason, applied_target_id: <returned uuid> }`.
-
-Also drop the now-unused `review_id = crypto.randomUUID()` on line 453 (the DB generates the id; `applied_target_id` returned by the RPC is the new `daily_macro_targets.id`).
-
-Result: one code path inserts the review (hold or adjust), and adjustments additionally call the atomic apply RPC — matching the client-side flow and the DB function definitions already in this project.
-
-## Out of scope
-
-- `index.ts` HTTP shell — no edits.
-- Decision logic, abnormal-week rules, refeed flag — unchanged.
-- DB migrations — `apply_existing_weekly_macro_review` already exists.  
-  
+None. Approve to close out, or tell me if you want the `applied_target_id` fallback changed.
