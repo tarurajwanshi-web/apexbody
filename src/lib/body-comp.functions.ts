@@ -101,7 +101,7 @@ export const getBodyCompState = createServerFn({ method: "GET" })
     const strengthAbs = Math.abs(strengthChange);
 
     // Confidence
-    const distinctSetDays = new Set(setRows.map((r) => r.entry_date as string)).size;
+    const distinctSetDays = new Set(setRows.map((r) => r.entry_date)).size;
     let confidence: "high" | "medium" | "low" = "low";
     if (weightRows.length >= 2 && setRows.length >= 2 && distinctSetDays >= 2) {
       confidence = "high";
