@@ -619,7 +619,7 @@ function Nutrition() {
 
       <WeeklyPreviewCard weekly={weekly} onOpen={() => setWeeklySheetOpen(true)} />
 
-      <WeeklyReviewCard review={weeklyReview} applying={applyingReview} onApply={handleApplyReview} />
+      <WeeklyReviewCard review={weeklyReview} daysLogged={daysLoggedThisWeek} applying={applyingReview} onApply={handleApplyReview} />
 
       <section className="mx-5 mt-5">
         <div className="flex items-center justify-between mb-2">
