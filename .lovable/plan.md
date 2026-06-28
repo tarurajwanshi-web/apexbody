@@ -1,90 +1,86 @@
-# Plan: Body Composition Classifier
+# Plan: Three optional logging modals (energy, sleep quality, eating window)
 
-Pure-rules classifier. No AI. Reads only.
+Pure user-driven input. No AI. All three follow the existing `Sheet` modal pattern in `LogModals.tsx`.
 
-## Files
+## 1. Migration — `add_recovery_inputs.sql`
 
-**New (2)**
-- `src/lib/body-comp.functions.ts` — `getBodyCompState()` server fn
-- `src/components/dashboard/BodyCompCard.tsx` — display card
+```sql
+ALTER TABLE public.shield_manual_inputs
+  ADD COLUMN IF NOT EXISTS post_session_energy_rating int
+    CHECK (post_session_energy_rating BETWEEN 1 AND 5);
 
-**Modified (1)**
-- `src/routes/_authenticated/dashboard.tsx` — mount under Coach section after `ExerciseHistoryPanel`
+ALTER TABLE public.shield_manual_inputs
+  ADD COLUMN IF NOT EXISTS sleep_quality_rating int
+    CHECK (sleep_quality_rating BETWEEN 1 AND 5);
 
-## `getBodyCompState()` server fn
-
-`createServerFn({ method: 'GET' })` + `.middleware([requireSupabaseAuth])`, no input.
-
-Inside handler (RLS via `context.supabase`, `userId` from context):
-
-1. Resolve TZ via `resolveUserTimezone` + `getLocalDateISO`. Date range: today and today−6 (7-day window).
-2. **Weight**: query `body_measurement_events` for last 7 days, ordered by `measured_at` (or `entry_date`) asc. Pull `weight_kg` non-null.
-   - `latestWeight` = last row, `earliestWeight` = first row.
-   - `weightChange = latestWeight - earliestWeight` (kg).
-   - `weightPct = abs(weightChange / earliestWeight) × 100`.
-3. **Strength**: query `workout_set_logs` last 7 days, `completed=true`, with `exercise_id`, `weight_kg`, `reps_completed`, `entry_date`.
-   - Find top 3 exercises by set count over the window.
-   - For each, compute `latestVolume = weight × reps` from the most recent completed set, and `earliestVolume` from the oldest completed set in the window.
-   - Aggregate: sum latest vs sum earliest across the 3 exercises.
-   - `strengthChangePct = ((sumLatest - sumEarliest) / sumEarliest) × 100`.
-4. **Confidence**:
-   - `high` — ≥2 weight points AND ≥2 strength sessions across ≥2 distinct days.
-   - `medium` — at least 1 weight + 1 strength data point in window.
-   - `low` — sparse / missing data; classification falls back to plateau with low confidence.
-5. **Classification matrix** (apply exactly as specified by the user, using `weightPct` and `abs(strengthChangePct)` against the 2% threshold and the directional signs of `weightChange` / `strengthChangePct`):
-   - W↑ S↑ both >2% → `clean_bulk`
-   - W↑ S→ (<2%) → `excess_fat_gain`
-   - W↓ S↑ both >2% → `perfect_recomposition`
-   - W↓ S→ → `good_cut`
-   - W↓ S↓ both >2% → `muscle_loss`
-   - else → `body_recomposition_plateau`
-
-Return shape (matches spec):
-```ts
-{
-  state: string,
-  weight_change: number,      // kg, signed, rounded to 1 decimal
-  strength_change: number,    // % signed, rounded to 1 decimal
-  message: string,
-  action: string,
-  confidence: 'high' | 'medium' | 'low',
-}
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS eating_pattern varchar(20) DEFAULT NULL;
 ```
 
-Insufficient data branch: if `latestWeight == null` OR no completed sets, return `state: 'body_recomposition_plateau'`, `confidence: 'low'`, with a copy variant ("Not enough data yet. Log weight and at least one workout this week.") and a neutral action.
+No new tables — no GRANT/RLS changes needed (existing policies on `shield_manual_inputs` and `profiles` already cover these columns).
 
-## `BodyCompCard.tsx`
+## 2. `src/lib/shield.functions.ts` — three new server fns
 
-- `useSuspenseQuery({ queryKey: ['coach','body-comp'], queryFn: ..., staleTime: 1h, gcTime: 2h })`.
-- Pure presentational; no markdown, no emoji (project markdown-stripping convention — the spec emojis in `message` will be stripped before render via the same regex used in `dashboard.tsx`/`text.ts`).
-- Layout using APEX tokens from `@/components/dashboard/tokens`:
-  - Card: `cardStyle` (`T.surface`, `T.border`, 16 radius).
-  - Title row: "Body Composition" 10px uppercase tracked, `T.label`.
-  - State message: 13px `T.text1`, 2-line max.
-  - Stats line: 12px `T.text2` — "Weight: −0.8 kg · Strength: +2.3%" using arrows in plain unicode (no emoji); color the deltas with `T.green` / `T.red` / `T.text3` based on sign + state.
-  - Action block: nested `nestedCardStyle` panel with 12px uppercase `T.label` "Next" + 12px `T.text2` action body.
-  - Footer: confidence pill 10px uppercase — `high` green, `medium` amber, `low` text3.
-- Allowed font sizes only (10/12/13/14/20). No bold. No `rounded-3xl`. No `text-text-accent`.
-- Returns `null` when both `weight_change === 0` and `strength_change === 0` AND `confidence === 'low'`? No — always render so users see the empty-state guidance.
+All `.middleware([requireSupabaseAuth])`, Zod-validated, RLS-scoped via `context.supabase`. All use `userTodayWithHint` for the `entry_date`.
 
-## Dashboard mount
+### `upsertPostSessionEnergy`
+Input: `{ energy_rating: 1..5, client_timezone?: string }`
+Upsert on `shield_manual_inputs (user_id, entry_date)` with `post_session_energy_rating`.
 
-In `src/routes/_authenticated/dashboard.tsx`, inside the Coach section, immediately after the `<ExerciseHistoryPanel />` Suspense block:
+### `upsertSleepQuality`
+Input: `{ sleep_quality_rating: 1..5, client_timezone?: string }`
+Same upsert pattern, column `sleep_quality_rating`.
 
-```tsx
-<SectionLabel>Body composition</SectionLabel>
-<Suspense fallback={<SkeletonBlock />}>
-  <BodyCompCard />
-</Suspense>
-```
+### `validateEatingWindow`
+Input: `{ meal_time_iso: string, client_timezone?: string }`
 
-(Reuses the existing `SkeletonBlock` component already defined in the file; the spec's `<SkeletonRow />` does not exist in the project.)
+Behavior:
+- Read `profiles.eating_pattern`. If null → return `{ enabled: false }`.
+- Parse pattern. Initial support: `"16:8"` → window 12:00–20:00 local; `"18:6"` → 14:00–20:00; `"OMAD"` → 17:00–19:00; `"flexible"` → no window (return `{ enabled: false }`). Unknown strings → `{ enabled: false }`.
+- Compute meal hour in user TZ from `meal_time_iso`. Return `{ enabled: true, in_window: boolean, window_start: "12:00", window_end: "20:00", pattern: "16:8" }`.
 
-Add `import { BodyCompCard } from '@/components/dashboard/BodyCompCard'` alongside the existing dashboard component imports.
+Adherence query (separate fn `getEatingWindowAdherence`):
+- Last 15 logged meals from `shield_nutrition_logs` (ordered desc by created_at).
+- For each, project meal hour into user TZ and check against the resolved window.
+- Return `{ pattern, window_start, window_end, in_window_count, total_count, adherence_pct }`.
 
-## Notes / non-goals
+(Spec calls this "calculate adherence" inside `validateEatingWindow`; splitting it keeps the validator cheap to call before every meal log and the adherence fn callable from the adherence display only.)
 
-- No schema changes. No migrations. No new RPCs.
-- All emojis in the spec messages are stripped before display to comply with the project's plain-prose card convention.
-- 1-hour cache via TanStack Query; no manual invalidation hooks added.
-- `lint:ui` constraints respected (font sizes, no bold, no `rounded-3xl`, no `text-text-accent`).
+## 3. `src/components/LogModals.tsx` — three new modal components
+
+Style: reuse `Sheet`, plain text, 1–5 button rows mirroring the existing `ManualRecoveryForm` rating row (numbered tiles with labels under). No markdown.
+
+### `PostSessionEnergyModal`
+- Props: `{ open, onClose, onSaved? }`.
+- Question: "How energized did that session leave you?"
+- Buttons 1–5 with labels: Drained / Tired / Neutral / Good / Pumped.
+- Footer: primary "Save" (disabled until selected) + secondary "Skip" (closes without writing).
+- Calls `upsertPostSessionEnergy` then `onSaved?.()` + `onClose()`.
+
+### `SleepQualityModal`
+- Same shape, question: "How was your sleep quality?"
+- Labels: Terrible / Poor / Okay / Good / Excellent.
+- Calls `upsertSleepQuality`.
+
+### `EatingWindowValidator`
+- Props: `{ open, onClose, mealTimeISO, onConfirm, onSkip }`.
+- On open: call `validateEatingWindow` once; if `enabled === false` or `in_window === true`, auto-call `onConfirm()` and close (no UI flash).
+- If outside window: render plain text:
+  - "Your window is {window_start}–{window_end} ({pattern})."
+  - "This meal at {meal_local_time} is outside."
+- Buttons: "Log anyway" (calls `onConfirm()`) | "Skip" (calls `onSkip()`).
+- This component does not write to the DB itself — caller persists via existing `logMeal`. (Adherence is recomputed on demand by `getEatingWindowAdherence`, not stored per-meal.)
+
+## Wiring (out-of-scope but noted for the next prompt)
+
+The spec asks for the modals to "show after" workout / sleep / meal logging. Hookup points exist but aren't modified in this prompt:
+- Workout save in `src/routes/workouts.tsx` (after `SetRow.save()` finishes the last set of a session).
+- Sleep slider in `ManualRecoveryForm` (`LogModals.tsx`) — surface `SleepQualityModal` after `Save recovery`.
+- Meal submit in the meal logging flow (`LogModals.tsx`) — wrap with `EatingWindowValidator` before `logMeal`.
+
+Wiring is intentionally deferred so this prompt only ships migration + functions + modal components.
+
+## Out of scope
+- No changes to scoring engines (the new columns aren't read by `calculate-score` yet).
+- No new RLS policies, no new tables, no `service_role` operations.
+- No AI calls.

@@ -973,3 +973,176 @@ export const getActivityWeek = createServerFn({ method: "GET" })
     return { streak, last7, last7_dates };
   });
 
+// ---------- Optional input modals: energy, sleep quality, eating window ----------
+
+export const upsertPostSessionEnergy = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      energy_rating: z.number().int().min(1).max(5),
+      client_timezone: z.string().max(64).optional(),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const entry_date = await userTodayWithHint(context.supabase, context.userId, data.client_timezone);
+    const { error } = await context.supabase
+      .from("shield_manual_inputs")
+      .upsert(
+        { user_id: context.userId, entry_date, post_session_energy_rating: data.energy_rating },
+        { onConflict: "user_id,entry_date" },
+      );
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const upsertSleepQuality = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      sleep_quality_rating: z.number().int().min(1).max(5),
+      client_timezone: z.string().max(64).optional(),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const entry_date = await userTodayWithHint(context.supabase, context.userId, data.client_timezone);
+    const { error } = await context.supabase
+      .from("shield_manual_inputs")
+      .upsert(
+        { user_id: context.userId, entry_date, sleep_quality_rating: data.sleep_quality_rating },
+        { onConflict: "user_id,entry_date" },
+      );
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+type EatingWindow = { start_hour: number; end_hour: number };
+
+function resolveEatingWindow(pattern: string | null): EatingWindow | null {
+  if (!pattern) return null;
+  const p = pattern.trim().toLowerCase();
+  if (p === "16:8" || p === "if") return { start_hour: 12, end_hour: 20 };
+  if (p === "18:6") return { start_hour: 14, end_hour: 20 };
+  if (p === "omad") return { start_hour: 17, end_hour: 19 };
+  return null; // "flexible" or unknown
+}
+
+function fmtHour(h: number): string {
+  const hh = String(h).padStart(2, "0");
+  return `${hh}:00`;
+}
+
+function localHour(iso: string, tz: string): number {
+  try {
+    const hStr = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric", hour12: false, timeZone: tz,
+    }).format(new Date(iso));
+    const h = parseInt(hStr, 10);
+    return Number.isFinite(h) ? h : 0;
+  } catch {
+    return new Date(iso).getUTCHours();
+  }
+}
+
+export type EatingWindowValidation =
+  | { enabled: false }
+  | {
+      enabled: true;
+      pattern: string;
+      window_start: string;
+      window_end: string;
+      meal_local_time: string;
+      in_window: boolean;
+    };
+
+export const validateEatingWindow = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      meal_time_iso: z.string().min(1),
+      client_timezone: z.string().max(64).optional(),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<EatingWindowValidation> => {
+    const { data: prof } = await context.supabase
+      .from("profiles")
+      .select("eating_pattern")
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    const pattern = (prof as any)?.eating_pattern ?? null;
+    const win = resolveEatingWindow(pattern);
+    if (!win) return { enabled: false };
+
+    const tz = await resolveUserTimezoneWithHint(context.supabase, context.userId, data.client_timezone);
+    let mealHour: number;
+    let mealLocal: string;
+    try {
+      const d = new Date(data.meal_time_iso);
+      mealHour = localHour(d.toISOString(), tz);
+      mealLocal = new Intl.DateTimeFormat("en-US", {
+        hour: "numeric", minute: "2-digit", hour12: false, timeZone: tz,
+      }).format(d);
+    } catch {
+      mealHour = 0;
+      mealLocal = "00:00";
+    }
+    const in_window = mealHour >= win.start_hour && mealHour < win.end_hour;
+    return {
+      enabled: true,
+      pattern,
+      window_start: fmtHour(win.start_hour),
+      window_end: fmtHour(win.end_hour),
+      meal_local_time: mealLocal,
+      in_window,
+    };
+  });
+
+export type EatingWindowAdherence =
+  | { enabled: false }
+  | {
+      enabled: true;
+      pattern: string;
+      window_start: string;
+      window_end: string;
+      in_window_count: number;
+      total_count: number;
+      adherence_pct: number;
+    };
+
+export const getEatingWindowAdherence = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<EatingWindowAdherence> => {
+    const { data: prof } = await context.supabase
+      .from("profiles")
+      .select("eating_pattern, timezone")
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    const pattern = (prof as any)?.eating_pattern ?? null;
+    const win = resolveEatingWindow(pattern);
+    if (!win) return { enabled: false };
+
+    const tz = await resolveUserTimezone(context.supabase, context.userId);
+    const { data: rows } = await context.supabase
+      .from("shield_nutrition_logs")
+      .select("created_at")
+      .eq("user_id", context.userId)
+      .eq("deleted", false)
+      .order("created_at", { ascending: false })
+      .limit(15);
+    const meals = (rows ?? []) as Array<{ created_at: string }>;
+    let inCount = 0;
+    for (const m of meals) {
+      const h = localHour(m.created_at, tz);
+      if (h >= win.start_hour && h < win.end_hour) inCount += 1;
+    }
+    const total = meals.length;
+    return {
+      enabled: true,
+      pattern,
+      window_start: fmtHour(win.start_hour),
+      window_end: fmtHour(win.end_hour),
+      in_window_count: inCount,
+      total_count: total,
+      adherence_pct: total > 0 ? Math.round((inCount / total) * 100) : 0,
+    };
+  });
+

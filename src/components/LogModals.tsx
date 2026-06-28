@@ -16,8 +16,12 @@ import {
   supplementDeviceRhr,
   reassignDeviceUploadDate,
   logBodyMeasurement,
+  upsertPostSessionEnergy,
+  upsertSleepQuality,
+  validateEatingWindow,
   type DeviceUploadStatus,
   type ConfirmedMealItem,
+  type EatingWindowValidation,
 } from "@/lib/shield.functions";
 
 
@@ -1582,3 +1586,245 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+
+// ---------- Optional input modals: energy, sleep quality, eating window ----------
+
+function RatingScale({
+  value,
+  onChange,
+  labels,
+}: {
+  value: number | null;
+  onChange: (v: number) => void;
+  labels: [string, string, string, string, string];
+}) {
+  return (
+    <div>
+      <div className="mt-2 grid grid-cols-5 gap-2">
+        {[1, 2, 3, 4, 5].map((n) => {
+          const active = value === n;
+          return (
+            <button
+              type="button"
+              key={n}
+              onClick={() => onChange(n)}
+              className="h-14 rounded-2xl text-[18px] font-semibold text-white active:scale-95 transition flex flex-col items-center justify-center gap-1"
+              style={{
+                background: active
+                  ? "linear-gradient(135deg, rgba(124,58,237,0.25), rgba(59,130,246,0.25))"
+                  : "#0A0E1A",
+                border: `1px solid ${active ? "rgba(124,58,237,0.6)" : "rgba(255,255,255,0.08)"}`,
+              }}
+            >
+              <span className="leading-none">{n}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-2 grid grid-cols-5 gap-2 text-[10px] text-text-tertiary text-center">
+        {labels.map((l, i) => (
+          <span key={i}>{l}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function PostSessionEnergyModal({ open, onClose, onSaved }: Props) {
+  const [rating, setRating] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const fn = useServerFn(upsertPostSessionEnergy);
+
+  useEffect(() => {
+    if (open) {
+      setRating(null);
+      setErr(null);
+    }
+  }, [open]);
+
+  const save = async () => {
+    if (rating == null) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await fn({ data: { energy_rating: rating, client_timezone: getBrowserTimezone() } });
+      onSaved?.();
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Post-session energy">
+      <div className="space-y-5">
+        <p className="text-[14px] text-white">How energized did that session leave you?</p>
+        <RatingScale
+          value={rating}
+          onChange={setRating}
+          labels={["Drained", "Tired", "Neutral", "Good", "Pumped"]}
+        />
+        {err && <p className="text-[12px] text-red-400">{err}</p>}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded-2xl py-3 text-[14px] font-medium text-text-secondary active:scale-[0.98]"
+            style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)" }}
+          >
+            Skip
+          </button>
+          <div className="flex-1">
+            <SubmitBtn busy={busy} label="Save" disabled={rating == null} onClick={save} />
+          </div>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+export function SleepQualityModal({ open, onClose, onSaved }: Props) {
+  const [rating, setRating] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const fn = useServerFn(upsertSleepQuality);
+
+  useEffect(() => {
+    if (open) {
+      setRating(null);
+      setErr(null);
+    }
+  }, [open]);
+
+  const save = async () => {
+    if (rating == null) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await fn({ data: { sleep_quality_rating: rating, client_timezone: getBrowserTimezone() } });
+      onSaved?.();
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Sleep quality">
+      <div className="space-y-5">
+        <p className="text-[14px] text-white">How was your sleep quality?</p>
+        <RatingScale
+          value={rating}
+          onChange={setRating}
+          labels={["Terrible", "Poor", "Okay", "Good", "Excellent"]}
+        />
+        {err && <p className="text-[12px] text-red-400">{err}</p>}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded-2xl py-3 text-[14px] font-medium text-text-secondary active:scale-[0.98]"
+            style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)" }}
+          >
+            Skip
+          </button>
+          <div className="flex-1">
+            <SubmitBtn busy={busy} label="Save" disabled={rating == null} onClick={save} />
+          </div>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+export function EatingWindowValidator({
+  open,
+  onClose,
+  mealTimeISO,
+  onConfirm,
+  onSkip,
+}: {
+  open: boolean;
+  onClose: () => void;
+  mealTimeISO: string;
+  onConfirm: () => void;
+  onSkip: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [result, setResult] = useState<EatingWindowValidation | null>(null);
+  const fn = useServerFn(validateEatingWindow);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    fn({ data: { meal_time_iso: mealTimeISO, client_timezone: getBrowserTimezone() } })
+      .then((r) => {
+        if (cancelled) return;
+        setResult(r);
+        // Auto-proceed when not enabled or already in window.
+        if (!r.enabled || (r.enabled && r.in_window)) {
+          onConfirm();
+          onClose();
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        onConfirm();
+        onClose();
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, mealTimeISO, fn, onConfirm, onClose]);
+
+  if (!open) return null;
+  if (loading || !result || !result.enabled || result.in_window) {
+    // No UI flash — the auto-confirm above handles these cases.
+    return null;
+  }
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Outside your eating window">
+      <div className="space-y-4">
+        <p className="text-[14px] text-white">
+          Your window is {result.window_start}–{result.window_end} ({result.pattern}).
+        </p>
+        <p className="text-[13px] text-text-secondary">
+          This meal at {result.meal_local_time} is outside.
+        </p>
+        <div className="flex gap-2 pt-2">
+          <button
+            type="button"
+            onClick={() => {
+              onSkip();
+              onClose();
+            }}
+            className="flex-1 rounded-2xl py-3 text-[14px] font-medium text-text-secondary active:scale-[0.98]"
+            style={{ background: "#0A0E1A", border: "1px solid rgba(255,255,255,0.08)" }}
+          >
+            Skip
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onConfirm();
+              onClose();
+            }}
+            className="flex-1 rounded-2xl gradient-brand py-3 text-[14px] font-semibold text-white active:scale-[0.98]"
+          >
+            Log anyway
+          </button>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
