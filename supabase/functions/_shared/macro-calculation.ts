@@ -450,69 +450,60 @@ export async function calculateMacrosForUser(
   }
 
   const adjustment_kcal = new_target_calories - (old_target_calories || blended_tdee);
-  const review_id = crypto.randomUUID();
   const macros = recomputeMacros(new_target_calories, current_weight_kg, goal);
   const shouldApply = decision !== "hold" && confidenceTier !== "low" && !abnormal;
 
-  const directInsertReview = async (overrideFlag?: string | null) => {
-    await supa.from("nutrition_weekly_reviews").insert({
-      user_id,
-      week_start_date,
-      week_end_date,
-      weigh_in_count,
-      days_logged,
-      adherence_pct,
-      eligible: days_logged >= 3,
-      confidence_tier: confidenceTier,
-      abnormal_week: abnormal,
-      old_target_calories: old_target_calories || null,
-      old_observed_tdee,
-      new_observed_tdee,
-      blended_tdee,
-      raw_target_calories,
-      new_target_calories,
-      adjustment_kcal,
-      training_load_index: trainingLoadIndex,
-      weekly_sets_avg: weeklySetAvg,
-      avg_strain_value: avgStrain,
-      decision,
-      flag_reason: overrideFlag ?? flagReason,
-      applied_target_id: null,
-      applied_at: null,
-      timezone_used: tz,
-    });
+  const directInsertReview = async (overrideFlag?: string | null): Promise<string> => {
+    const { data, error } = await supa
+      .from("nutrition_weekly_reviews")
+      .insert({
+        user_id,
+        week_start_date,
+        week_end_date,
+        weigh_in_count,
+        days_logged,
+        adherence_pct,
+        eligible: days_logged >= 3,
+        confidence_tier: confidenceTier,
+        abnormal_week: abnormal,
+        old_target_calories: old_target_calories || null,
+        old_observed_tdee,
+        new_observed_tdee,
+        blended_tdee,
+        raw_target_calories,
+        new_target_calories,
+        adjustment_kcal,
+        training_load_index: trainingLoadIndex,
+        weekly_sets_avg: weeklySetAvg,
+        avg_strain_value: avgStrain,
+        bmr: old_bmr,
+        target_protein_g: macros.target_protein_g,
+        target_carbs_g: macros.target_carbs_g,
+        target_fat_g: macros.target_fat_g,
+        decision,
+        flag_reason: overrideFlag ?? flagReason,
+        applied_target_id: null,
+        applied_at: null,
+        timezone_used: tz,
+      })
+      .select("id")
+      .single();
+    if (error || !data) {
+      throw new Error(`review_insert_failed: ${error?.message ?? "no row returned"}`);
+    }
+    return data.id as string;
   };
 
   if (shouldApply) {
-    const { error: rpcErr } = await supa.rpc("apply_weekly_macro_review", {
-      p_review_id: review_id,
-      p_user_id: user_id,
-      p_week_start_date: week_start_date,
-      p_week_end_date: week_end_date,
-      p_effective_start_date: new_effective_start_date,
-      p_weigh_in_count: weigh_in_count,
-      p_days_logged: days_logged,
-      p_adherence_pct: adherence_pct,
-      p_eligible: days_logged >= 3,
-      p_confidence_tier: confidenceTier,
-      p_abnormal_week: abnormal,
-      p_old_target_calories: old_target_calories,
-      p_old_observed_tdee: old_observed_tdee ?? 0,
-      p_new_observed_tdee: new_observed_tdee ?? 0,
-      p_blended_tdee: blended_tdee,
-      p_raw_target_calories: raw_target_calories,
-      p_new_target_calories: new_target_calories,
-      p_adjustment_kcal: adjustment_kcal,
-      p_decision: decision,
-      p_flag_reason: flagReason ?? "",
-      p_timezone_used: tz,
-      p_bmr: old_bmr,
-      p_target_protein_g: macros.target_protein_g,
-      p_target_carbs_g: macros.target_carbs_g,
-      p_target_fat_g: macros.target_fat_g,
-    });
+    const reviewId = await directInsertReview();
+    const { data: appliedTargetId, error: rpcErr } = await supa.rpc(
+      "apply_existing_weekly_macro_review",
+      {
+        p_review_id: reviewId,
+        p_effective_start_date: new_effective_start_date,
+      },
+    );
     if (rpcErr) {
-      // Per spec: throw on RPC failure. Caller decides how to surface it.
       throw new Error(`apply_rpc_failed: ${rpcErr.message}`);
     }
     return {
@@ -520,7 +511,7 @@ export async function calculateMacrosForUser(
       status: "adjusted",
       decision,
       flag_reason: flagReason,
-      applied_target_id: review_id,
+      applied_target_id: (appliedTargetId as string | null) ?? null,
     };
   }
 
