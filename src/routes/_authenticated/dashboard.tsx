@@ -377,6 +377,10 @@ function Dashboard() {
         <SectionLabel>Body composition</SectionLabel>
         <Suspense fallback={<SkeletonBlock />}><BodyCompCard /></Suspense>
 
+        <SectionLabel>Your Recovery Signature</SectionLabel>
+        <Suspense fallback={<SkeletonBlock />}><PatternMemoryCard /></Suspense>
+
+
         <SectionLabel>This week's volume</SectionLabel>
         <Suspense fallback={<SkeletonBlock />}><MuscleGroupVolumeGrid /></Suspense>
 
