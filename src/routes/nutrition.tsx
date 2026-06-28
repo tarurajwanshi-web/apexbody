@@ -687,9 +687,11 @@ function Nutrition() {
         onClose={() => setWeeklySheetOpen(false)}
         initialAnchor={selectedDate}
         review={weeklyReview}
+        daysLogged={daysLoggedThisWeek}
         applying={applyingReview}
         onApply={handleApplyReview}
       />
+
 
     </div>
   );
