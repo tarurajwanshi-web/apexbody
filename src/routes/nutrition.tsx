@@ -110,6 +110,7 @@ function Nutrition() {
   const [openMeal, setOpenMeal] = useState<TodayMeal | null>(null);
   const [weekly, setWeekly] = useState<WeeklyNutritionInsight | null>(null);
   const [weeklyReview, setWeeklyReview] = useState<WeeklyReviewRow | null>(null);
+  const [daysLoggedThisWeek, setDaysLoggedThisWeek] = useState<number>(0);
   const [applyingReview, setApplyingReview] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
