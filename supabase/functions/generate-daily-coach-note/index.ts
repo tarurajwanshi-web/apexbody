@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import Anthropic from "https://esm.sh/@anthropic-ai/sdk@0.24.0";
 import { requireInternalSecret, corsAllowHeaders } from "../_shared/authorize.ts";
 import { detectContradictions } from "../_shared/contradictions.ts";
+import { buildApexSystemPrompt } from "../_shared/apex-voice.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -64,7 +65,7 @@ Deno.serve(async (req) => {
   // Fetch profiles
   const profileQuery = supa
     .from("profiles")
-    .select("user_id, timezone, coaching_time, goal, measurement_weight_kg, biological_sex, age")
+    .select("user_id, timezone, coaching_time, goal, measurement_weight_kg, biological_sex, age, name, experience_level")
     .not("profile_completed_at", "is", null);
   if (body.user_id) profileQuery.eq("user_id", body.user_id);
   const { data: profiles, error: profileErr } = await profileQuery;
@@ -285,6 +286,10 @@ Instructions:
       const response = await anthropic.messages.create({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 400,
+        system: buildApexSystemPrompt({
+          proficiency: (profile as any).experience_level,
+          name: (profile as any).name,
+        }),
         messages: [{ role: "user", content: haikuPrompt }],
       });
       coachNote = response.content[0].type === "text"

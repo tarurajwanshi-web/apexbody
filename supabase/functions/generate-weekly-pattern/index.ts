@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import Anthropic from "https://esm.sh/@anthropic-ai/sdk@0.24.0";
 import { requireInternalSecret, corsAllowHeaders } from "../_shared/authorize.ts";
+import { buildApexSystemPrompt } from "../_shared/apex-voice.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -238,7 +239,7 @@ Deno.serve(async (req) => {
 
   const profileQuery = supa
     .from("profiles")
-    .select("user_id, timezone, goal, measurement_weight_kg, biological_sex, age")
+    .select("user_id, timezone, goal, measurement_weight_kg, biological_sex, age, name, experience_level")
     .not("profile_completed_at", "is", null);
   if (body.user_id) profileQuery.eq("user_id", body.user_id);
   const { data: profiles, error: profileErr } = await profileQuery;
@@ -453,6 +454,10 @@ Output: Plain text, 250-300 words. Start with 📊`;
       const response = await anthropic.messages.create({
         model: "claude-sonnet-4-6",
         max_tokens: 600,
+        system: buildApexSystemPrompt({
+          proficiency: (profile as any).experience_level,
+          name: (profile as any).name,
+        }),
         messages: [{ role: "user", content: sonnetPrompt }],
       });
       weeklyCard = response.content[0].type === "text"
