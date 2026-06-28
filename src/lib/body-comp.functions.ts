@@ -83,7 +83,7 @@ export const getBodyCompState = createServerFn({ method: "GET" })
       const key = String(r.exercise_name);
       const vol = Number(r.weight_kg) * Number(r.reps_completed);
       if (!byExercise.has(key)) byExercise.set(key, []);
-      byExercise.get(key)!.push({ vol, date: r.entry_date as string });
+      byExercise.get(key)!.push({ vol, date: r.entry_date });
     }
     const top3 = [...byExercise.entries()]
       .sort((a, b) => b[1].length - a[1].length)
