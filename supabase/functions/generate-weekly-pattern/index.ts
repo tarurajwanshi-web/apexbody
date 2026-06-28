@@ -44,12 +44,182 @@ function addDays(isoDate: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+type DetectedPattern = {
+  pattern_type: string;
+  pattern_key: string;
+  description: string;
+  data_points: number;
+  correlation_coeff: number | null;
+  metadata: Record<string, unknown>;
+};
+
+async function generatePatternExplanation(
+  lovableKey: string,
+  pattern: DetectedPattern,
+  ctx: { age: number | null; goal: string | null; proficiency: string | null },
+): Promise<{ explanation: string; protocol: string } | null> {
+  if (!lovableKey) return null;
+  const sys =
+    "You're explaining a user's unique recovery pattern based on 4+ weeks of data. " +
+    "Be concrete and personal. Don't be generic. Explain the physiology simply. " +
+    "Provide a specific weekly protocol they can follow. " +
+    'Output ONLY JSON: { "explanation": string, "protocol": string }. ' +
+    "Plain text, no markdown, no emoji. Keep each field under 240 chars.";
+  const user =
+    `Pattern: ${pattern.description}\n` +
+    `Type: ${pattern.pattern_type}\n` +
+    `Key: ${pattern.pattern_key}\n` +
+    `Observations: ${pattern.data_points}\n` +
+    `Metadata: ${JSON.stringify(pattern.metadata)}\n` +
+    `User age: ${ctx.age ?? "unknown"}\n` +
+    `Goal: ${ctx.goal ?? "general"}\n` +
+    `Proficiency: ${ctx.proficiency ?? "intermediate"}\n\n` +
+    "Explain why this happens (physiology, 1-2 sentences). Provide a weekly protocol (1-2 sentences, specific days/intensities).";
+  try {
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Lovable-API-Key": lovableKey,
+        "X-Lovable-AIG-SDK": "vercel-ai-sdk",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-3-flash-preview",
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: user },
+        ],
+        response_format: { type: "json_object" },
+      }),
+    });
+    if (!res.ok) {
+      console.error("pattern explanation failed:", res.status, await res.text());
+      return null;
+    }
+    const json = await res.json();
+    const text = json?.choices?.[0]?.message?.content ?? "";
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed.explanation === "string" && typeof parsed.protocol === "string") {
+      return { explanation: parsed.explanation, protocol: parsed.protocol };
+    }
+    return null;
+  } catch (e) {
+    console.error("pattern explanation error:", e);
+    return null;
+  }
+}
+
+function detectExerciseLagPatterns(
+  setRows: Array<{ exercise_name: string; entry_date: string }>,
+  readinessByDate: Map<string, number>,
+): DetectedPattern[] {
+  const patterns: DetectedPattern[] = [];
+  if (!setRows.length || readinessByDate.size === 0) return patterns;
+
+  // top exercises by frequency of distinct workout dates
+  const datesByExercise = new Map<string, Set<string>>();
+  for (const r of setRows) {
+    if (!r.exercise_name) continue;
+    const key = r.exercise_name.toLowerCase().trim();
+    if (!datesByExercise.has(key)) datesByExercise.set(key, new Set());
+    datesByExercise.get(key)!.add(r.entry_date);
+  }
+
+  const allReadiness = [...readinessByDate.values()];
+  const baseline =
+    allReadiness.reduce((s, n) => s + n, 0) / Math.max(1, allReadiness.length);
+
+  const candidates = [...datesByExercise.entries()]
+    .filter(([, dates]) => dates.size >= 4)
+    .sort((a, b) => b[1].size - a[1].size)
+    .slice(0, 3);
+
+  for (const [exercise, dateSet] of candidates) {
+    const lagScores: number[] = [];
+    for (const d of dateSet) {
+      const dt = new Date(d + "T00:00:00Z");
+      dt.setUTCDate(dt.getUTCDate() + 2);
+      const lagDate = dt.toISOString().slice(0, 10);
+      const r = readinessByDate.get(lagDate);
+      if (typeof r === "number") lagScores.push(r);
+    }
+    if (lagScores.length < 4) continue;
+    const avgLag = lagScores.reduce((s, n) => s + n, 0) / lagScores.length;
+    const delta = avgLag - baseline; // negative = readiness dips
+    if (delta <= -3) {
+      patterns.push({
+        pattern_type: "exercise_lag",
+        pattern_key: exercise,
+        description: `Readiness drops ${Math.abs(delta).toFixed(1)} points two days after ${exercise} (${lagScores.length} observations).`,
+        data_points: lagScores.length,
+        correlation_coeff: Number((-delta / 10).toFixed(3)),
+        metadata: {
+          exercise,
+          days_to_recover: 2,
+          avg_lag_readiness: Number(avgLag.toFixed(1)),
+          baseline_readiness: Number(baseline.toFixed(1)),
+          delta: Number(delta.toFixed(1)),
+        },
+      });
+    }
+  }
+  return patterns;
+}
+
+function detectSleepEffectPattern(
+  sleepByDate: Map<string, number>,
+  readinessByDate: Map<string, number>,
+): DetectedPattern | null {
+  const pairs: Array<{ sleep: number; readiness: number }> = [];
+  for (const [date, sleep] of sleepByDate.entries()) {
+    const dt = new Date(date + "T00:00:00Z");
+    dt.setUTCDate(dt.getUTCDate() + 1);
+    const next = dt.toISOString().slice(0, 10);
+    const r = readinessByDate.get(next);
+    if (typeof r === "number") pairs.push({ sleep, readiness: r });
+  }
+  if (pairs.length < 4) return null;
+
+  const n = pairs.length;
+  const meanX = pairs.reduce((s, p) => s + p.sleep, 0) / n;
+  const meanY = pairs.reduce((s, p) => s + p.readiness, 0) / n;
+  let num = 0;
+  let denX = 0;
+  let denY = 0;
+  for (const p of pairs) {
+    const dx = p.sleep - meanX;
+    const dy = p.readiness - meanY;
+    num += dx * dy;
+    denX += dx * dx;
+    denY += dy * dy;
+  }
+  if (denX <= 0 || denY <= 0) return null;
+  const slope = num / denX; // readiness pts per hour of sleep
+  const r = num / Math.sqrt(denX * denY);
+  if (Math.abs(r) < 0.4 || Math.abs(slope) < 1) return null;
+
+  return {
+    pattern_type: "sleep_effect",
+    pattern_key: "sleep_to_readiness",
+    description: `Each extra hour of sleep adds ${slope.toFixed(1)} readiness points the next day (${n} observations).`,
+    data_points: n,
+    correlation_coeff: Number(r.toFixed(3)),
+    metadata: {
+      slope_per_hour: Number(slope.toFixed(2)),
+      mean_sleep_h: Number(meanX.toFixed(1)),
+      mean_readiness: Number(meanY.toFixed(1)),
+    },
+  };
+}
+
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")!;
+  const lovableKey = Deno.env.get("LOVABLE_API_KEY") || "";
 
   const supa = createClient(supabaseUrl, supabaseKey);
   const anthropic = new Anthropic({ apiKey: anthropicKey });
@@ -301,9 +471,95 @@ Output: Plain text, 250-300 words. Start with 📊`;
       content: weeklyCard,
     }, { onConflict: "user_id,card_date,card_type" });
 
+    // --- Recovery pattern memory: detect + explain + persist (30d window) ---
+    let patternsStored = 0;
+    try {
+      const patternStart = addDays(today, -30);
+
+      const { data: setRows30 } = await supa
+        .from("workout_set_logs")
+        .select("exercise_name, entry_date")
+        .eq("user_id", profile.user_id)
+        .eq("completed", true)
+        .gte("entry_date", patternStart)
+        .lte("entry_date", today);
+
+      const { data: readiness30 } = await supa
+        .from("readiness_scores")
+        .select("score_date, final_score")
+        .eq("user_id", profile.user_id)
+        .gte("score_date", patternStart)
+        .lte("score_date", today);
+
+      const { data: sleep30 } = await supa
+        .from("shield_manual_inputs")
+        .select("entry_date, sleep_hours")
+        .eq("user_id", profile.user_id)
+        .gte("entry_date", patternStart)
+        .lte("entry_date", today)
+        .not("sleep_hours", "is", null);
+
+      const readinessByDate = new Map<string, number>();
+      for (const r of readiness30 ?? []) {
+        if (r.score_date && typeof r.final_score === "number") {
+          readinessByDate.set(r.score_date, Number(r.final_score));
+        }
+      }
+      const sleepByDate = new Map<string, number>();
+      for (const r of sleep30 ?? []) {
+        if (r.entry_date && r.sleep_hours != null) {
+          sleepByDate.set(r.entry_date, Number(r.sleep_hours));
+        }
+      }
+
+      const detected: DetectedPattern[] = [];
+      detected.push(
+        ...detectExerciseLagPatterns(
+          (setRows30 ?? []) as Array<{ exercise_name: string; entry_date: string }>,
+          readinessByDate,
+        ),
+      );
+      const sleepPattern = detectSleepEffectPattern(sleepByDate, readinessByDate);
+      if (sleepPattern) detected.push(sleepPattern);
+
+      const proficiency =
+        (profile as { experience_level?: string }).experience_level ?? null;
+
+      for (const p of detected) {
+        if (p.data_points < 4) continue;
+        const explained = await generatePatternExplanation(lovableKey, p, {
+          age: (profile.age as number | null) ?? null,
+          goal: (profile.goal as string | null) ?? null,
+          proficiency,
+        });
+        const { error: upsertErr } = await supa
+          .from("user_recovery_patterns")
+          .upsert(
+            {
+              user_id: profile.user_id,
+              pattern_type: p.pattern_type,
+              pattern_key: p.pattern_key,
+              description: p.description,
+              explanation: explained?.explanation ?? null,
+              protocol: explained?.protocol ?? null,
+              data_points: p.data_points,
+              correlation_coeff: p.correlation_coeff,
+              metadata: p.metadata,
+              detected_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id,pattern_type,pattern_key" },
+          );
+        if (!upsertErr) patternsStored += 1;
+        else console.error("pattern upsert error:", upsertErr);
+      }
+    } catch (e) {
+      console.error("pattern memory phase error:", e);
+    }
+
     results.push({
       user_id: profile.user_id,
       status: "generated",
+      patterns_stored: patternsStored,
       preview: weeklyCard.slice(0, 150) + "...",
     });
   }
