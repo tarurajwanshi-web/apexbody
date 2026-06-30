@@ -1,7 +1,22 @@
-// APEX Shield deterministic readiness engine (v6.1).
+// APEX Shield deterministic readiness engine (v6.3).
 // NO LLM CALLS. Pure formulas per spec.
+//
+// v6.3 changes vs v6.2:
+// - Source-agnostic input layer: reads public.shield_health_signals first
+//   (screenshot / native_health / manual / derived). Falls back to legacy
+//   tables when no normalized rows exist. Pillar weights and formulas are
+//   unchanged so scores stay deterministic and backward-comparable.
+// - Writes per-signal quality audit rows into shield_signal_quality_events.
+// - Populates readiness_scores.{signal_quality, top_drivers, load_carryover,
+//   fuelling_status, training_permission, nutrition_modifier, reason_codes}.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { authorizeCaller, corsAllowHeaders } from "../_shared/authorize.ts";
+import {
+  classifyHrv, classifyRhr, classifySleep,
+  REASON, dedupe,
+  type Confidence as SigConfidence,
+  type Freshness, type Validity, type ReasonCode,
+} from "../_shared/signal-quality.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,18 +28,13 @@ const W = { recovery: 30, sleep: 22, nutrition: 20, training: 15, mood: 13 } as 
 type PillarKey = keyof typeof W;
 const PILLAR_KEYS: PillarKey[] = ["recovery", "sleep", "nutrition", "training", "mood"];
 const NEUTRAL = 50;
-// v6.2: manual-path Nutrition pillar split into 70% meal-quality + 30% hydration.
-// Device-path Nutrition pillar unchanged (meal-quality only) — hydration
-// information is already physiologically captured by HRV/RHR via Recovery.
-// Hydration target = ACSM-aligned baseline: 30 ml/kg rest day, 40 ml/kg on
-// days with a logged training session.
-const ENGINE_VERSION = "v6.2";
+const ENGINE_VERSION = "v6.3";
 const HYDRATION_ML_PER_KG_REST = 30;
 const HYDRATION_ML_PER_KG_TRAIN = 40;
 const NUTRITION_MEAL_WEIGHT = 0.7;
 const NUTRITION_HYDRATION_WEIGHT = 0.3;
 
-// ---------------- core formulas (verbatim from spec) ----------------
+// ---------------- core formulas (verbatim from v6.2) ----------------
 function manualSleepScore(hours: number): number {
   let raw = 100 / (1 + Math.exp(-1.6 * (hours - 6.3)));
   if (hours > 8.5) raw -= (hours - 8.5) * 9;
@@ -74,10 +84,6 @@ function nextBestInput(present: Record<PillarKey, boolean>): PillarKey | null {
   return missing.length ? missing[0][0] : null;
 }
 
-// mood_emoji → 5-point scale (worst 20 → best 100).
-// No prior values existed in shield_manual_inputs; mapping covers the
-// emoji set the manual recovery UI is expected to send, plus a few text
-// synonyms for robustness. Unknown values → null (treated as absent).
 const MOOD_MAP: Record<string, number> = {
   "😞": 20, "😢": 20, "😔": 20, sad: 20, awful: 20, terrible: 20, worst: 20,
   "😕": 40, "🙁": 40, bad: 40, low: 40,
@@ -86,7 +92,6 @@ const MOOD_MAP: Record<string, number> = {
   "😄": 100, "😁": 100, "🤩": 100, great: 100, best: 100, peak: 100,
 };
 
-// ---------------- helpers ----------------
 function dateOffset(iso: string, daysBack: number): string {
   const d = new Date(iso + "T00:00:00Z");
   d.setUTCDate(d.getUTCDate() - daysBack);
@@ -103,14 +108,6 @@ type DayInputs = {
 
 type RecoveryBaseline = { hrv: number | null; rhr: number | null };
 
-// Device-path recovery scoring (v1 — finishes the placeholder previously at
-// scores.recovery=55). HRV is the primary signal (higher=better, weight 0.7),
-// RHR is the confirming signal (lower=better, weight 0.3). Each sub-score is
-// a relative deviation against the user's own rolling baseline, or against a
-// population default for users with no history yet (HRV adults ~50 ms,
-// RHR adults ~60 bpm). We apply the same 0.75 deviation-cap damping used by
-// manualRecoveryScore so device and manual paths sit on the same scale, and
-// the existing confidence/cap system still bounds the pillar's net effect.
 const HRV_POP_BASELINE = 50;
 const RHR_POP_BASELINE = 60;
 function deviceRecoveryScore(
@@ -121,11 +118,9 @@ function deviceRecoveryScore(
   if (hrv == null && rhr == null) return null;
   const hb = baseline.hrv && baseline.hrv > 0 ? baseline.hrv : HRV_POP_BASELINE;
   const rb = baseline.rhr && baseline.rhr > 0 ? baseline.rhr : RHR_POP_BASELINE;
-  // ±30% HRV deviation maps to ±50 points around NEUTRAL.
   const hrvSub = hrv != null
     ? Math.max(10, Math.min(95, NEUTRAL + ((hrv - hb) / hb) * (50 / 0.3)))
     : null;
-  // RHR: lower=better. ±15% deviation → ±50 points.
   const rhrSub = rhr != null
     ? Math.max(10, Math.min(95, NEUTRAL + ((rb - rhr) / rb) * (50 / 0.15)))
     : null;
@@ -136,9 +131,6 @@ function deviceRecoveryScore(
   return Math.min(100, Math.max(5, damped));
 }
 
-// Resolve effective bodyweight. MUST stay in lockstep with
-// src/lib/shield.functions.ts → getTodayHydration (same logic, ported here
-// for the Deno edge runtime). If you change one, change the other.
 function resolveEffectiveWeight(p: any): number | null {
   let w: number | null = p?.measurement_weight_kg != null ? Number(p.measurement_weight_kg) : null;
   if ((!w || w <= 0) && p?.dexa_lean_mass_kg != null && p?.dexa_body_fat_pct != null) {
@@ -166,12 +158,7 @@ function scoreDay(d: DayInputs, recoveryBaseline: RecoveryBaseline): {
   let usedDevice = false;
   let usedManual = false;
 
-  // recovery — precedence depends on the user's input path.
-  // device-path users: device data with HRV (Journey A/B) wins over any
-  //   same-day manual entry; manual only contributes when device data is
-  //   absent OR unusable (HRV null = Journey C territory).
-  // manual-path users: manual entry wins; device data is a fallback.
-  const deviceUsable = d.device && d.device.parsed_hrv != null; // HRV is the primary signal
+  const deviceUsable = d.device && d.device.parsed_hrv != null;
   const useDeviceFirst = d.pathPref === "device" && deviceUsable;
   if (useDeviceFirst) {
     const r = deviceRecoveryScore(d.device!.parsed_hrv, d.device!.parsed_rhr, recoveryBaseline);
@@ -184,7 +171,6 @@ function scoreDay(d: DayInputs, recoveryBaseline: RecoveryBaseline): {
     if (r != null) { scores.recovery = r; usedDevice = true; }
   }
 
-  // sleep — same precedence model: device-path users prefer device sleep when present.
   let sleepHours: number | null = null;
   const deviceSleep = d.device?.parsed_sleep_hours;
   if (d.pathPref === "device" && deviceSleep != null) {
@@ -201,9 +187,6 @@ function scoreDay(d: DayInputs, recoveryBaseline: RecoveryBaseline): {
     usedDevice = true;
   }
 
-  // nutrition — split into meal-quality + hydration; final composition happens
-  // in the caller (path-dependent: manual users get 70/30 split, device users
-  // get meal-quality only since HRV/RHR already reflect hydration state).
   const scored = d.meals.map((m) => m.claude_quality_score).filter((v): v is number => v != null);
   const mealQuality = scored.length > 0
     ? scored.reduce((a, b) => a + b, 0) / scored.length
@@ -212,7 +195,6 @@ function scoreDay(d: DayInputs, recoveryBaseline: RecoveryBaseline): {
     ? Number(d.manual.hydration_ml)
     : null;
 
-  // training
   let strainNorm: number | null = null;
   let hadTraining = false;
   if (d.training?.strain_value != null) {
@@ -222,19 +204,15 @@ function scoreDay(d: DayInputs, recoveryBaseline: RecoveryBaseline): {
     hadTraining = true;
   }
 
-  // mood
   if (d.manual?.mood_emoji) {
     const m = MOOD_MAP[d.manual.mood_emoji.trim()];
-    if (m != null) {
-      scores.mood = m;
-      usedManual = true;
-    }
+    if (m != null) { scores.mood = m; usedManual = true; }
   }
 
   const present: Record<PillarKey, boolean> = {
     recovery: scores.recovery != null,
     sleep: scores.sleep != null,
-    nutrition: false, // filled in by caller
+    nutrition: false,
     training: scores.training != null,
     mood: scores.mood != null,
   };
@@ -242,12 +220,6 @@ function scoreDay(d: DayInputs, recoveryBaseline: RecoveryBaseline): {
   return { scores, present, sleepHours, strainNorm, usedDevice, usedManual, mealQuality, hydrationMl, hadTraining };
 }
 
-/** Compose the Nutrition pillar score per user path.
- *  Manual path: 70% meal-quality + 30% hydration % vs ACSM target. Either
- *    sub-input alone still produces a score (reweighted to 100%).
- *  Device path: meal-quality only — hydration is excluded to avoid
- *    double-counting with HRV/RHR-driven Recovery.
- *  Returns null when no sub-input is available. */
 function composeNutrition(
   mealQuality: number | null,
   hydrationMl: number | null,
@@ -264,7 +236,6 @@ function composeNutrition(
   if (path === "device") {
     return { score: mealQuality, hydrationPct, hydrationTargetMl: targetMl };
   }
-  // manual path
   const mealOk = mealQuality != null;
   const hydOk = hydrationPct != null;
   if (!mealOk && !hydOk) return { score: null, hydrationPct, hydrationTargetMl: targetMl };
@@ -272,7 +243,6 @@ function composeNutrition(
     const score = NUTRITION_MEAL_WEIGHT * mealQuality + NUTRITION_HYDRATION_WEIGHT * hydrationPct;
     return { score, hydrationPct, hydrationTargetMl: targetMl };
   }
-  // partial credit — single sub-input takes full weight rather than blanking the pillar
   return { score: mealOk ? mealQuality : hydrationPct, hydrationPct, hydrationTargetMl: targetMl };
 }
 
@@ -286,6 +256,75 @@ function nudgeMessageFor(pillar: PillarKey | null): string | null {
     mood: "A quick mood check sharpens today's readiness picture.",
   };
   return map[pillar];
+}
+
+// ---------------- v6.3 source-agnostic signal reader ----------------
+// Per (date, metric) pick the best row from shield_health_signals.
+// Priority: validity (valid > suspicious), then confidence (HIGH>MED>LOW),
+// then source_method (native_health > screenshot > manual > derived > system).
+const METHOD_RANK: Record<string, number> = {
+  native_health: 5, screenshot: 4, manual: 3, derived: 2, system: 1,
+};
+const CONF_RANK: Record<string, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+const VALID_RANK: Record<string, number> = { valid: 2, suspicious: 1 };
+
+type HealthSignalRow = {
+  signal_date: string;
+  metric_name: string;
+  metric_value: number | null;
+  unit: string | null;
+  source_method: string;
+  source_provider: string;
+  source_table: string | null;
+  source_id: string | null;
+  confidence_level: string | null;
+  freshness_status: string | null;
+  validity_status: string | null;
+  reason_codes: string[] | null;
+};
+
+type PerMetricMeta = {
+  value: number | null;
+  confidence: SigConfidence;
+  freshness: Freshness;
+  validity: Validity;
+  source_method: string;
+  source_provider: string;
+  reason_codes: ReasonCode[];
+};
+
+function rankRow(r: HealthSignalRow): number {
+  const v = VALID_RANK[r.validity_status ?? "valid"] ?? 0;
+  const c = CONF_RANK[r.confidence_level ?? "LOW"] ?? 0;
+  const m = METHOD_RANK[r.source_method] ?? 0;
+  return v * 100 + c * 10 + m;
+}
+
+function groupSignals(rows: HealthSignalRow[]): Map<string, Map<string, HealthSignalRow>> {
+  // date -> metric -> best row
+  const out = new Map<string, Map<string, HealthSignalRow>>();
+  for (const r of rows) {
+    if (r.metric_value == null) continue;
+    if (r.validity_status === "invalid" || r.validity_status === "missing") continue;
+    let day = out.get(r.signal_date);
+    if (!day) { day = new Map(); out.set(r.signal_date, day); }
+    const existing = day.get(r.metric_name);
+    if (!existing || rankRow(r) > rankRow(existing)) day.set(r.metric_name, r);
+  }
+  return out;
+}
+
+function toMeta(r: HealthSignalRow | undefined): PerMetricMeta | null {
+  if (!r) return null;
+  return {
+    value: r.metric_value,
+    confidence: (r.confidence_level as SigConfidence) ?? "LOW",
+    freshness: (r.freshness_status as Freshness) ?? "unknown",
+    validity: (r.validity_status as Validity) ?? "valid",
+    source_method: r.source_method,
+    source_provider: r.source_provider,
+    reason_codes: (r.reason_codes ?? []) as ReasonCode[],
+  };
 }
 
 // ---------------- main ----------------
@@ -303,8 +342,6 @@ Deno.serve(async (req) => {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    // Audit #3: only callable via DB-dispatch internal secret, or by the user
-    // whose data is being scored (JWT user.id must match body.user_id).
     const authz = await authorizeCaller(req, supabase, user_id);
     if (!authz.ok) {
       return new Response(JSON.stringify({ error: authz.error }), {
@@ -317,7 +354,9 @@ Deno.serve(async (req) => {
     const dayBefore = dateOffset(today, 2);
     const dateList = [dayBefore, yesterday, today];
 
-    // Read previous score for today (for change toast)
+    // load_carryover window (today + 3 prior days).
+    const loadDates = [today, dateOffset(today, 1), dateOffset(today, 2), dateOffset(today, 3)];
+
     const { data: prev } = await supabase
       .from("readiness_scores")
       .select("final_score")
@@ -326,10 +365,6 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const previous_score: number | null = prev?.final_score != null ? Number(prev.final_score) : null;
 
-    // Profile drives path-aware Nutrition pillar composition + hydration target.
-    // We also read DEXA fields so weight resolution mirrors getTodayHydration
-    // exactly — without this, DEXA-path users silently get hydrationPct=null
-    // and their hydration never contributes to the Nutrition pillar score.
     const { data: profile } = await supabase
       .from("profiles")
       .select("input_path_preference, measurement_weight_kg, dexa_lean_mass_kg, dexa_body_fat_pct")
@@ -338,22 +373,34 @@ Deno.serve(async (req) => {
     const pathPref: "device" | "manual" = profile?.input_path_preference === "device" ? "device" : "manual";
     const weightKg: number | null = resolveEffectiveWeight(profile);
 
-    // Fetch the last 3 days of inputs + a 14-day HRV/RHR baseline window for
-    // device-path users (uses any parsed device upload, today included as a
-    // reasonable prior for single-day users).
     const baselineFrom = dateOffset(today, 14);
-    const [manualRes, deviceRes, mealsRes, trainingRes, baselineRes] = await Promise.all([
+    const [
+      manualRes, deviceRes, mealsRes, trainingRes, baselineRes,
+      signalsRes, loadStrainRes, targetsRes,
+    ] = await Promise.all([
       supabase.from("shield_manual_inputs").select("entry_date, recovery_self_rating, sleep_hours, mood_emoji, hydration_ml, recovery_source")
         .eq("user_id", user_id).in("entry_date", dateList),
       supabase.from("shield_device_uploads").select("entry_date, parsed_hrv, parsed_rhr, parsed_sleep_hours, parse_status")
         .eq("user_id", user_id).in("entry_date", dateList).eq("parse_status", "parsed"),
-      supabase.from("shield_nutrition_logs").select("entry_date, claude_quality_score, deleted")
+      supabase.from("shield_nutrition_logs").select("entry_date, claude_quality_score, total_protein_g, total_calories, deleted")
         .eq("user_id", user_id).in("entry_date", dateList).eq("deleted", false),
       supabase.from("shield_training_logs").select("entry_date, strain_value")
         .eq("user_id", user_id).in("entry_date", dateList),
       supabase.from("shield_device_uploads").select("parsed_hrv, parsed_rhr")
         .eq("user_id", user_id).eq("parse_status", "parsed")
         .gte("entry_date", baselineFrom).lte("entry_date", today),
+      supabase.from("shield_health_signals")
+        .select("signal_date, metric_name, metric_value, unit, source_method, source_provider, source_table, source_id, confidence_level, freshness_status, validity_status, reason_codes")
+        .eq("user_id", user_id).in("signal_date", dateList),
+      supabase.from("shield_training_logs").select("entry_date, strain_value")
+        .eq("user_id", user_id).in("entry_date", loadDates),
+      supabase.from("daily_macro_targets")
+        .select("target_calories, target_protein_g, effective_start_date, effective_end_date")
+        .eq("user_id", user_id)
+        .lte("effective_start_date", today)
+        .or(`effective_end_date.is.null,effective_end_date.gte.${today}`)
+        .order("effective_start_date", { ascending: false })
+        .limit(1),
     ]);
 
     const baselineRows = (baselineRes.data ?? []) as Array<{ parsed_hrv: number | null; parsed_rhr: number | null }>;
@@ -363,16 +410,43 @@ Deno.serve(async (req) => {
       rhr: mean(baselineRows.map((r) => r.parsed_rhr).filter((v): v is number => v != null && v > 0)),
     };
 
-    const byDate: Record<string, DayInputs> = {};
-    for (const d of dateList) byDate[d] = { meals: [], pathPref };
+    // Group normalized signals by date+metric.
+    const signalRows = (signalsRes.data ?? []) as HealthSignalRow[];
+    const signalsByDate = groupSignals(signalRows);
+
+    // Build per-day inputs. Prefer normalized signals; fall back to legacy.
+    const byDate: Record<string, DayInputs & { meta: { hrv?: PerMetricMeta; rhr?: PerMetricMeta; sleep?: PerMetricMeta; recovery_proxy?: PerMetricMeta } }> = {};
+    for (const d of dateList) byDate[d] = { meals: [], pathPref, meta: {} };
+
     for (const r of manualRes.data ?? []) byDate[r.entry_date].manual = r as any;
     for (const r of deviceRes.data ?? []) byDate[r.entry_date].device = r as any;
     for (const r of mealsRes.data ?? []) byDate[r.entry_date].meals.push({ claude_quality_score: r.claude_quality_score });
     for (const r of trainingRes.data ?? []) byDate[r.entry_date].training = r as any;
 
+    // Overlay normalized signals where present.
+    for (const d of dateList) {
+      const day = signalsByDate.get(d);
+      if (!day) continue;
+      const hrv = day.get("hrv_ms");
+      const rhr = day.get("resting_heart_rate_bpm");
+      const slp = day.get("sleep_hours");
+      const rec = day.get("recovery_score") ?? day.get("readiness_proxy_score") ?? day.get("body_battery");
+
+      if (hrv || rhr || slp) {
+        byDate[d].device = {
+          parsed_hrv: hrv?.metric_value ?? byDate[d].device?.parsed_hrv ?? null,
+          parsed_rhr: rhr?.metric_value ?? byDate[d].device?.parsed_rhr ?? null,
+          parsed_sleep_hours: slp?.metric_value ?? byDate[d].device?.parsed_sleep_hours ?? null,
+        };
+      }
+      byDate[d].meta.hrv = toMeta(hrv) ?? undefined;
+      byDate[d].meta.rhr = toMeta(rhr) ?? undefined;
+      byDate[d].meta.sleep = toMeta(slp) ?? undefined;
+      byDate[d].meta.recovery_proxy = toMeta(rec) ?? undefined;
+    }
+
     const perDay = dateList.map((d) => {
       const s = scoreDay(byDate[d], recoveryBaseline);
-      // Compose Nutrition pillar per user path; mutates s.scores / s.present.
       const comp = composeNutrition(s.mealQuality, s.hydrationMl, weightKg, s.hadTraining, pathPref);
       if (comp.score != null) {
         s.scores.nutrition = comp.score;
@@ -382,9 +456,7 @@ Deno.serve(async (req) => {
     });
     const today_ = perDay[2];
 
-    // Weighted 3-day average per pillar (today*3 + yesterday*2 + day_before*1)/6
-    // Only count days where that pillar is present; reweight remaining days.
-    const weights = [1, 2, 3]; // dayBefore, yesterday, today
+    const weights = [1, 2, 3];
     const weightedAvgPerPillar: PillarScores = {};
     for (const p of PILLAR_KEYS) {
       let num = 0; let den = 0;
@@ -395,7 +467,6 @@ Deno.serve(async (req) => {
       if (den > 0) weightedAvgPerPillar[p] = num / den;
     }
 
-    // raw_score across pillars present TODAY (per spec, weighted avg per present pillar)
     const presentToday = today_.present;
     let rawNum = 0; let rawDen = 0;
     for (const p of PILLAR_KEYS) {
@@ -405,25 +476,16 @@ Deno.serve(async (req) => {
       }
     }
     const raw_score = rawDen > 0 ? rawNum / rawDen : NEUTRAL;
-
-    // coverage = sum(weights of pillars present TODAY) / 100
     const coverage = PILLAR_KEYS.reduce((s, p) => s + (presentToday[p] ? W[p] : 0), 0) / 100;
 
-    // Fatigue state across 3-day window
-    // sleep debt: optimal=8h, per-day max 2h, decay 30%/day (0.7 retention).
     let sleepDebt = 0;
     for (const day of perDay) {
       sleepDebt = sleepDebt * 0.7;
-      if (day.sleepHours != null) {
-        sleepDebt += Math.max(0, Math.min(2, 8 - day.sleepHours));
-      }
+      if (day.sleepHours != null) sleepDebt += Math.max(0, Math.min(2, 8 - day.sleepHours));
     }
     const strainHistory = perDay.map((d) => d.strainNorm).filter((v): v is number => v != null);
     const penalty = fatiguePenalty(sleepDebt, strainHistory);
 
-    // ----- Pre-workout readiness check (additive AFTER existing formula) -----
-    // If a row exists for today with session_readiness in the bottom 2 (1 or 2),
-    // apply an extra -5 to score; respect the existing -15 combined cap (penalty + extra).
     const { data: psc } = await supabase
       .from("pre_session_checks")
       .select("session_readiness")
@@ -435,7 +497,7 @@ Deno.serve(async (req) => {
     const lowReadiness = psc != null && Number(psc.session_readiness) <= 2;
     const rawExtra = lowReadiness ? 5 : 0;
     const combinedPenalty = Math.min(15, penalty + rawExtra);
-    const preSessionDelta = combinedPenalty - penalty; // 0..5 — actually applied extra
+    const preSessionDelta = combinedPenalty - penalty;
     const final_pre_cap = raw_score - combinedPenalty;
 
     const confidence = deriveConfidence(presentToday.recovery, presentToday.sleep, coverage);
@@ -445,7 +507,6 @@ Deno.serve(async (req) => {
     const nudge_pillar = nextBestInput(presentToday);
     const nudge_message = nudgeMessageFor(nudge_pillar);
 
-    // pillar_breakdown for TODAY (null for absent)
     const pillar_breakdown: Record<PillarKey, number | null> = {
       recovery: presentToday.recovery ? Math.round(today_.scores.recovery!) : null,
       sleep: presentToday.sleep ? Math.round(today_.scores.sleep!) : null,
@@ -457,6 +518,258 @@ Deno.serve(async (req) => {
     const input_path: "device" | "manual" | "mixed" =
       today_.usedDevice && today_.usedManual ? "mixed" : today_.usedDevice ? "device" : "manual";
 
+    // ---------------- v6.3 outputs ----------------
+    const reasonCodesAll: ReasonCode[] = [];
+
+    // load_carryover from today + 3 prior days.
+    const strainByDate = new Map<string, number>();
+    for (const r of (loadStrainRes.data ?? []) as Array<{ entry_date: string; strain_value: number | null }>) {
+      if (r.strain_value != null) strainByDate.set(r.entry_date, Number(r.strain_value));
+    }
+    const decayMap: Record<number, number> = { 0: 1.0, 1: 0.7, 2: 0.4, 3: 0.2 };
+    const loadDays = loadDates.map((d, i) => {
+      const strain = strainByDate.get(d) ?? 0;
+      const decay = decayMap[i];
+      return { date: d, strain, decay, contribution: Math.round(strain * decay * 10) / 10 };
+    });
+    const systemic_load = Math.round(loadDays.reduce((a, b) => a + b.contribution, 0) * 10) / 10;
+    const loadReasons: ReasonCode[] = [];
+    if (systemic_load >= 20) loadReasons.push(REASON.HIGH_LOAD_CARRYOVER);
+    if (loadReasons.length) reasonCodesAll.push(...loadReasons);
+
+    const load_carryover = {
+      systemic_load,
+      days: loadDays,
+      reason_codes: loadReasons,
+    };
+
+    // signal_quality block — per-signal confidence/validity/freshness summary.
+    const todayMeta = byDate[today].meta;
+
+    // Re-classify legacy fallback values so suspicious/invalid is tagged even
+    // when there are no normalized rows yet.
+    const legacyDev = byDate[today].device;
+    const legacyMan = byDate[today].manual;
+    const fallbackHrvC = legacyDev?.parsed_hrv != null && !todayMeta.hrv
+      ? classifyHrv(legacyDev.parsed_hrv) : null;
+    const fallbackRhrC = legacyDev?.parsed_rhr != null && !todayMeta.rhr
+      ? classifyRhr(legacyDev.parsed_rhr) : null;
+    const fallbackSleepC =
+      todayMeta.sleep ? null :
+      legacyDev?.parsed_sleep_hours != null ? classifySleep(legacyDev.parsed_sleep_hours)
+      : legacyMan?.sleep_hours != null ? classifySleep(legacyMan.sleep_hours)
+      : null;
+
+    type SignalSummary = {
+      present: boolean;
+      confidence: SigConfidence;
+      validity: Validity;
+      freshness: Freshness;
+      source_method: string | null;
+      source_provider: string | null;
+      reason_codes: ReasonCode[];
+      value: number | null;
+    };
+    const blankSig: SignalSummary = {
+      present: false, confidence: "LOW", validity: "missing", freshness: "missing",
+      source_method: null, source_provider: null, reason_codes: [], value: null,
+    };
+
+    const hrvSig: SignalSummary = todayMeta.hrv ? {
+      present: true, confidence: todayMeta.hrv.confidence, validity: todayMeta.hrv.validity,
+      freshness: todayMeta.hrv.freshness, source_method: todayMeta.hrv.source_method,
+      source_provider: todayMeta.hrv.source_provider, reason_codes: todayMeta.hrv.reason_codes,
+      value: todayMeta.hrv.value,
+    } : fallbackHrvC ? {
+      present: fallbackHrvC.value != null,
+      confidence: fallbackHrvC.validity === "valid" ? "MEDIUM" : fallbackHrvC.validity === "suspicious" ? "LOW" : "LOW",
+      validity: fallbackHrvC.validity, freshness: "unknown",
+      source_method: "screenshot", source_provider: "unknown",
+      reason_codes: fallbackHrvC.reason_codes, value: fallbackHrvC.value,
+    } : { ...blankSig, reason_codes: [REASON.HRV_MISSING] };
+
+    const rhrSig: SignalSummary = todayMeta.rhr ? {
+      present: true, confidence: todayMeta.rhr.confidence, validity: todayMeta.rhr.validity,
+      freshness: todayMeta.rhr.freshness, source_method: todayMeta.rhr.source_method,
+      source_provider: todayMeta.rhr.source_provider, reason_codes: todayMeta.rhr.reason_codes,
+      value: todayMeta.rhr.value,
+    } : fallbackRhrC ? {
+      present: fallbackRhrC.value != null,
+      confidence: fallbackRhrC.validity === "valid" ? "MEDIUM" : "LOW",
+      validity: fallbackRhrC.validity, freshness: "unknown",
+      source_method: "screenshot", source_provider: "unknown",
+      reason_codes: fallbackRhrC.reason_codes, value: fallbackRhrC.value,
+    } : { ...blankSig, reason_codes: [REASON.RHR_MISSING] };
+
+    const sleepSig: SignalSummary = todayMeta.sleep ? {
+      present: true, confidence: todayMeta.sleep.confidence, validity: todayMeta.sleep.validity,
+      freshness: todayMeta.sleep.freshness, source_method: todayMeta.sleep.source_method,
+      source_provider: todayMeta.sleep.source_provider, reason_codes: todayMeta.sleep.reason_codes,
+      value: todayMeta.sleep.value,
+    } : fallbackSleepC ? {
+      present: fallbackSleepC.value != null,
+      confidence: fallbackSleepC.validity === "valid" ? "MEDIUM" : "LOW",
+      validity: fallbackSleepC.validity, freshness: "unknown",
+      source_method: legacyDev?.parsed_sleep_hours != null ? "screenshot" : "manual",
+      source_provider: legacyDev?.parsed_sleep_hours != null ? "unknown" : "user",
+      reason_codes: fallbackSleepC.reason_codes, value: fallbackSleepC.value,
+    } : { ...blankSig, reason_codes: [REASON.SLEEP_MISSING] };
+
+    if (sleepSig.confidence === "LOW" && sleepSig.present) {
+      sleepSig.reason_codes = dedupe([...sleepSig.reason_codes, REASON.LOW_SLEEP_CONFIDENCE]);
+    }
+    if (hrvSig.confidence === "HIGH") {
+      hrvSig.reason_codes = dedupe([...hrvSig.reason_codes, REASON.HRV_HIGH_CONFIDENCE]);
+    }
+
+    const nutritionSig: SignalSummary = {
+      present: today_.mealQuality != null,
+      confidence: today_.mealQuality != null
+        ? (today_.meals.length >= 2 ? "HIGH" : "MEDIUM")
+        : "LOW",
+      validity: today_.mealQuality != null ? "valid" : "missing",
+      freshness: today_.mealQuality != null ? "fresh" : "missing",
+      source_method: "nutrition_log", source_provider: "user",
+      reason_codes: [], value: today_.mealQuality,
+    };
+    const hydrationTarget = (perDay[2] as any).hydrationTargetMl as number | null;
+    const hydrationPct = (perDay[2] as any).hydrationPct as number | null;
+    const hydrationSig: SignalSummary = {
+      present: today_.hydrationMl != null,
+      confidence: today_.hydrationMl != null ? "HIGH" : "LOW",
+      validity: today_.hydrationMl != null ? "valid" : "missing",
+      freshness: today_.hydrationMl != null ? "fresh" : "missing",
+      source_method: "manual", source_provider: "user",
+      reason_codes: hydrationPct != null && hydrationPct < 70 ? [REASON.HYDRATION_BELOW_TARGET] : [],
+      value: today_.hydrationMl,
+    };
+    const trainingSig: SignalSummary = {
+      present: today_.hadTraining,
+      confidence: today_.hadTraining ? "HIGH" : "LOW",
+      validity: today_.hadTraining ? "valid" : "missing",
+      freshness: today_.hadTraining ? "fresh" : "missing",
+      source_method: "workout_log", source_provider: "user",
+      reason_codes: [], value: today_.strainNorm,
+    };
+    const moodSig: SignalSummary = {
+      present: presentToday.mood,
+      confidence: presentToday.mood ? "HIGH" : "LOW",
+      validity: presentToday.mood ? "valid" : "missing",
+      freshness: presentToday.mood ? "fresh" : "missing",
+      source_method: "mood_log", source_provider: "user",
+      reason_codes: [], value: presentToday.mood ? today_.scores.mood ?? null : null,
+    };
+
+    // Overall sig quality.
+    const backboneHigh = hrvSig.confidence === "HIGH" && sleepSig.confidence === "HIGH";
+    const anyMedium = [hrvSig, sleepSig, nutritionSig].some((s) => s.confidence === "MEDIUM");
+    const overall_sq: SigConfidence = backboneHigh
+      ? "HIGH"
+      : (coverage >= 0.45 || anyMedium ? "MEDIUM" : "LOW");
+
+    const signal_quality = {
+      overall: overall_sq,
+      signals: {
+        hrv: hrvSig, rhr: rhrSig, sleep: sleepSig,
+        nutrition: nutritionSig, hydration: hydrationSig,
+        training: trainingSig, mood: moodSig,
+      },
+    };
+
+    // Aggregate top-level reason_codes.
+    for (const s of [hrvSig, rhrSig, sleepSig, nutritionSig, hydrationSig, trainingSig, moodSig]) {
+      reasonCodesAll.push(...s.reason_codes);
+    }
+    if (lowReadiness) reasonCodesAll.push(REASON.PRE_SESSION_LOW_READINESS);
+    if (today_.usedManual && pathPref === "device" && presentToday.recovery && !todayMeta.hrv) {
+      reasonCodesAll.push(REASON.MANUAL_RECOVERY_DISCOUNTED);
+    }
+    if (!hrvSig.present && !rhrSig.present && !sleepSig.present) {
+      reasonCodesAll.push(REASON.MANUAL_FALLBACK_REQUIRED);
+    }
+
+    // Fuelling status — pull today's nutrition totals from legacy meals query.
+    const todayMeals = (mealsRes.data ?? []).filter((m: any) => m.entry_date === today && !m.deleted);
+    const todayCalories = todayMeals.reduce((a: number, m: any) => a + Number(m.total_calories ?? 0), 0);
+    const todayProtein = todayMeals.reduce((a: number, m: any) => a + Number(m.total_protein_g ?? 0), 0);
+    const target = (targetsRes.data ?? [])[0];
+    const proteinPct = target?.target_protein_g
+      ? Math.round((todayProtein / Number(target.target_protein_g)) * 100)
+      : null;
+    const caloriesPct = target?.target_calories
+      ? Math.round((todayCalories / Number(target.target_calories)) * 100)
+      : null;
+    const fuelReasons: ReasonCode[] = [];
+    if (proteinPct != null && proteinPct < 80) fuelReasons.push(REASON.PROTEIN_LOW_FOR_GOAL);
+    if (caloriesPct != null && caloriesPct < 75 && systemic_load >= 25) {
+      fuelReasons.push(REASON.DEFICIT_CAUTION_LOW_RECOVERY);
+    }
+    if (fuelReasons.length) reasonCodesAll.push(...fuelReasons);
+
+    const fuelling_status = {
+      hydration_pct: hydrationPct,
+      hydration_target_ml: hydrationTarget,
+      protein_pct: proteinPct,
+      calories_pct: caloriesPct,
+      reason_codes: fuelReasons,
+    };
+
+    // top_drivers — pillar deltas + carryover.
+    type Driver = { type: "positive" | "negative"; label: string; impact: string };
+    const PILLAR_LABEL: Record<PillarKey, { pos: string; neg: string }> = {
+      recovery: { pos: "Strong recovery signal", neg: "Recovery running low" },
+      sleep: { pos: "Solid sleep last night", neg: "Sleep debt building" },
+      nutrition: { pos: "Nutrition on target", neg: "Nutrition off target" },
+      training: { pos: "Training load balanced", neg: "Training load heavy" },
+      mood: { pos: "Mood trending up", neg: "Mood trending down" },
+    };
+    const drivers: Array<Driver & { _abs: number }> = [];
+    for (const p of PILLAR_KEYS) {
+      const v = today_.scores[p];
+      if (v == null) continue;
+      const impact = Math.round(((v - NEUTRAL) * W[p]) / 100);
+      if (impact === 0) continue;
+      drivers.push({
+        type: impact > 0 ? "positive" : "negative",
+        label: impact > 0 ? PILLAR_LABEL[p].pos : PILLAR_LABEL[p].neg,
+        impact: (impact > 0 ? "+" : "") + impact,
+        _abs: Math.abs(impact),
+      });
+    }
+    if (systemic_load >= 20) {
+      const carryImpact = -Math.min(10, Math.round(systemic_load / 5));
+      drivers.push({
+        type: "negative",
+        label: "High training load carrying over",
+        impact: String(carryImpact),
+        _abs: Math.abs(carryImpact),
+      });
+    }
+    drivers.sort((a, b) => b._abs - a._abs);
+    const top_drivers = drivers.slice(0, 4).map(({ _abs: _omit, ...d }) => d);
+
+    // training_permission (rule-based).
+    let training_permission: "green_train" | "yellow_modify" | "orange_reduce" | "red_recover";
+    if (final_score < 45 || systemic_load > 50) training_permission = "red_recover";
+    else if (final_score < 60 || systemic_load > 35 || lowReadiness) training_permission = "orange_reduce";
+    else if (final_score < 75 || systemic_load >= 25) training_permission = "yellow_modify";
+    else training_permission = "green_train";
+
+    // nutrition_modifier (rule-based).
+    let nutrition_modifier:
+      | "normal" | "fuel_more" | "protein_priority" | "hydration_priority"
+      | "deficit_caution" | "recovery_day_refeed";
+    const nutritionPillar = today_.scores.nutrition ?? NEUTRAL;
+    if (training_permission === "red_recover") nutrition_modifier = "recovery_day_refeed";
+    else if (hydrationPct != null && hydrationPct < 70) nutrition_modifier = "hydration_priority";
+    else if (proteinPct != null && proteinPct < 80) nutrition_modifier = "protein_priority";
+    else if (nutritionPillar < 50 && systemic_load >= 25) nutrition_modifier = "deficit_caution";
+    else if (final_score >= 70 && systemic_load >= 25 && nutritionPillar < 60) nutrition_modifier = "fuel_more";
+    else nutrition_modifier = "normal";
+
+    const reason_codes = dedupe(reasonCodesAll);
+
+    // ---------------- write readiness_scores ----------------
     const row = {
       user_id,
       score_date: today,
@@ -468,12 +781,79 @@ Deno.serve(async (req) => {
       nudge_message,
       input_path,
       engine_version: ENGINE_VERSION,
+      signal_quality,
+      top_drivers,
+      load_carryover,
+      fuelling_status,
+      training_permission,
+      nutrition_modifier,
+      reason_codes,
     };
-
     const { error: upErr } = await supabase
       .from("readiness_scores")
       .upsert(row, { onConflict: "user_id,score_date" });
     if (upErr) throw upErr;
+
+    // ---------------- write shield_signal_quality_events (idempotent) ----------------
+    await supabase
+      .from("shield_signal_quality_events")
+      .delete()
+      .eq("user_id", user_id)
+      .eq("signal_date", today)
+      .eq("source_type", "system")
+      .eq("source_table", "readiness_scores");
+
+    type QualityEvent = {
+      user_id: string; signal_date: string;
+      source_table: string; source_id: string | null;
+      metric_name: string; raw_value: number | null; normalized_value: number | null; unit: string | null;
+      source_type: "system"; device_source: string | null;
+      freshness_status: string | null; validity_status: string | null;
+      confidence_level: string | null; reason_codes: string[];
+    };
+    const events: QualityEvent[] = [];
+    const pushEv = (metric: string, s: SignalSummary, normalized: number | null, unit: string | null) => {
+      events.push({
+        user_id, signal_date: today,
+        source_table: "readiness_scores", source_id: null,
+        metric_name: metric, raw_value: s.value, normalized_value: normalized, unit,
+        source_type: "system",
+        device_source: s.source_provider && ["whoop","oura","garmin","apple_health","health_connect","samsung_health","user","apex","unknown"].includes(s.source_provider) ? s.source_provider : null,
+        freshness_status: s.freshness, validity_status: s.validity,
+        confidence_level: s.confidence,
+        reason_codes: s.reason_codes,
+      });
+    };
+    pushEv("hrv", hrvSig, hrvSig.value, "ms");
+    pushEv("rhr", rhrSig, rhrSig.value, "bpm");
+    pushEv("sleep", sleepSig, today_.scores.sleep ?? null, "h");
+    pushEv("recovery", {
+      present: presentToday.recovery,
+      confidence: presentToday.recovery ? (today_.usedDevice ? "HIGH" : "MEDIUM") : "LOW",
+      validity: presentToday.recovery ? "valid" : "missing",
+      freshness: presentToday.recovery ? "fresh" : "missing",
+      source_method: today_.usedDevice ? "screenshot" : "manual",
+      source_provider: today_.usedDevice ? (hrvSig.source_provider ?? "unknown") : "user",
+      reason_codes: [], value: today_.scores.recovery ?? null,
+    }, today_.scores.recovery ?? null, "score");
+    pushEv("nutrition", nutritionSig, today_.scores.nutrition ?? null, "score");
+    pushEv("hydration", hydrationSig, hydrationPct, "pct");
+    pushEv("training", trainingSig, today_.scores.training ?? null, "score");
+    pushEv("mood", moodSig, today_.scores.mood ?? null, "score");
+    pushEv("pre_session", {
+      present: psc != null,
+      confidence: psc != null ? "HIGH" : "LOW",
+      validity: psc != null ? "valid" : "missing",
+      freshness: psc != null ? "fresh" : "missing",
+      source_method: "manual", source_provider: "user",
+      reason_codes: lowReadiness ? [REASON.PRE_SESSION_LOW_READINESS] : [],
+      value: psc != null ? Number(psc.session_readiness) : null,
+    }, psc != null ? Number(psc.session_readiness) : null, "rating");
+
+    if (events.length > 0) {
+      const { error: evErr } = await supabase.from("shield_signal_quality_events").insert(events);
+      if (evErr) console.error("shield_signal_quality_events insert failed:", evErr);
+    }
 
     return new Response(
       JSON.stringify({
@@ -488,6 +868,11 @@ Deno.serve(async (req) => {
         nudge_message,
         input_path,
         engine_version: ENGINE_VERSION,
+        signal_quality_overall: overall_sq,
+        training_permission,
+        nutrition_modifier,
+        systemic_load,
+        reason_codes,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
