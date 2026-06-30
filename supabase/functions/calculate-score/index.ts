@@ -104,6 +104,8 @@ type DayInputs = {
   meals: Array<{ claude_quality_score: number | null }>;
   training?: { strain_value: number | null };
   pathPref?: "device" | "manual";
+  forceRecovery?: "device" | "manual" | null;
+  forceSleep?: "device" | "manual" | null;
 };
 
 type RecoveryBaseline = { hrv: number | null; rhr: number | null };
