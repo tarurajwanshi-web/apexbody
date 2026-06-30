@@ -1,127 +1,133 @@
-# Backend Safety Patch — APEX Coach
+# Backend Safety Patch — Native Health Signals
 
-Single idempotent SQL migration. No UI changes, no data loss, no RLS weakening.
+Single idempotent SQL migration. No UI, no edge function, no data deletion changes.
 
-## A. Rewrite `public.apply_existing_weekly_macro_review`
+## 1. Create `public.shield_health_signals`
 
-`CREATE OR REPLACE FUNCTION` (security definer, search_path = public). Logic:
+`CREATE TABLE IF NOT EXISTS` with the full column set as specified:
 
-1. `SELECT ... FROM nutrition_weekly_reviews WHERE id = p_review_id FOR UPDATE INTO v_review`. Raise if not found or `applied_target_id IS NOT NULL`.
-2. `SELECT ... FROM daily_macro_targets WHERE user_id = v_review.user_id AND effective_end_date IS NULL ORDER BY effective_start_date DESC LIMIT 1 FOR UPDATE INTO v_active`. Raise if none.
-3. `UPDATE daily_macro_targets SET effective_end_date = p_effective_start_date - 1, updated_at = now() WHERE id = v_active.id`. Verify exactly one row closed.
-4. Compose new target values:
-  - `v_bmr := v_active.bmr`
-  - `v_tdee := COALESCE(v_review.blended_tdee, v_active.tdee)`
-  - `v_calories := COALESCE(v_review.new_target_calories, v_active.target_calories)`
-  - `v_protein := v_active.target_protein_g`
-  - `v_fat := v_active.target_fat_g`
-  - `v_carbs := GREATEST(0, ROUND((v_calories - v_protein*4 - v_fat*9) / 4.0))` when calories/protein/fat are all non-null, else `v_active.target_carbs_g`
-5. `INSERT INTO daily_macro_targets (...) VALUES (...) RETURNING id INTO v_new_id` with `formula_used = 'adaptive_weekly_tdee_reconciliation_v1'`, `source = 'weekly_review'`, `review_id = v_review.id`, `effective_start_date = p_effective_start_date`, `effective_end_date = NULL`, `calculated_at = now()`.
-6. `UPDATE nutrition_weekly_reviews SET applied_target_id = v_new_id, applied_at = now() WHERE id = v_review.id`.
-7. `RETURN v_new_id`.
+- `id uuid PK default gen_random_uuid()`
+- `user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE`
+- `signal_date date NOT NULL`
+- `observed_start_at timestamptz`, `observed_end_at timestamptz`
+- `metric_name text NOT NULL`, `metric_value numeric`, `unit text`
+- `source_method text NOT NULL`, `source_provider text NOT NULL`
+- `source_table text`, `source_id uuid`
+- `confidence_level text`, `freshness_status text`, `validity_status text`
+- `is_user_corrected boolean NOT NULL DEFAULT false`, `original_value numeric`, `corrected_at timestamptz`, `correction_reason text`
+- `reason_codes text[] NOT NULL DEFAULT '{}'`
+- `metadata jsonb NOT NULL DEFAULT '{}'::jsonb`
+- `created_at timestamptz NOT NULL DEFAULT now()`, `updated_at timestamptz NOT NULL DEFAULT now()`
 
-Signature preserved: `(p_review_id uuid, p_effective_start_date date DEFAULT CURRENT_DATE) RETURNS uuid`.
+Idempotency: each column also re-asserted with `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` so a partially-created table converges to the spec.
 
-## B. Add Shield v1.1 columns to `readiness_scores`
+### Grants (immediately after CREATE)
 
-Each via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`:
+- `GRANT SELECT ON public.shield_health_signals TO authenticated`
+- `GRANT ALL ON public.shield_health_signals TO service_role`
 
-- `signal_quality jsonb DEFAULT '{}'::jsonb`
-- `top_drivers jsonb DEFAULT '[]'::jsonb`
-- `load_carryover jsonb DEFAULT '{}'::jsonb`
-- `fuelling_status jsonb DEFAULT '{}'::jsonb`
-- `training_permission text`
-- `nutrition_modifier text`
-- `reason_codes text[] DEFAULT '{}'`
+### CHECK constraints (each wrapped in guarded `DO $$ ... $$` checking `pg_constraint`)
 
-## C. `engine_version` default left at `'v6.1'`.
+- `shield_health_signals_source_method_check`: `source_method IN ('screenshot','native_health','manual','derived','system')`
+- `shield_health_signals_source_provider_check`: `source_provider IN ('whoop','oura','garmin','apple_health','health_connect','samsung_health','user','apex','unknown')`
+- `shield_health_signals_confidence_level_check`: `confidence_level IS NULL OR confidence_level IN ('HIGH','MEDIUM','LOW')`
+- `shield_health_signals_freshness_status_check`: `freshness_status IS NULL OR freshness_status IN ('fresh','stale','missing','future_date','unknown')`
+- `shield_health_signals_validity_status_check`: `validity_status IS NULL OR validity_status IN ('valid','suspicious','invalid','missing')`
+- `shield_health_signals_metric_name_check`: `metric_name IN ('hrv_ms','resting_heart_rate_bpm','sleep_hours','sleep_quality_score','sleep_deep_hours','sleep_rem_hours','sleep_awake_hours','recovery_score','readiness_proxy_score','body_battery','respiratory_rate','spo2_pct','temperature_deviation','steps','active_energy_kcal','hydration_ml','mood_score','training_strain','pre_session_readiness')`
 
-## D. CHECK constraints on `readiness_scores` (guarded via `pg_constraint` lookup, wrapped in `DO $$ ... $$`):
+### Indexes (`CREATE INDEX IF NOT EXISTS`)
 
-- `readiness_scores_training_permission_check`: `training_permission IS NULL OR training_permission IN ('green_train','yellow_modify','orange_reduce','red_recover')`
-- `readiness_scores_nutrition_modifier_check`: `nutrition_modifier IS NULL OR nutrition_modifier IN ('normal','fuel_more','protein_priority','hydration_priority','deficit_caution','recovery_day_refeed')`
+- `idx_shield_health_signals_user_date (user_id, signal_date)`
+- `idx_shield_health_signals_user_metric_date (user_id, metric_name, signal_date)`
+- `idx_shield_health_signals_user_provider_date (user_id, source_provider, signal_date)`
+- `CREATE UNIQUE INDEX IF NOT EXISTS idx_shield_health_signals_unique_source ON ... (user_id, signal_date, metric_name, source_method, source_provider, source_id) WHERE source_id IS NOT NULL`
 
-NULL-tolerant so existing rows pass.
+### `updated_at` trigger
 
-## E. Create `public.shield_signal_quality_events` (`IF NOT EXISTS`)
+Existing `public.update_updated_at_column()` is present (confirmed in db-functions list). Reuse it:
 
-Columns exactly as specified: `id`, `user_id` FK `auth.users(id) ON DELETE CASCADE`, `signal_date`, `source_table`, `source_id`, `metric_name`, `raw_value`, `normalized_value`, `unit`, `source_type`, `device_source`, `freshness_status`, `validity_status`, `confidence_level`, `reason_codes`, `created_at`.
+```sql
+DROP TRIGGER IF EXISTS update_shield_health_signals_updated_at ON public.shield_health_signals;
+CREATE TRIGGER update_shield_health_signals_updated_at
+BEFORE UPDATE ON public.shield_health_signals
+FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+```
 
-Followed in same migration by GRANTs:
+### RLS
 
-- `GRANT SELECT ON public.shield_signal_quality_events TO authenticated`
-- `GRANT ALL ON public.shield_signal_quality_events TO service_role`
+- `ALTER TABLE public.shield_health_signals ENABLE ROW LEVEL SECURITY`
+- `DROP POLICY IF EXISTS shield_health_signals_select_own ...; CREATE POLICY shield_health_signals_select_own FOR SELECT TO authenticated USING (auth.uid() = user_id)`
+- No INSERT/UPDATE/DELETE policies for authenticated → blocked. Service role bypasses RLS via grant.
 
-## F. CHECK constraints on `shield_signal_quality_events` (guarded):
+## 2. Native-ready upgrades on `public.shield_signal_quality_events`
 
-- `source_type IN ('device_screenshot','manual','workout_log','nutrition_log','mood_log','system')`
-- `freshness_status IS NULL OR freshness_status IN ('fresh','stale','missing','future_date','unknown')`
-- `validity_status IS NULL OR validity_status IN ('valid','suspicious','invalid','missing')`
-- `confidence_level IS NULL OR confidence_level IN ('HIGH','MEDIUM','LOW')`
+- `ALTER TABLE ... ADD COLUMN IF NOT EXISTS source_provider text`
+- Replace `source_type` CHECK safely:
+  1. `DO $$` block: look up existing `shield_signal_quality_events_source_type_check` (or any check on `source_type`), `ALTER TABLE ... DROP CONSTRAINT IF EXISTS` it.
+  2. `ALTER TABLE ... ADD CONSTRAINT shield_signal_quality_events_source_type_check CHECK (source_type IN ('screenshot','device_screenshot','native_health','manual','workout_log','nutrition_log','mood_log','system'))` — keeps `device_screenshot` for backward compatibility; no data migration needed.
+- Add guarded `shield_signal_quality_events_source_provider_check`: `source_provider IS NULL OR source_provider IN ('whoop','oura','garmin','apple_health','health_connect','samsung_health','user','apex','unknown')`.
 
-## G. Indexes (`CREATE INDEX IF NOT EXISTS`):
+## Idempotency summary
 
-- `idx_shield_signal_quality_events_user_date (user_id, signal_date)`
-- `idx_shield_signal_quality_events_user_metric_date (user_id, metric_name, signal_date)`
-- `idx_readiness_scores_user_date (user_id, score_date)`
+- `CREATE TABLE IF NOT EXISTS` + `ADD COLUMN IF NOT EXISTS` for table shape
+- `CREATE INDEX IF NOT EXISTS` (incl. unique partial)
+- `DROP TRIGGER IF EXISTS` + `CREATE TRIGGER`
+- `DROP POLICY IF EXISTS` + `CREATE POLICY`
+- Constraints: guarded `DO $$ ... $$` blocks that test `pg_constraint` before adding; for the source_type swap, drop-if-exists then add
 
-## H. RLS on `shield_signal_quality_events`:
+## Out of scope (per request)
 
-- `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`
-- Policy `signal_quality_select_own` FOR SELECT TO authenticated USING `auth.uid() = user_id`
-- No INSERT/UPDATE/DELETE policies for authenticated → blocked by default
-- Service role bypasses RLS via its grant
-
-Each policy created via `DROP POLICY IF EXISTS ... ; CREATE POLICY ...` for idempotency.
-
-## Idempotency strategy
-
-- `CREATE OR REPLACE FUNCTION` for the RPC
-- `ADD COLUMN IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`
-- CHECK constraints + policies wrapped in `DO $$ ... $$` blocks that test `pg_constraint` / `pg_policies` before creating
+- No edge function changes
+- No UI changes
+- No backfill / data deletion
+- No new RPCs
 
 ## Deliverable
 
-Single `supabase--migration` call containing the full SQL. No code or UI changes in this patch.
+Single `supabase--migration` call containing the SQL above.  
+  
+Proceed, but make this correction before running:
 
-Proceed? , yes but Small required fix before proceeding:
+For replacing the source_type constraint on public.shield_signal_quality_events, do not dynamically drop "any check on source_type".
 
-In apply_existing_weekly_macro_review, handle effective date edge cases:
+Explicitly drop only these known possible constraint names:
 
-1. If p_effective_start_date < v_active.effective_start_date:
+ALTER TABLE public.shield_signal_quality_events
 
-   raise exception 'effective_start_before_active_target_start'.
+DROP CONSTRAINT IF EXISTS shield_sqe_source_type_check;
 
-2. If p_effective_start_date = v_active.effective_start_date:
+ALTER TABLE public.shield_signal_quality_events
 
-   do not close the active row and insert a new row.
+DROP CONSTRAINT IF EXISTS shield_signal_quality_events_source_type_check;
 
-   Instead update the active daily_macro_targets row in place with:
+Then add the new constraint:
 
-   - tdee = v_tdee
+ALTER TABLE public.shield_signal_quality_events
 
-   - target_calories = v_calories
+ADD CONSTRAINT shield_signal_quality_events_source_type_check
 
-   - target_protein_g = v_protein
+CHECK (
 
-   - target_carbs_g = v_carbs
+  source_type IN (
 
-   - target_fat_g = v_fat
+    'screenshot',
 
-   - formula_used = 'adaptive_weekly_tdee_reconciliation_v1'
+    'device_screenshot',
 
-   - source = 'weekly_review'
+    'native_health',
 
-   - review_id = v_[review.id](http://review.id)
+    'manual',
 
-   - calculated_at = now()
+    'workout_log',
 
-   - updated_at = now()
+    'nutrition_log',
 
-   Then set v_new_id = v_[active.id](http://active.id).
+    'mood_log',
 
-3. If p_effective_start_date > v_active.effective_start_date:
+    'system'
 
-   use the close-old-row and insert-new-row flow already described.
+  )
 
-Then update nutrition_weekly_reviews.applied_target_id = v_new_id and applied_at = now() in both paths.
+);
+
+Everything else is approved.
