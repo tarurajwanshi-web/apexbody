@@ -455,26 +455,172 @@ Deno.serve(async (req) => {
     for (const r of mealsRes.data ?? []) byDate[r.entry_date].meals.push({ claude_quality_score: r.claude_quality_score });
     for (const r of trainingRes.data ?? []) byDate[r.entry_date].training = r as any;
 
-    // Overlay normalized signals where present.
+    // Per-day best device-usable rows and manual-correction rows by metric,
+    // computed across ALL signal rows (not just the single rank-winner). The
+    // overlay below uses these to make the bundle/source decisions per pillar.
+    const bestUsable = new Map<string, Map<string, HealthSignalRow>>();
+    const manualOverride = new Map<string, Map<string, HealthSignalRow>>();
+    for (const r of signalRows) {
+      if (r.metric_value == null) continue;
+      if (isDeviceUsable(r)) {
+        let m = bestUsable.get(r.signal_date);
+        if (!m) { m = new Map(); bestUsable.set(r.signal_date, m); }
+        const ex = m.get(r.metric_name);
+        if (!ex || rankRow(r) > rankRow(ex)) m.set(r.metric_name, r);
+      }
+      if (isManualCorrection(r)) {
+        let m = manualOverride.get(r.signal_date);
+        if (!m) { m = new Map(); manualOverride.set(r.signal_date, m); }
+        m.set(r.metric_name, r);
+      }
+    }
+
+    // Track today's pillar source decisions for downstream signal_quality.
+    type ActiveSrc = "native_health" | "screenshot" | "manual" | "none";
+    const todayActive: {
+      recovery: ActiveSrc; sleep: ActiveSrc;
+      recoveryProvider: string | null; sleepProvider: string | null;
+      overrideRecovery: boolean; overrideSleep: boolean;
+      recoveryStale: boolean; sleepStale: boolean;
+      recoveryInvalid: boolean; sleepInvalid: boolean;
+    } = {
+      recovery: "none", sleep: "none",
+      recoveryProvider: null, sleepProvider: null,
+      overrideRecovery: false, overrideSleep: false,
+      recoveryStale: false, sleepStale: false,
+      recoveryInvalid: false, sleepInvalid: false,
+    };
+
+    // Overlay normalized signals where present, and decide per-pillar source.
     for (const d of dateList) {
       const day = signalsByDate.get(d);
-      if (!day) continue;
-      const hrv = day.get("hrv_ms");
-      const rhr = day.get("resting_heart_rate_bpm");
-      const slp = day.get("sleep_hours");
-      const rec = day.get("recovery_score") ?? day.get("readiness_proxy_score") ?? day.get("body_battery");
+      const hrv = day?.get("hrv_ms");
+      const rhr = day?.get("resting_heart_rate_bpm");
+      const slp = day?.get("sleep_hours");
+      const rec = day?.get("recovery_score") ?? day?.get("readiness_proxy_score") ?? day?.get("body_battery");
 
-      if (hrv || rhr || slp) {
-        byDate[d].device = {
-          parsed_hrv: hrv?.metric_value ?? byDate[d].device?.parsed_hrv ?? null,
-          parsed_rhr: rhr?.metric_value ?? byDate[d].device?.parsed_rhr ?? null,
-          parsed_sleep_hours: slp?.metric_value ?? byDate[d].device?.parsed_sleep_hours ?? null,
-        };
+      const usable = bestUsable.get(d) ?? new Map<string, HealthSignalRow>();
+      const overrides = manualOverride.get(d) ?? new Map<string, HealthSignalRow>();
+
+      // ---- recovery bundle (HRV + RHR) ----
+      const usableHrv = usable.get("hrv_ms");
+      const usableRhr = usable.get("resting_heart_rate_bpm");
+      const nativeHrv = usableHrv?.source_method === "native_health" ? usableHrv : undefined;
+      const nativeRhr = usableRhr?.source_method === "native_health" ? usableRhr : undefined;
+      const screenshotHrv = usableHrv?.source_method === "screenshot" ? usableHrv : undefined;
+      const screenshotRhr = usableRhr?.source_method === "screenshot" ? usableRhr : undefined;
+      const manualHasRecovery = byDate[d].manual?.recovery_self_rating != null;
+      const overrideRec = overrides.has("hrv_ms") || overrides.has("resting_heart_rate_bpm");
+
+      let recoverySrcRow: HealthSignalRow | undefined;
+      let recoverySrcMethod: ActiveSrc = "none";
+      if (overrideRec && manualHasRecovery) {
+        recoverySrcMethod = "manual";
+      } else if (nativeHrv || nativeRhr) {
+        recoverySrcRow = nativeHrv ?? nativeRhr;
+        recoverySrcMethod = "native_health";
+      } else if ((screenshotHrv || screenshotRhr) && pathPref === "device") {
+        recoverySrcRow = screenshotHrv ?? screenshotRhr;
+        recoverySrcMethod = "screenshot";
+      } else if (manualHasRecovery) {
+        recoverySrcMethod = "manual";
+      } else if (screenshotHrv || screenshotRhr) {
+        recoverySrcRow = screenshotHrv ?? screenshotRhr;
+        recoverySrcMethod = "screenshot";
       }
+
+      // Detect stale/invalid device data even when we end up choosing manual.
+      const rawHrv = hrv, rawRhr = rhr;
+      const recoveryStale =
+        (rawHrv && (rawHrv.freshness_status === "stale" || rawHrv.freshness_status === "future_date")) ||
+        (rawRhr && (rawRhr.freshness_status === "stale" || rawRhr.freshness_status === "future_date"));
+      const recoveryInvalid =
+        signalRows.some((r) => r.signal_date === d &&
+          (r.metric_name === "hrv_ms" || r.metric_name === "resting_heart_rate_bpm") &&
+          (r.validity_status === "invalid"));
+
+      // ---- sleep ----
+      const usableSlp = usable.get("sleep_hours");
+      const nativeSlp = usableSlp?.source_method === "native_health" ? usableSlp : undefined;
+      const screenshotSlp = usableSlp?.source_method === "screenshot" ? usableSlp : undefined;
+      const manualHasSleep = byDate[d].manual?.sleep_hours != null;
+      const overrideSlp = overrides.has("sleep_hours");
+
+      let sleepSrcRow: HealthSignalRow | undefined;
+      let sleepSrcMethod: ActiveSrc = "none";
+      if (overrideSlp && manualHasSleep) {
+        sleepSrcMethod = "manual";
+      } else if (nativeSlp) {
+        sleepSrcRow = nativeSlp; sleepSrcMethod = "native_health";
+      } else if (screenshotSlp && pathPref === "device") {
+        sleepSrcRow = screenshotSlp; sleepSrcMethod = "screenshot";
+      } else if (manualHasSleep) {
+        sleepSrcMethod = "manual";
+      } else if (screenshotSlp) {
+        sleepSrcRow = screenshotSlp; sleepSrcMethod = "screenshot";
+      }
+      const sleepStale = slp && (slp.freshness_status === "stale" || slp.freshness_status === "future_date");
+      const sleepInvalid =
+        signalRows.some((r) => r.signal_date === d && r.metric_name === "sleep_hours" && r.validity_status === "invalid");
+
+      // ---- apply to byDate[d] so existing scoreDay math produces the right outcome ----
+      if (recoverySrcMethod === "native_health" || recoverySrcMethod === "screenshot") {
+        const useHrv = recoverySrcMethod === "native_health"
+          ? (nativeHrv?.metric_value ?? null)
+          : (screenshotHrv?.metric_value ?? null);
+        const useRhr = recoverySrcMethod === "native_health"
+          ? (nativeRhr?.metric_value ?? null)
+          : (screenshotRhr?.metric_value ?? null);
+        byDate[d].device = {
+          parsed_hrv: useHrv,
+          parsed_rhr: useRhr,
+          parsed_sleep_hours: byDate[d].device?.parsed_sleep_hours ?? null,
+        };
+        byDate[d].forceRecovery = "device";
+      } else if (recoverySrcMethod === "manual") {
+        // Wipe device HRV/RHR so scoreDay can't fall back into device branch.
+        byDate[d].device = {
+          parsed_hrv: null,
+          parsed_rhr: null,
+          parsed_sleep_hours: byDate[d].device?.parsed_sleep_hours ?? null,
+        };
+        byDate[d].forceRecovery = "manual";
+      }
+
+      if (sleepSrcMethod === "native_health" || sleepSrcMethod === "screenshot") {
+        byDate[d].device = {
+          parsed_hrv: byDate[d].device?.parsed_hrv ?? null,
+          parsed_rhr: byDate[d].device?.parsed_rhr ?? null,
+          parsed_sleep_hours: sleepSrcRow?.metric_value ?? byDate[d].device?.parsed_sleep_hours ?? null,
+        };
+        byDate[d].forceSleep = "device";
+      } else if (sleepSrcMethod === "manual") {
+        byDate[d].device = {
+          parsed_hrv: byDate[d].device?.parsed_hrv ?? null,
+          parsed_rhr: byDate[d].device?.parsed_rhr ?? null,
+          parsed_sleep_hours: null,
+        };
+        byDate[d].forceSleep = "manual";
+      }
+
+      // Meta keeps the rank-winning rows for downstream summary display.
       byDate[d].meta.hrv = toMeta(hrv) ?? undefined;
       byDate[d].meta.rhr = toMeta(rhr) ?? undefined;
       byDate[d].meta.sleep = toMeta(slp) ?? undefined;
       byDate[d].meta.recovery_proxy = toMeta(rec) ?? undefined;
+
+      if (d === today) {
+        todayActive.recovery = recoverySrcMethod;
+        todayActive.sleep = sleepSrcMethod;
+        todayActive.recoveryProvider = recoverySrcRow?.source_provider ?? null;
+        todayActive.sleepProvider = sleepSrcRow?.source_provider ?? null;
+        todayActive.overrideRecovery = overrideRec && recoverySrcMethod === "manual";
+        todayActive.overrideSleep = overrideSlp && sleepSrcMethod === "manual";
+        todayActive.recoveryStale = !!recoveryStale && recoverySrcMethod === "manual";
+        todayActive.sleepStale = !!sleepStale && sleepSrcMethod === "manual";
+        todayActive.recoveryInvalid = recoveryInvalid && recoverySrcMethod === "manual";
+        todayActive.sleepInvalid = sleepInvalid && sleepSrcMethod === "manual";
+      }
     }
 
     const perDay = dateList.map((d) => {
