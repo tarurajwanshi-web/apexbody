@@ -1,81 +1,127 @@
+# Backend Safety Patch — APEX Coach
 
-# Plan: Fuelling Adequacy Evaluation + Gemini → OpenAI Migration
+Single idempotent SQL migration. No UI changes, no data loss, no RLS weakening.
 
-## Part 1 — Fuelling Adequacy Evaluation
+## A. Rewrite `public.apply_existing_weekly_macro_review`
 
-### 1a. New table `user_fuelling_evaluations` (migration)
-Columns:
-- `id uuid pk default gen_random_uuid()`
-- `user_id uuid not null references auth.users(id) on delete cascade`
-- `evaluation_date date not null`
-- `total_sets int`, `avg_rir numeric`
-- `calories_consumed numeric`, `calories_target numeric`, `shortfall numeric`
-- `bmr numeric`, `training_cost numeric`
-- `severity text check in ('underfuelled','marginal','adequate')`
-- `severity_score int` (1/2/3)
-- `message text`, `action text`, `mini_explanation text`
-- `created_at timestamptz default now()`
-- Unique `(user_id, evaluation_date)`
+`CREATE OR REPLACE FUNCTION` (security definer, search_path = public). Logic:
 
-Standard grants (authenticated select own, service_role all), RLS enabled, policy `user_id = auth.uid()` for SELECT.
+1. `SELECT ... FROM nutrition_weekly_reviews WHERE id = p_review_id FOR UPDATE INTO v_review`. Raise if not found or `applied_target_id IS NOT NULL`.
+2. `SELECT ... FROM daily_macro_targets WHERE user_id = v_review.user_id AND effective_end_date IS NULL ORDER BY effective_start_date DESC LIMIT 1 FOR UPDATE INTO v_active`. Raise if none.
+3. `UPDATE daily_macro_targets SET effective_end_date = p_effective_start_date - 1, updated_at = now() WHERE id = v_active.id`. Verify exactly one row closed.
+4. Compose new target values:
+  - `v_bmr := v_active.bmr`
+  - `v_tdee := COALESCE(v_review.blended_tdee, v_active.tdee)`
+  - `v_calories := COALESCE(v_review.new_target_calories, v_active.target_calories)`
+  - `v_protein := v_active.target_protein_g`
+  - `v_fat := v_active.target_fat_g`
+  - `v_carbs := GREATEST(0, ROUND((v_calories - v_protein*4 - v_fat*9) / 4.0))` when calories/protein/fat are all non-null, else `v_active.target_carbs_g`
+5. `INSERT INTO daily_macro_targets (...) VALUES (...) RETURNING id INTO v_new_id` with `formula_used = 'adaptive_weekly_tdee_reconciliation_v1'`, `source = 'weekly_review'`, `review_id = v_review.id`, `effective_start_date = p_effective_start_date`, `effective_end_date = NULL`, `calculated_at = now()`.
+6. `UPDATE nutrition_weekly_reviews SET applied_target_id = v_new_id, applied_at = now() WHERE id = v_review.id`.
+7. `RETURN v_new_id`.
 
-### 1b. New Edge Function `supabase/functions/evaluate-fuelling/index.ts`
-- Service-role client, CORS headers.
-- Iterates all users (or accepts `{ user_id }` for targeted runs).
-- For each user, resolves "yesterday" in their local timezone (from `profiles.timezone`), so cron can run hourly and only act at local 6am.
-- Queries yesterday's `workout_set_logs` (sum sets where `completed=true`, avg `rir`), `shield_nutrition_logs` (sum kcal + macros), active `daily_macro_targets` (BMR), `profiles` (goal, experience).
-- Computes top-20% volume tier from trailing 30-day total sets across all users (cached per run).
-- Filter: skip if `total_sets < 15` or user not in top 20%.
-- Decision tree as spec'd → severity / message / action.
-- If `severity_score >= 2`: call OpenAI (`gpt-5-mini` via Lovable Gateway) for `{explanation, protocol}` JSON.
-- Upsert into `user_fuelling_evaluations` on `(user_id, evaluation_date)`.
+Signature preserved: `(p_review_id uuid, p_effective_start_date date DEFAULT CURRENT_DATE) RETURNS uuid`.
 
-### 1c. Cron registration
-`cron.schedule` every hour calling the function with empty body; function handles per-user 6am-local gating.
+## B. Add Shield v1.1 columns to `readiness_scores`
 
-### 1d. `src/lib/fuelling.functions.ts` (NEW)
-`getFuellingAdequacy` server fn with `requireSupabaseAuth`:
-- Selects most recent `user_fuelling_evaluations` row for user where `severity_score >= 2` AND `evaluation_date >= today - 2`.
-- Returns row or `null`.
+Each via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`:
 
-### 1e. `src/components/dashboard/FuellingAdequacyCard.tsx` (NEW)
-- `useSuspenseQuery` with 6h staleTime.
-- Returns `null` when no row.
-- Renders card with title, metric line, message (red for underfuelled, yellow for marginal), italic mini_explanation, bold action — APEX tokens, sanitized text via `cleanCardText`.
+- `signal_quality jsonb DEFAULT '{}'::jsonb`
+- `top_drivers jsonb DEFAULT '[]'::jsonb`
+- `load_carryover jsonb DEFAULT '{}'::jsonb`
+- `fuelling_status jsonb DEFAULT '{}'::jsonb`
+- `training_permission text`
+- `nutrition_modifier text`
+- `reason_codes text[] DEFAULT '{}'`
 
-### 1f. `src/routes/_authenticated/dashboard.tsx`
-- Import + mount `<Suspense fallback={null}><FuellingAdequacyCard /></Suspense>` after `HydrationCorrelationCard` (if present) else after `PatternMemoryCard`.
+## C. `engine_version` default left at `'v6.1'`.
 
-## Part 2 — Migrate Gemini AI calls to OpenAI
+## D. CHECK constraints on `readiness_scores` (guarded via `pg_constraint` lookup, wrapped in `DO $$ ... $$`):
 
-Audit and switch every Edge Function currently calling `google/gemini-*` (Lovable AI Gateway) to OpenAI equivalents:
+- `readiness_scores_training_permission_check`: `training_permission IS NULL OR training_permission IN ('green_train','yellow_modify','orange_reduce','red_recover')`
+- `readiness_scores_nutrition_modifier_check`: `nutrition_modifier IS NULL OR nutrition_modifier IN ('normal','fuel_more','protein_priority','hydration_priority','deficit_caution','recovery_day_refeed')`
 
-| Current | Replacement |
-|---|---|
-| `google/gemini-3-flash-preview` | `openai/gpt-5-mini` |
-| `google/gemini-3-flash-preview` (heavy reasoning) | `openai/gpt-5` |
-| `google/gemini-3.1-flash-lite` / `gemini-2.5-flash-lite` | `openai/gpt-5-nano` |
+NULL-tolerant so existing rows pass.
 
-Files to scan and update (known callers):
-- `supabase/functions/generate-weekly-pattern/index.ts` (pattern explanation) → `openai/gpt-5-mini`
-- Any other `gemini-*` reference under `supabase/functions/**`
+## E. Create `public.shield_signal_quality_events` (`IF NOT EXISTS`)
 
-For each:
-1. Swap the `model` string.
-2. Keep Lovable Gateway base URL + `LOVABLE_API_KEY` header (still OpenAI-compatible).
-3. Drop Gemini-only fields (e.g., `response_mime_type`); use OpenAI `response_format: { type: "json_object" }` where JSON is required.
-4. Verify token/param shape per OpenAI chat API.
+Columns exactly as specified: `id`, `user_id` FK `auth.users(id) ON DELETE CASCADE`, `signal_date`, `source_table`, `source_id`, `metric_name`, `raw_value`, `normalized_value`, `unit`, `source_type`, `device_source`, `freshness_status`, `validity_status`, `confidence_level`, `reason_codes`, `created_at`.
 
-Out of scope: `score-nutrition` already uses `gpt-4o-mini` — leave; Claude-based functions (`generate-daily-coach-note`, etc.) — leave.
+Followed in same migration by GRANTs:
 
-## Technical notes
-- Top-20% threshold computed via a single SQL `percentile_cont(0.8)` over 30-day per-user set totals.
-- Use `Intl.DateTimeFormat` with the user's timezone to derive their local hour for the 6am gate.
-- All new Supabase access via service role inside the function; client surface read-only with RLS.
-- No client-side schema changes beyond the new table.
+- `GRANT SELECT ON public.shield_signal_quality_events TO authenticated`
+- `GRANT ALL ON public.shield_signal_quality_events TO service_role`
 
-## Verification
-- `supabase--migration` for table.
-- Deploy function, hit `supabase--curl_edge_functions` with a known high-volume test user to confirm row insert + mini explanation.
-- `supabase--read_query` to confirm severity rows visible.
-- Dashboard render check via preview.
+## F. CHECK constraints on `shield_signal_quality_events` (guarded):
+
+- `source_type IN ('device_screenshot','manual','workout_log','nutrition_log','mood_log','system')`
+- `freshness_status IS NULL OR freshness_status IN ('fresh','stale','missing','future_date','unknown')`
+- `validity_status IS NULL OR validity_status IN ('valid','suspicious','invalid','missing')`
+- `confidence_level IS NULL OR confidence_level IN ('HIGH','MEDIUM','LOW')`
+
+## G. Indexes (`CREATE INDEX IF NOT EXISTS`):
+
+- `idx_shield_signal_quality_events_user_date (user_id, signal_date)`
+- `idx_shield_signal_quality_events_user_metric_date (user_id, metric_name, signal_date)`
+- `idx_readiness_scores_user_date (user_id, score_date)`
+
+## H. RLS on `shield_signal_quality_events`:
+
+- `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`
+- Policy `signal_quality_select_own` FOR SELECT TO authenticated USING `auth.uid() = user_id`
+- No INSERT/UPDATE/DELETE policies for authenticated → blocked by default
+- Service role bypasses RLS via its grant
+
+Each policy created via `DROP POLICY IF EXISTS ... ; CREATE POLICY ...` for idempotency.
+
+## Idempotency strategy
+
+- `CREATE OR REPLACE FUNCTION` for the RPC
+- `ADD COLUMN IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`
+- CHECK constraints + policies wrapped in `DO $$ ... $$` blocks that test `pg_constraint` / `pg_policies` before creating
+
+## Deliverable
+
+Single `supabase--migration` call containing the full SQL. No code or UI changes in this patch.
+
+Proceed? , yes but Small required fix before proceeding:
+
+In apply_existing_weekly_macro_review, handle effective date edge cases:
+
+1. If p_effective_start_date < v_active.effective_start_date:
+
+   raise exception 'effective_start_before_active_target_start'.
+
+2. If p_effective_start_date = v_active.effective_start_date:
+
+   do not close the active row and insert a new row.
+
+   Instead update the active daily_macro_targets row in place with:
+
+   - tdee = v_tdee
+
+   - target_calories = v_calories
+
+   - target_protein_g = v_protein
+
+   - target_carbs_g = v_carbs
+
+   - target_fat_g = v_fat
+
+   - formula_used = 'adaptive_weekly_tdee_reconciliation_v1'
+
+   - source = 'weekly_review'
+
+   - review_id = v_[review.id](http://review.id)
+
+   - calculated_at = now()
+
+   - updated_at = now()
+
+   Then set v_new_id = v_[active.id](http://active.id).
+
+3. If p_effective_start_date > v_active.effective_start_date:
+
+   use the close-old-row and insert-new-row flow already described.
+
+Then update nutrition_weekly_reviews.applied_target_id = v_new_id and applied_at = now() in both paths.
