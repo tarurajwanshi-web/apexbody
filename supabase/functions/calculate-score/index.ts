@@ -644,13 +644,16 @@ Deno.serve(async (req) => {
       reason_codes: hydrationPct != null && hydrationPct < 70 ? [REASON.HYDRATION_BELOW_TARGET] : [],
       value: today_.hydrationMl,
     };
+    const priorStrainPresent = loadDays.some((d) => d.date !== today && d.strain > 0);
+    const trainingPresent = today_.hadTraining || priorStrainPresent;
     const trainingSig: SignalSummary = {
-      present: today_.hadTraining,
-      confidence: today_.hadTraining ? "HIGH" : "LOW",
-      validity: today_.hadTraining ? "valid" : "missing",
-      freshness: today_.hadTraining ? "fresh" : "missing",
+      present: trainingPresent,
+      confidence: today_.hadTraining ? "HIGH" : priorStrainPresent ? "MEDIUM" : "LOW",
+      validity: trainingPresent ? "valid" : "missing",
+      freshness: today_.hadTraining ? "fresh" : priorStrainPresent ? "stale" : "missing",
       source_method: "workout_log", source_provider: "user",
-      reason_codes: [], value: today_.strainNorm,
+      reason_codes: [...loadReasons],
+      value: today_.hadTraining ? today_.strainNorm : (systemic_load > 0 ? systemic_load : null),
     };
     const moodSig: SignalSummary = {
       present: presentToday.mood,
