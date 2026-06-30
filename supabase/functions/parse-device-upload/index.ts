@@ -270,7 +270,138 @@ Deno.serve(async (req) => {
     const totalFailure = !hasCoreMetric && !hasProxy;
     const nextStatus = totalFailure ? "failed" : "parsed";
 
-    // Persist legacy columns. Invalid values are stored as NULL — never guess.
+    // ---- Write order: normalized signals FIRST, then a single update to
+    // shield_device_uploads that flips parse_status. The webhook only
+    // dispatches calculate-score when parse_status becomes 'parsed', so this
+    // guarantees normalized rows are visible before scoring runs.
+
+    if (totalFailure) {
+      // Nothing usable. Mark failed; do not touch shield_health_signals.
+      const { data: failedRow } = await supabase
+        .from("shield_device_uploads")
+        .update({
+          parsed_hrv: null,
+          parsed_rhr: null,
+          parsed_sleep_hours: null,
+          parsed_date,
+          parse_status: "failed",
+        })
+        .eq("id", row.id)
+        .select()
+        .single();
+      return new Response(
+        JSON.stringify({
+          row: failedRow,
+          parsed: {
+            parsed_hrv: null, parsed_rhr: null, parsed_sleep_hours: null,
+            parsed_date, freshness, upload_confidence: uploadConfidence,
+            proxy_only: providerProxyOnly, reason_codes: dedupe(uploadReasons),
+          },
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Build normalized rows.
+    const provider: string = String(row.device_source ?? "unknown");
+    const baseRow = {
+      user_id: row.user_id,
+      signal_date: row.entry_date,
+      source_method: "screenshot" as const,
+      source_provider: provider,
+      source_table: "shield_device_uploads" as const,
+      source_id: row.id,
+      freshness_status: freshness,
+      metadata: { parsed_date, upload_confidence: uploadConfidence, proxy_only: providerProxyOnly },
+    };
+
+    const rows: SignalRow[] = [];
+    const pushMetric = (
+      metric_name: string,
+      c: { validity: Validity; value: number | null; reason_codes: ReasonCode[] },
+      unit: string | null,
+    ) => {
+      if (c.value == null || c.validity === "invalid" || c.validity === "missing") return;
+      const validity = c.validity as Exclude<Validity, "missing">;
+      const conf = confidenceForMetric(validity, freshness);
+      const cappedConf: Confidence =
+        metric_name !== "hrv_ms" && !hrvOk && conf === "HIGH" ? "MEDIUM" : conf;
+      rows.push({
+        ...baseRow,
+        metric_name,
+        metric_value: c.value,
+        unit,
+        confidence_level: cappedConf,
+        validity_status: validity,
+        reason_codes: dedupe(c.reason_codes),
+      });
+    };
+
+    pushMetric("hrv_ms", hrvC, "ms");
+    pushMetric("resting_heart_rate_bpm", rhrC, "bpm");
+    pushMetric("sleep_hours", sleepC, "h");
+    pushMetric("sleep_deep_hours", deepC, "h");
+    pushMetric("sleep_rem_hours", remC, "h");
+    pushMetric("sleep_awake_hours", awakeC, "h");
+
+    if (recoveryScore != null && recoveryScore >= 0 && recoveryScore <= 100) {
+      const metric = providerProxyOnly ? "readiness_proxy_score" : "recovery_score";
+      const conf: Confidence = providerProxyOnly
+        ? (freshness === "stale" ? "LOW" : "MEDIUM")
+        : (freshness === "stale" ? "MEDIUM" : "HIGH");
+      rows.push({
+        ...baseRow,
+        metric_name: metric,
+        metric_value: recoveryScore,
+        unit: "pct",
+        confidence_level: conf,
+        validity_status: "valid",
+        reason_codes: providerProxyOnly ? [REASON.DEVICE_PROXY_SCORE_ONLY] : [],
+      });
+    }
+    if (bodyBattery != null && bodyBattery >= 0 && bodyBattery <= 100 && provider === "garmin") {
+      rows.push({
+        ...baseRow,
+        metric_name: "body_battery",
+        metric_value: bodyBattery,
+        unit: "pct",
+        confidence_level: providerProxyOnly ? "MEDIUM" : "HIGH",
+        validity_status: "valid",
+        reason_codes: providerProxyOnly ? [REASON.DEVICE_PROXY_SCORE_ONLY] : [],
+      });
+    }
+
+    // Phase 1: replace normalized rows for this upload.
+    const { error: delErr } = await supabase
+      .from("shield_health_signals")
+      .delete()
+      .eq("user_id", row.user_id)
+      .eq("signal_date", row.entry_date)
+      .eq("source_table", "shield_device_uploads")
+      .eq("source_id", row.id);
+    if (delErr) {
+      console.error("shield_health_signals delete failed:", delErr);
+      await markFailed(row.user_id, row.entry_date);
+      return new Response(JSON.stringify({ error: delErr.message }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (rows.length > 0) {
+      const { error: sigErr } = await supabase.from("shield_health_signals").insert(rows);
+      if (sigErr) {
+        console.error("shield_health_signals insert failed:", sigErr);
+        await markFailed(row.user_id, row.entry_date);
+        return new Response(JSON.stringify({ error: sigErr.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    // Phase 2: now flip shield_device_uploads in one update. The 'parsed'
+    // status triggers the calculate-score dispatch webhook — normalized rows
+    // are already committed at this point.
     const { data: updated, error: upErr } = await supabase
       .from("shield_device_uploads")
       .update({
@@ -278,7 +409,7 @@ Deno.serve(async (req) => {
         parsed_rhr: rhrC.value,
         parsed_sleep_hours: sleepC.value,
         parsed_date,
-        parse_status: nextStatus,
+        parse_status: "parsed",
       })
       .eq("id", row.id)
       .select()
@@ -292,92 +423,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Normalize into shield_health_signals. Skip on total failure — never
-    // write guessed data; calculate-score will fall back to manual/neutral.
-    if (!totalFailure) {
-      const provider: string = String(row.device_source ?? "unknown");
-      const baseRow = {
-        user_id: row.user_id,
-        signal_date: row.entry_date,
-        source_method: "screenshot" as const,
-        source_provider: provider,
-        source_table: "shield_device_uploads" as const,
-        source_id: row.id,
-        freshness_status: freshness,
-        metadata: { parsed_date, upload_confidence: uploadConfidence, proxy_only: providerProxyOnly },
-      };
-
-      const rows: SignalRow[] = [];
-      const pushMetric = (
-        metric_name: string,
-        c: { validity: Validity; value: number | null; reason_codes: ReasonCode[] },
-        unit: string | null,
-      ) => {
-        if (c.value == null || c.validity === "invalid" || c.validity === "missing") return;
-        const validity = c.validity as Exclude<Validity, "missing">;
-        const conf = confidenceForMetric(validity, freshness);
-        // HRV missing in the SET → cap non-HRV metrics at MEDIUM.
-        const cappedConf: Confidence =
-          metric_name !== "hrv_ms" && !hrvOk && conf === "HIGH" ? "MEDIUM" : conf;
-        rows.push({
-          ...baseRow,
-          metric_name,
-          metric_value: c.value,
-          unit,
-          confidence_level: cappedConf,
-          validity_status: validity,
-          reason_codes: dedupe(c.reason_codes),
-        });
-      };
-
-      pushMetric("hrv_ms", hrvC, "ms");
-      pushMetric("resting_heart_rate_bpm", rhrC, "bpm");
-      pushMetric("sleep_hours", sleepC, "h");
-      pushMetric("sleep_deep_hours", deepC, "h");
-      pushMetric("sleep_rem_hours", remC, "h");
-      pushMetric("sleep_awake_hours", awakeC, "h");
-
-      if (recoveryScore != null && recoveryScore >= 0 && recoveryScore <= 100) {
-        const metric = providerProxyOnly ? "readiness_proxy_score" : "recovery_score";
-        const conf: Confidence = providerProxyOnly
-          ? (freshness === "stale" ? "LOW" : "MEDIUM")
-          : (freshness === "stale" ? "MEDIUM" : "HIGH");
-        rows.push({
-          ...baseRow,
-          metric_name: metric,
-          metric_value: recoveryScore,
-          unit: "pct",
-          confidence_level: conf,
-          validity_status: "valid",
-          reason_codes: providerProxyOnly ? [REASON.DEVICE_PROXY_SCORE_ONLY] : [],
-        });
-      }
-      if (bodyBattery != null && bodyBattery >= 0 && bodyBattery <= 100 && provider === "garmin") {
-        rows.push({
-          ...baseRow,
-          metric_name: "body_battery",
-          metric_value: bodyBattery,
-          unit: "pct",
-          confidence_level: providerProxyOnly ? "MEDIUM" : "HIGH",
-          validity_status: "valid",
-          reason_codes: providerProxyOnly ? [REASON.DEVICE_PROXY_SCORE_ONLY] : [],
-        });
-      }
-
-      // Clear any prior rows from this same upload, then insert fresh.
-      await supabase
-        .from("shield_health_signals")
-        .delete()
-        .eq("user_id", row.user_id)
-        .eq("signal_date", row.entry_date)
-        .eq("source_table", "shield_device_uploads")
-        .eq("source_id", row.id);
-
-      if (rows.length > 0) {
-        const { error: sigErr } = await supabase.from("shield_health_signals").insert(rows);
-        if (sigErr) console.error("shield_health_signals insert failed:", sigErr);
-      }
-    }
 
     return new Response(
       JSON.stringify({
