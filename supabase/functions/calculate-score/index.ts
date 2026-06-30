@@ -690,19 +690,24 @@ Deno.serve(async (req) => {
 
     // Fuelling status — pull today's nutrition totals from legacy meals query.
     const todayMeals = (mealsRes.data ?? []).filter((m: any) => m.entry_date === today && !m.deleted);
+    const loggedMealsToday = todayMeals.length > 0;
     const todayCalories = todayMeals.reduce((a: number, m: any) => a + Number(m.total_calories ?? 0), 0);
     const todayProtein = todayMeals.reduce((a: number, m: any) => a + Number(m.total_protein_g ?? 0), 0);
     const target = (targetsRes.data ?? [])[0];
-    const proteinPct = target?.target_protein_g
+    const proteinPct = loggedMealsToday && target?.target_protein_g
       ? Math.round((todayProtein / Number(target.target_protein_g)) * 100)
       : null;
-    const caloriesPct = target?.target_calories
+    const caloriesPct = loggedMealsToday && target?.target_calories
       ? Math.round((todayCalories / Number(target.target_calories)) * 100)
       : null;
     const fuelReasons: ReasonCode[] = [];
-    if (proteinPct != null && proteinPct < 80) fuelReasons.push(REASON.PROTEIN_LOW_FOR_GOAL);
-    if (caloriesPct != null && caloriesPct < 75 && systemic_load >= 25) {
-      fuelReasons.push(REASON.DEFICIT_CAUTION_LOW_RECOVERY);
+    if (!loggedMealsToday) {
+      fuelReasons.push(REASON.NUTRITION_NOT_LOGGED);
+    } else {
+      if (proteinPct != null && proteinPct < 80) fuelReasons.push(REASON.PROTEIN_LOW_FOR_GOAL);
+      if (caloriesPct != null && caloriesPct < 75 && systemic_load >= 25) {
+        fuelReasons.push(REASON.DEFICIT_CAUTION_LOW_RECOVERY);
+      }
     }
     if (fuelReasons.length) reasonCodesAll.push(...fuelReasons);
 
