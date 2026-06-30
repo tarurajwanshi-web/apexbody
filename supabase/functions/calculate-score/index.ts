@@ -534,7 +534,8 @@ Deno.serve(async (req) => {
     });
     const systemic_load = Math.round(loadDays.reduce((a, b) => a + b.contribution, 0) * 10) / 10;
     const loadReasons: ReasonCode[] = [];
-    if (systemic_load >= 20) loadReasons.push(REASON.HIGH_LOAD_CARRYOVER);
+    if (systemic_load >= 25) loadReasons.push(REASON.HIGH_LOAD_CARRYOVER);
+    else if (systemic_load >= 5) loadReasons.push(REASON.TRAINING_LOAD_CARRYOVER);
     if (loadReasons.length) reasonCodesAll.push(...loadReasons);
 
     const load_carryover = {
