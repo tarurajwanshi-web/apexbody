@@ -842,7 +842,32 @@ Deno.serve(async (req) => {
       reason_codes: [], value: presentToday.mood ? today_.scores.mood ?? null : null,
     };
 
-    // Overall sig quality.
+    // Reflect active source decisions on today's recovery/sleep summaries.
+    // If manual won despite a usable device row → mark as manual + emit override
+    // reason. If manual won because device was stale/invalid → emit fallback +
+    // device reason. Mutations are targeted; values/confidence stay accurate.
+    const applyManualFallback = (sig: SignalSummary, override: boolean, stale: boolean, invalid: boolean, metric: "hrv" | "rhr" | "sleep") => {
+      sig.source_method = "manual";
+      sig.source_provider = "user";
+      const codes: ReasonCode[] = [...sig.reason_codes];
+      if (override) codes.push(REASON.USER_MANUAL_OVERRIDE_USED);
+      if (stale) codes.push(REASON.DEVICE_SIGNAL_STALE);
+      if (invalid) {
+        if (metric === "hrv") codes.push(REASON.HRV_INVALID_RANGE);
+        else if (metric === "rhr") codes.push(REASON.RHR_INVALID_RANGE);
+        else codes.push(REASON.SLEEP_INVALID_RANGE);
+      }
+      if (!override) codes.push(REASON.MANUAL_FALLBACK_REQUIRED);
+      sig.reason_codes = dedupe(codes);
+    };
+    if (todayActive.recovery === "manual" && (todayActive.overrideRecovery || todayActive.recoveryStale || todayActive.recoveryInvalid)) {
+      applyManualFallback(hrvSig, todayActive.overrideRecovery, todayActive.recoveryStale, todayActive.recoveryInvalid, "hrv");
+      applyManualFallback(rhrSig, todayActive.overrideRecovery, todayActive.recoveryStale, todayActive.recoveryInvalid, "rhr");
+    }
+    if (todayActive.sleep === "manual" && (todayActive.overrideSleep || todayActive.sleepStale || todayActive.sleepInvalid)) {
+      applyManualFallback(sleepSig, todayActive.overrideSleep, todayActive.sleepStale, todayActive.sleepInvalid, "sleep");
+    }
+
     const backboneHigh = hrvSig.confidence === "HIGH" && sleepSig.confidence === "HIGH";
     const anyMedium = [hrvSig, sleepSig, nutritionSig].some((s) => s.confidence === "MEDIUM");
     const overall_sq: SigConfidence = backboneHigh
