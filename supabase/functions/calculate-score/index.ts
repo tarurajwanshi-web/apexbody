@@ -681,10 +681,10 @@ Deno.serve(async (req) => {
       reasonCodesAll.push(...s.reason_codes);
     }
     if (lowReadiness) reasonCodesAll.push(REASON.PRE_SESSION_LOW_READINESS);
-    if (today_.usedManual && pathPref === "device" && presentToday.recovery && !todayMeta.hrv) {
+    if (today_.usedManual && presentToday.recovery && !hrvSig.present) {
       reasonCodesAll.push(REASON.MANUAL_RECOVERY_DISCOUNTED);
     }
-    if (!hrvSig.present && !rhrSig.present && !sleepSig.present) {
+    if (!hrvSig.present && !rhrSig.present) {
       reasonCodesAll.push(REASON.MANUAL_FALLBACK_REQUIRED);
     }
 
