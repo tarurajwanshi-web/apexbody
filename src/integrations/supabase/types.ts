@@ -717,6 +717,84 @@ export type Database = {
         }
         Relationships: []
       }
+      shield_health_signals: {
+        Row: {
+          confidence_level: string | null
+          corrected_at: string | null
+          correction_reason: string | null
+          created_at: string
+          freshness_status: string | null
+          id: string
+          is_user_corrected: boolean
+          metadata: Json
+          metric_name: string
+          metric_value: number | null
+          observed_end_at: string | null
+          observed_start_at: string | null
+          original_value: number | null
+          reason_codes: string[]
+          signal_date: string
+          source_id: string | null
+          source_method: string
+          source_provider: string
+          source_table: string | null
+          unit: string | null
+          updated_at: string
+          user_id: string
+          validity_status: string | null
+        }
+        Insert: {
+          confidence_level?: string | null
+          corrected_at?: string | null
+          correction_reason?: string | null
+          created_at?: string
+          freshness_status?: string | null
+          id?: string
+          is_user_corrected?: boolean
+          metadata?: Json
+          metric_name: string
+          metric_value?: number | null
+          observed_end_at?: string | null
+          observed_start_at?: string | null
+          original_value?: number | null
+          reason_codes?: string[]
+          signal_date: string
+          source_id?: string | null
+          source_method: string
+          source_provider: string
+          source_table?: string | null
+          unit?: string | null
+          updated_at?: string
+          user_id: string
+          validity_status?: string | null
+        }
+        Update: {
+          confidence_level?: string | null
+          corrected_at?: string | null
+          correction_reason?: string | null
+          created_at?: string
+          freshness_status?: string | null
+          id?: string
+          is_user_corrected?: boolean
+          metadata?: Json
+          metric_name?: string
+          metric_value?: number | null
+          observed_end_at?: string | null
+          observed_start_at?: string | null
+          original_value?: number | null
+          reason_codes?: string[]
+          signal_date?: string
+          source_id?: string | null
+          source_method?: string
+          source_provider?: string
+          source_table?: string | null
+          unit?: string | null
+          updated_at?: string
+          user_id?: string
+          validity_status?: string | null
+        }
+        Relationships: []
+      }
       shield_manual_inputs: {
         Row: {
           created_at: string
@@ -877,6 +955,7 @@ export type Database = {
           reason_codes: string[] | null
           signal_date: string
           source_id: string | null
+          source_provider: string | null
           source_table: string | null
           source_type: string
           unit: string | null
@@ -895,6 +974,7 @@ export type Database = {
           reason_codes?: string[] | null
           signal_date: string
           source_id?: string | null
+          source_provider?: string | null
           source_table?: string | null
           source_type: string
           unit?: string | null
@@ -913,6 +993,7 @@ export type Database = {
           reason_codes?: string[] | null
           signal_date?: string
           source_id?: string | null
+          source_provider?: string | null
           source_table?: string | null
           source_type?: string
           unit?: string | null
