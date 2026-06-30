@@ -422,7 +422,7 @@ Deno.serve(async (req) => {
         .eq("user_id", user_id).eq("parse_status", "parsed")
         .gte("entry_date", baselineFrom).lte("entry_date", today),
       supabase.from("shield_health_signals")
-        .select("signal_date, metric_name, metric_value, unit, source_method, source_provider, source_table, source_id, confidence_level, freshness_status, validity_status, reason_codes")
+        .select("signal_date, metric_name, metric_value, unit, source_method, source_provider, source_table, source_id, confidence_level, freshness_status, validity_status, reason_codes, is_user_corrected, correction_reason")
         .eq("user_id", user_id).in("signal_date", dateList),
       supabase.from("shield_training_logs").select("entry_date, strain_value")
         .eq("user_id", user_id).in("entry_date", loadDates),
