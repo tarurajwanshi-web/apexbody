@@ -160,34 +160,45 @@ function scoreDay(d: DayInputs, recoveryBaseline: RecoveryBaseline): {
   let usedDevice = false;
   let usedManual = false;
 
-  const deviceUsable = d.device && d.device.parsed_hrv != null;
-  const useDeviceFirst = d.pathPref === "device" && deviceUsable;
-  if (useDeviceFirst) {
-    const r = deviceRecoveryScore(d.device!.parsed_hrv, d.device!.parsed_rhr, recoveryBaseline);
-    if (r != null) { scores.recovery = r; usedDevice = true; }
-  } else if (d.manual?.recovery_self_rating != null) {
-    scores.recovery = manualRecoveryScore(d.manual.recovery_self_rating);
-    usedManual = true;
-  } else if (d.device && (d.device.parsed_hrv != null || d.device.parsed_rhr != null)) {
-    const r = deviceRecoveryScore(d.device.parsed_hrv, d.device.parsed_rhr, recoveryBaseline);
-    if (r != null) { scores.recovery = r; usedDevice = true; }
-  }
+    const deviceUsable = d.device && d.device.parsed_hrv != null;
+    const recoveryForce = d.forceRecovery ?? null;
+    const useDeviceFirst = recoveryForce === "device"
+      ? !!(d.device && (d.device.parsed_hrv != null || d.device.parsed_rhr != null))
+      : recoveryForce === "manual"
+        ? false
+        : (d.pathPref === "device" && deviceUsable);
+    if (useDeviceFirst) {
+      const r = deviceRecoveryScore(d.device!.parsed_hrv, d.device!.parsed_rhr, recoveryBaseline);
+      if (r != null) { scores.recovery = r; usedDevice = true; }
+    } else if (d.manual?.recovery_self_rating != null) {
+      scores.recovery = manualRecoveryScore(d.manual.recovery_self_rating);
+      usedManual = true;
+    } else if (recoveryForce !== "manual" && d.device && (d.device.parsed_hrv != null || d.device.parsed_rhr != null)) {
+      const r = deviceRecoveryScore(d.device.parsed_hrv, d.device.parsed_rhr, recoveryBaseline);
+      if (r != null) { scores.recovery = r; usedDevice = true; }
+    }
 
-  let sleepHours: number | null = null;
-  const deviceSleep = d.device?.parsed_sleep_hours;
-  if (d.pathPref === "device" && deviceSleep != null) {
-    sleepHours = Number(deviceSleep);
-    scores.sleep = manualSleepScore(sleepHours);
-    usedDevice = true;
-  } else if (d.manual?.sleep_hours != null) {
-    sleepHours = Number(d.manual.sleep_hours);
-    scores.sleep = manualSleepScore(sleepHours);
-    usedManual = true;
-  } else if (deviceSleep != null) {
-    sleepHours = Number(deviceSleep);
-    scores.sleep = manualSleepScore(sleepHours);
-    usedDevice = true;
-  }
+    let sleepHours: number | null = null;
+    const deviceSleep = d.device?.parsed_sleep_hours;
+    const sleepForce = d.forceSleep ?? null;
+    const useDeviceSleep = sleepForce === "device"
+      ? deviceSleep != null
+      : sleepForce === "manual"
+        ? false
+        : (d.pathPref === "device" && deviceSleep != null);
+    if (useDeviceSleep && deviceSleep != null) {
+      sleepHours = Number(deviceSleep);
+      scores.sleep = manualSleepScore(sleepHours);
+      usedDevice = true;
+    } else if (d.manual?.sleep_hours != null) {
+      sleepHours = Number(d.manual.sleep_hours);
+      scores.sleep = manualSleepScore(sleepHours);
+      usedManual = true;
+    } else if (sleepForce !== "manual" && deviceSleep != null) {
+      sleepHours = Number(deviceSleep);
+      scores.sleep = manualSleepScore(sleepHours);
+      usedDevice = true;
+    }
 
   const scored = d.meals.map((m) => m.claude_quality_score).filter((v): v is number => v != null);
   const mealQuality = scored.length > 0
