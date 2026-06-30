@@ -611,12 +611,19 @@ export type Database = {
           engine_version: string
           fatigue_adjustment: number
           final_score: number
+          fuelling_status: Json | null
           id: string
           input_path: string | null
+          load_carryover: Json | null
           nudge_message: string | null
+          nutrition_modifier: string | null
           pillar_breakdown: Json
           pre_session_adjustment: number
+          reason_codes: string[] | null
           score_date: string
+          signal_quality: Json | null
+          top_drivers: Json | null
+          training_permission: string | null
           user_id: string
         }
         Insert: {
@@ -626,12 +633,19 @@ export type Database = {
           engine_version?: string
           fatigue_adjustment?: number
           final_score: number
+          fuelling_status?: Json | null
           id?: string
           input_path?: string | null
+          load_carryover?: Json | null
           nudge_message?: string | null
+          nutrition_modifier?: string | null
           pillar_breakdown: Json
           pre_session_adjustment?: number
+          reason_codes?: string[] | null
           score_date: string
+          signal_quality?: Json | null
+          top_drivers?: Json | null
+          training_permission?: string | null
           user_id: string
         }
         Update: {
@@ -641,12 +655,19 @@ export type Database = {
           engine_version?: string
           fatigue_adjustment?: number
           final_score?: number
+          fuelling_status?: Json | null
           id?: string
           input_path?: string | null
+          load_carryover?: Json | null
           nudge_message?: string | null
+          nutrition_modifier?: string | null
           pillar_breakdown?: Json
           pre_session_adjustment?: number
+          reason_codes?: string[] | null
           score_date?: string
+          signal_quality?: Json | null
+          top_drivers?: Json | null
+          training_permission?: string | null
           user_id?: string
         }
         Relationships: []
@@ -840,6 +861,63 @@ export type Database = {
           vision_confidence?: number | null
           vision_detected_items?: Json | null
           vision_provider?: string | null
+        }
+        Relationships: []
+      }
+      shield_signal_quality_events: {
+        Row: {
+          confidence_level: string | null
+          created_at: string | null
+          device_source: string | null
+          freshness_status: string | null
+          id: string
+          metric_name: string
+          normalized_value: number | null
+          raw_value: number | null
+          reason_codes: string[] | null
+          signal_date: string
+          source_id: string | null
+          source_table: string | null
+          source_type: string
+          unit: string | null
+          user_id: string
+          validity_status: string | null
+        }
+        Insert: {
+          confidence_level?: string | null
+          created_at?: string | null
+          device_source?: string | null
+          freshness_status?: string | null
+          id?: string
+          metric_name: string
+          normalized_value?: number | null
+          raw_value?: number | null
+          reason_codes?: string[] | null
+          signal_date: string
+          source_id?: string | null
+          source_table?: string | null
+          source_type: string
+          unit?: string | null
+          user_id: string
+          validity_status?: string | null
+        }
+        Update: {
+          confidence_level?: string | null
+          created_at?: string | null
+          device_source?: string | null
+          freshness_status?: string | null
+          id?: string
+          metric_name?: string
+          normalized_value?: number | null
+          raw_value?: number | null
+          reason_codes?: string[] | null
+          signal_date?: string
+          source_id?: string | null
+          source_table?: string | null
+          source_type?: string
+          unit?: string | null
+          user_id?: string
+          validity_status?: string | null
         }
         Relationships: []
       }
