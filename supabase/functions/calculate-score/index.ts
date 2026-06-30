@@ -764,34 +764,87 @@ Deno.serve(async (req) => {
         _abs: Math.abs(hImpact),
       });
     }
-    if (systemic_load >= 20) {
-      const carryImpact = -Math.min(10, Math.round(systemic_load / 5));
-      drivers.push({
-        type: "negative",
-        label: "High training load carrying over",
-        impact: String(carryImpact),
-        _abs: Math.abs(carryImpact),
-      });
-    }
-    drivers.sort((a, b) => b._abs - a._abs);
-    const top_drivers = drivers.slice(0, 4).map(({ _abs: _omit, ...d }) => d);
-
-    // training_permission (rule-based).
+    // training_permission (rule-based) — computed before drivers so we know
+    // whether load carryover is the decisive factor.
     let training_permission: "green_train" | "yellow_modify" | "orange_reduce" | "red_recover";
     if (final_score < 45 || systemic_load > 50) training_permission = "red_recover";
     else if (final_score < 60 || systemic_load > 35 || lowReadiness) training_permission = "orange_reduce";
     else if (final_score < 75 || systemic_load >= 25) training_permission = "yellow_modify";
     else training_permission = "green_train";
 
-    // nutrition_modifier (rule-based).
+    const loadIsDecisive =
+      systemic_load > 50 ||
+      (training_permission === "orange_reduce" && systemic_load > 35) ||
+      (training_permission === "yellow_modify" && systemic_load >= 25) ||
+      (training_permission === "red_recover" && systemic_load >= 25);
+
+    // Carryover driver: only emit for >=5 systemic_load, OR when it's decisive.
+    if (systemic_load >= 25 || loadIsDecisive) {
+      const carryImpact = -Math.min(10, Math.max(5, Math.round(systemic_load / 5)));
+      drivers.push({
+        type: "negative",
+        label: "Training load carrying over",
+        impact: String(carryImpact),
+        _abs: Math.abs(carryImpact),
+      });
+    } else if (systemic_load >= 5) {
+      const carryImpact = -Math.min(3, Math.max(1, Math.round(systemic_load / 5)));
+      drivers.push({
+        type: "negative",
+        label: "Training load carrying over",
+        impact: String(carryImpact),
+        _abs: Math.abs(carryImpact),
+      });
+    }
+    // Deterministic tie-break: negatives win ties so decisive load shows.
+    drivers.sort((a, b) =>
+      (b._abs - a._abs) ||
+      (a.type === b.type ? 0 : a.type === "negative" ? -1 : 1)
+    );
+    // Force-bump carryover when it's decisive but its raw |impact| would lose.
+    if (loadIsDecisive) {
+      const carryIdx = drivers.findIndex((d) => d.label === "Training load carrying over");
+      if (carryIdx > 3) {
+        const maxAbs = Math.max(0, ...drivers.slice(0, 4).map((d) => d._abs));
+        drivers[carryIdx]._abs = maxAbs + 1;
+        drivers.sort((a, b) =>
+          (b._abs - a._abs) ||
+          (a.type === b.type ? 0 : a.type === "negative" ? -1 : 1)
+        );
+      }
+    }
+    const top_drivers = drivers.slice(0, 4).map(({ _abs: _omit, ...d }) => d);
+
+    // Ensure decisive carryover surfaces in reason channels even if it
+    // would have been demoted below the HIGH threshold.
+    if (loadIsDecisive && !reasonCodesAll.includes(REASON.HIGH_LOAD_CARRYOVER)) {
+      reasonCodesAll.push(REASON.HIGH_LOAD_CARRYOVER);
+      loadReasons.push(REASON.HIGH_LOAD_CARRYOVER);
+      load_carryover.reason_codes = loadReasons;
+      trainingSig.reason_codes = dedupe([...trainingSig.reason_codes, REASON.HIGH_LOAD_CARRYOVER]);
+    }
+
+    // nutrition_modifier (rule-based). recovery_day_refeed requires a visible
+    // material cause — otherwise downgrade to deficit_caution / normal.
     let nutrition_modifier:
       | "normal" | "fuel_more" | "protein_priority" | "hydration_priority"
       | "deficit_caution" | "recovery_day_refeed";
     const nutritionPillar = today_.scores.nutrition ?? NEUTRAL;
-    if (training_permission === "red_recover") nutrition_modifier = "recovery_day_refeed";
-    else if (hydrationPct != null && hydrationPct < 70) nutrition_modifier = "hydration_priority";
+    const recoveryLowDriver = top_drivers.some((d) => d.label === "Recovery running low");
+    const loadDriverVisible = top_drivers.some((d) => d.label === "Training load carrying over");
+    const hasRefeedCause =
+      reasonCodesAll.includes(REASON.HIGH_LOAD_CARRYOVER) ||
+      (reasonCodesAll.includes(REASON.TRAINING_LOAD_CARRYOVER) && systemic_load >= 5) ||
+      recoveryLowDriver ||
+      loadDriverVisible ||
+      (reasonCodesAll.includes(REASON.MANUAL_RECOVERY_DISCOUNTED) && lowReadiness);
+
+    if (training_permission === "red_recover" && hasRefeedCause) {
+      nutrition_modifier = "recovery_day_refeed";
+    } else if (hydrationPct != null && hydrationPct < 70) nutrition_modifier = "hydration_priority";
     else if (proteinPct != null && proteinPct < 80) nutrition_modifier = "protein_priority";
     else if (nutritionPillar < 50 && systemic_load >= 25) nutrition_modifier = "deficit_caution";
+    else if (training_permission === "red_recover") nutrition_modifier = "deficit_caution";
     else if (final_score >= 70 && systemic_load >= 25 && nutritionPillar < 60) nutrition_modifier = "fuel_more";
     else nutrition_modifier = "normal";
 
