@@ -294,7 +294,26 @@ type HealthSignalRow = {
   freshness_status: string | null;
   validity_status: string | null;
   reason_codes: string[] | null;
+  is_user_corrected: boolean | null;
+  correction_reason: string | null;
 };
+
+// A signal row is "device-usable" when it has a usable value, isn't stale or
+// future-dated, and isn't an explicit manual user correction.
+function isDeviceUsable(r: HealthSignalRow | undefined): boolean {
+  if (!r || r.metric_value == null) return false;
+  const v = r.validity_status;
+  if (v !== "valid" && v !== "suspicious") return false;
+  const f = r.freshness_status ?? "unknown";
+  if (f === "stale" || f === "future_date") return false;
+  return r.source_method === "native_health" || r.source_method === "screenshot";
+}
+
+function isManualCorrection(r: HealthSignalRow | undefined): boolean {
+  if (!r) return false;
+  return r.source_method === "manual" &&
+    (r.is_user_corrected === true || (r.correction_reason ?? "").length > 0);
+}
 
 type PerMetricMeta = {
   value: number | null;
