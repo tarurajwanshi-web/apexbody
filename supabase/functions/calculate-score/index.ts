@@ -793,12 +793,22 @@ Deno.serve(async (req) => {
 
     const reason_codes = dedupe(reasonCodesAll);
 
+    // Align stored confidence_level with signal quality (never higher).
+    const CONF_ORDER: Record<string, number> = { LOW: 1, MEDIUM: 2, HIGH: 3 };
+    const minConf = (a: SigConfidence, b: SigConfidence): SigConfidence =>
+      CONF_ORDER[a] <= CONF_ORDER[b] ? a : b;
+    let effectiveConfidence: SigConfidence = confidence.toUpperCase() as SigConfidence;
+    const manualOnlyBackbone = !hrvSig.present && !rhrSig.present;
+    if (manualOnlyBackbone) effectiveConfidence = minConf(effectiveConfidence, "MEDIUM");
+    if (!backboneHigh && effectiveConfidence === "HIGH") effectiveConfidence = "MEDIUM";
+    effectiveConfidence = minConf(effectiveConfidence, overall_sq);
+
     // ---------------- write readiness_scores ----------------
     const row = {
       user_id,
       score_date: today,
       final_score,
-      confidence_level: confidence.toUpperCase(),
+      confidence_level: effectiveConfidence,
       pillar_breakdown,
       fatigue_adjustment: -penalty,
       pre_session_adjustment: -preSessionDelta,
