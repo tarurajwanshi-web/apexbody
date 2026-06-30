@@ -729,16 +729,35 @@ Deno.serve(async (req) => {
       mood: { pos: "Mood trending up", neg: "Mood trending down" },
     };
     const drivers: Array<Driver & { _abs: number }> = [];
+    const backbonePresentForDrivers = hrvSig.present || rhrSig.present;
     for (const p of PILLAR_KEYS) {
       const v = today_.scores[p];
       if (v == null) continue;
-      const impact = Math.round(((v - NEUTRAL) * W[p]) / 100);
+      let impact = Math.round(((v - NEUTRAL) * W[p]) / 100);
       if (impact === 0) continue;
+      let label = impact > 0 ? PILLAR_LABEL[p].pos : PILLAR_LABEL[p].neg;
+      // Recovery: when device backbone is absent, manual recovery can't claim a strong positive.
+      if (p === "recovery" && impact > 0 && !backbonePresentForDrivers) {
+        label = "Manual recovery check-in";
+        impact = Math.min(impact, 3);
+      }
+      // Nutrition: only emit positive when meals were actually logged today.
+      if (p === "nutrition" && impact > 0 && today_.mealQuality == null) continue;
       drivers.push({
         type: impact > 0 ? "positive" : "negative",
-        label: impact > 0 ? PILLAR_LABEL[p].pos : PILLAR_LABEL[p].neg,
+        label,
         impact: (impact > 0 ? "+" : "") + impact,
         _abs: Math.abs(impact),
+      });
+    }
+    // Hydration negative driver — independent of nutrition pillar.
+    if (hydrationPct != null && hydrationPct < 80) {
+      const hImpact = -Math.min(5, Math.max(1, Math.round((80 - hydrationPct) / 8)));
+      drivers.push({
+        type: "negative",
+        label: "Hydration below target",
+        impact: String(hImpact),
+        _abs: Math.abs(hImpact),
       });
     }
     if (systemic_load >= 20) {
