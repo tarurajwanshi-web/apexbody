@@ -204,7 +204,32 @@ Deno.serve(async (req) => {
       : null;
 
     const underFuelled = targetCalories != null && avgIntake != null && avgIntake < targetCalories * 0.80;
-    const lowReadiness = avgReadiness != null && avgReadiness < 45;
+    const trendLow = avgReadiness != null && avgReadiness < 45;
+
+    // Shield decisions
+    const acuteRecover = latestTrainingPermission === "red_recover";
+    const acuteReduce  = latestTrainingPermission === "orange_reduce";
+    const acuteModify  = latestTrainingPermission === "yellow_modify";
+    const lowConfidenceGate = latestConfidenceLevel === "LOW";
+    const weeklyReduce =
+      redDays7 >= 2 ||
+      orangeDays7 >= 2 ||
+      (orangeDays7 >= 1 && redDays7 >= 1) ||
+      trendLow;
+    const highLoadCarryover = latestSystemicLoad >= 25;
+    const mildLoadCarryover = latestSystemicLoad > 0 && latestSystemicLoad < 25;
+
+    const fuellingModifierSet = new Set([
+      "hydration_priority", "protein_priority", "fuel_more",
+      "deficit_caution", "recovery_day_refeed",
+    ]);
+    const shieldFuellingCaution =
+      (latestNutritionModifier && fuellingModifierSet.has(latestNutritionModifier)) ||
+      (latestFuellingStatus && (
+        latestFuellingStatus.under_fuelled === true ||
+        latestFuellingStatus.deficit === true ||
+        typeof latestFuellingStatus.status === "string" && /deficit|under/i.test(latestFuellingStatus.status)
+      ));
 
     const equipRule = equip === "bodyweight_only"
       ? "STRICTLY bodyweight only. Do NOT prescribe any dumbbell, barbell, machine, or cable exercises."
@@ -228,12 +253,46 @@ Deno.serve(async (req) => {
         ? "Advanced: 4-5 sets, include periodisation variety (heavy compounds + isolation accessories), RIR-based intensity — note target RIR 2-3 for working sets."
         : "Intermediate: 3-4 sets, balanced compound + accessory split, standard rep ranges for the goal.";
 
-    const readinessNote = lowReadiness
-      ? `\nREADINESS ALERT: User's avg readiness score this week is ${Math.round(avgReadiness!)}. Reduce total weekly volume by ~20% (drop 1 set per exercise). Set "volume_gate_alert" to exactly: "Low readiness detected — keeping volume conservative this week. Reduce to 3 sets per exercise instead of 4-5 if needed."`
-      : `\nReadiness is adequate. Set "volume_gate_alert" to null.`;
+    // Layered readiness note — acute guardrail applies to FIRST non-rest training session (plan starts Monday, not necessarily today).
+    const readinessLines: string[] = [];
+    if (acuteRecover) {
+      readinessLines.push(
+        `ACUTE RECOVERY: Latest readiness = red_recover. The FIRST non-rest training day in the plan must be recovery-focused — light mobility, technique, easy conditioning, or converted to rest. Express this via exercise selection (mobility/technique work, low sets, high RIR) and progression_note ("recovery — light technique only"). Remaining training days progress normally unless a weekly reduction also applies.`
+      );
+    } else if (acuteReduce) {
+      readinessLines.push(
+        `ACUTE REDUCE: Latest readiness = orange_reduce. The FIRST non-rest training day must drop 1 set on compound lifts and keep RIR >= 2 (encode via progression_note "hold weight, RIR 2-3"). Rest of week unchanged unless a weekly reduction applies.`
+      );
+    } else if (acuteModify) {
+      readinessLines.push(
+        `ACUTE MODIFY: Latest readiness = yellow_modify. Keep programming intact but avoid forced progression on the first training day — progression_note should read "warm-up readiness check — hold weight if bar speed is off".`
+      );
+    } else if (lowConfidenceGate) {
+      readinessLines.push(
+        `LOW CONFIDENCE: Latest confidence_level = LOW. Do NOT prescribe aggressive unqualified progression. Use conservative progression_note ("hold weight, +1 rep if easy"). Do not cut volume — manual/no-wearable users must not be penalised.`
+      );
+    }
 
-    const fuelNote = underFuelled
-      ? `\nFUELLING ALERT: User is averaging ${Math.round(avgIntake!)} kcal/day vs ${Math.round(targetCalories!)} kcal target — under-fuelled. Do not programme to failure. Add a session_note: "Under-fuelled this week — stop 2-3 reps short of failure on all sets."`
+    if (weeklyReduce) {
+      readinessLines.push(
+        `WEEKLY REDUCE: Repeated low readiness this week (red=${redDays7}, orange=${orangeDays7}, avg=${avgReadiness != null ? Math.round(avgReadiness) : "n/a"}). Reduce total weekly volume by ~20% (drop 1 set per exercise). Set "volume_gate_alert" to: "Low readiness detected — keeping volume conservative this week. Reduce to 3 sets per exercise instead of 4-5 if needed."`
+      );
+    }
+
+    if (highLoadCarryover) {
+      readinessLines.push(
+        `HIGH LOAD CARRYOVER: systemic_load=${latestSystemicLoad}. Start the week conservatively — first working session should feel like RPE 6. Encode via progression_note "hold weight, RIR 3".`
+      );
+    } else if (mildLoadCarryover) {
+      readinessLines.push(
+        `Mild residual training load (systemic_load=${latestSystemicLoad}). No volume change — first session progression_note may read "monitor bar speed".`
+      );
+    }
+
+    const readinessNote = readinessLines.length > 0 ? "\n" + readinessLines.join("\n") : "\nReadiness is adequate. Set \"volume_gate_alert\" to null.";
+
+    const fuelNote = (underFuelled || shieldFuellingCaution)
+      ? `\nFUELLING CAUTION${underFuelled ? ` (avg intake ${Math.round(avgIntake!)} kcal vs ${Math.round(targetCalories!)} kcal target)` : ""}${latestNutritionModifier ? ` — Shield nutrition_modifier=${latestNutritionModifier}` : ""}. Do not programme to failure. Reflect this in progression_note ("stop 2-3 reps short of failure") and avoid aggressive metabolic finishers.`
       : "";
 
     const historyNote = Object.keys(exerciseHistory).length > 0
@@ -242,6 +301,17 @@ Deno.serve(async (req) => {
         `For unfamiliar exercises, progression_note should be "new exercise — start moderate".`
       : `\nNo recent workout history. For every exercise set progression_note to "new exercise — start moderate".`;
 
+    const shieldContext =
+      `\nShield 7-day context:\n` +
+      `- avg readiness: ${avgReadiness != null ? Math.round(avgReadiness) : "n/a"}\n` +
+      `- latest permission: ${latestTrainingPermission ?? "n/a"} (confidence ${latestConfidenceLevel ?? "n/a"})\n` +
+      `- red/orange/yellow days: ${redDays7}/${orangeDays7}/${yellowDays7}\n` +
+      `- low-confidence days: ${lowConfidenceDays7}\n` +
+      `- latest systemic load carryover: ${latestSystemicLoad}\n` +
+      `- latest nutrition modifier: ${latestNutritionModifier ?? "n/a"}\n` +
+      `- dominant reason codes: ${dominantReasonCodes.join(", ") || "none"}\n` +
+      `Use this as context only. Do not invent new plan JSON fields — express all adjustments via existing schema (sets, reps, rest_seconds, cue, progression_note, exercise selection, session_name, volume_gate_alert).`;
+
     const prompt =
       `Build a 7-day workout plan.\n` +
       `Goal: ${goal}. Training days per week: ${days}. Equipment: ${equip}. Experience: ${experience}.\n` +
@@ -249,7 +319,7 @@ Deno.serve(async (req) => {
       `Equipment rule: ${equipRule}\n` +
       `Experience rule: ${experienceRule}\n` +
       `Include muscle_group for each exercise (e.g. "chest", "quads", "back", "shoulders", "hamstrings", "glutes", "biceps", "triceps", "full_body", "cardio").` +
-      `${readinessNote}${fuelNote}${historyNote}\n` +
+      `${shieldContext}${readinessNote}${fuelNote}${historyNote}\n` +
       `Exactly ${days} training days with named sessions (e.g. Push/Pull/Legs, Upper/Lower, or Full Body depending on frequency), ` +
       `each with 4-6 exercises (name, sets, reps, rest_seconds, cue, muscle_group, progression_note). The remaining ${7 - days} days are rest. ` +
       `Return JSON matching the schema.`;
