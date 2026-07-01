@@ -244,69 +244,32 @@ Deno.serve(async (req) => {
         typeof latestFuellingStatus.status === "string" && /deficit|under/i.test(latestFuellingStatus.status)
       ));
 
-    const equipRule = equip === "bodyweight_only"
-      ? "STRICTLY bodyweight only. Do NOT prescribe any dumbbell, barbell, machine, or cable exercises."
-      : equip === "home_gym_db_only"
-      ? "Dumbbells only — no barbell, machines, or cables. Bands and bodyweight OK."
-      : equip === "limited_equipment"
-      ? "Limited equipment (basic dumbbells, maybe a bench/bands). Avoid barbell or machines."
-      : "Full commercial gym available — barbell, dumbbells, machines, cables all OK.";
+    // Resolve deterministic envelope (rules-first, before Sonnet)
+    const envelope: Envelope = resolveTrainingEnvelope({
+      goal,
+      experience,
+      equipment: equip,
+      trainingDaysPerWeek: days,
+      permission: latestTrainingPermission as Permission,
+      confidence: latestConfidenceLevel as Confidence,
+      nutritionModifier: latestNutritionModifier,
+      fuellingCaution: Boolean(underFuelled || shieldFuellingCaution),
+      systemicLoad: latestSystemicLoad,
+      weeklyReduce,
+      redDays7,
+      orangeDays7,
+    });
 
-    const goalRule =
-      goal === "muscle_gain" ? "Hypertrophy programming: 6-12 reps, 4 sets typical, 60-120s rest." :
-      goal === "strength" ? "Strength programming: 3-6 reps on main lifts, 4-5 sets, 2-4min rest, accessories 8-10." :
-      goal === "fat_loss" ? "Hypertrophy-leaning with density: 8-15 reps, shorter rests (45-75s), keep volume up." :
-      goal === "athletic_performance" ? "Mixed: power/explosive lifts (3-5 reps), accessories (6-10), include conditioning blocks." :
-      "Recomposition: balanced hypertrophy 6-12 reps with some heavier 4-6 sets, 75-120s rest.";
-
-    const experienceRule =
-      experience === "beginner"
-        ? "Beginner: 3 sets max per exercise, compound movements only, no exercise requiring advanced technique (no Olympic lifts, no deficit deadlifts). 10-15 reps."
-        : experience === "advanced"
-        ? "Advanced: 4-5 sets, include periodisation variety (heavy compounds + isolation accessories), RIR-based intensity — note target RIR 2-3 for working sets."
-        : "Intermediate: 3-4 sets, balanced compound + accessory split, standard rep ranges for the goal.";
-
-    // Layered readiness note — acute guardrail applies to FIRST non-rest training session (plan starts Monday, not necessarily today).
-    const readinessLines: string[] = [];
-    if (acuteRecover) {
-      readinessLines.push(
-        `ACUTE RECOVERY: Latest readiness = red_recover. The FIRST non-rest training day in the plan must be recovery-focused — light mobility, technique, easy conditioning, or converted to rest. Express this via exercise selection (mobility/technique work, low sets, high RIR) and progression_note ("recovery — light technique only"). Remaining training days progress normally unless a weekly reduction also applies.`
-      );
-    } else if (acuteReduce) {
-      readinessLines.push(
-        `ACUTE REDUCE: Latest readiness = orange_reduce. The FIRST non-rest training day must drop 1 set on compound lifts and keep RIR >= 2 (encode via progression_note "hold weight, RIR 2-3"). Rest of week unchanged unless a weekly reduction applies.`
-      );
-    } else if (acuteModify) {
-      readinessLines.push(
-        `ACUTE MODIFY: Latest readiness = yellow_modify. Keep programming intact but avoid forced progression on the first training day — progression_note should read "warm-up readiness check — hold weight if bar speed is off".`
-      );
-    } else if (lowConfidenceGate) {
-      readinessLines.push(
-        `LOW CONFIDENCE: Latest confidence_level = LOW. Do NOT prescribe aggressive unqualified progression. Use conservative progression_note ("hold weight, +1 rep if easy"). Do not cut volume — manual/no-wearable users must not be penalised.`
-      );
-    }
-
-    if (weeklyReduce) {
-      readinessLines.push(
-        `WEEKLY REDUCE: Repeated low readiness this week (red=${redDays7}, orange=${orangeDays7}, avg=${avgReadiness != null ? Math.round(avgReadiness) : "n/a"}). Reduce total weekly volume by ~20% (drop 1 set per exercise). Set "volume_gate_alert" to: "Low readiness detected — keeping volume conservative this week. Reduce to 3 sets per exercise instead of 4-5 if needed."`
-      );
-    }
-
-    if (highLoadCarryover) {
-      readinessLines.push(
-        `HIGH LOAD CARRYOVER: systemic_load=${latestSystemicLoad}. Start the week conservatively — first working session should feel like RPE 6. Encode via progression_note "hold weight, RIR 3".`
-      );
-    } else if (mildLoadCarryover) {
-      readinessLines.push(
-        `Mild residual training load (systemic_load=${latestSystemicLoad}). No volume change — first session progression_note may read "monitor bar speed".`
-      );
-    }
-
-    const readinessNote = readinessLines.length > 0 ? "\n" + readinessLines.join("\n") : "\nReadiness is adequate. Set \"volume_gate_alert\" to null.";
-
-    const fuelNote = (underFuelled || shieldFuellingCaution)
-      ? `\nFUELLING CAUTION${underFuelled ? ` (avg intake ${Math.round(avgIntake!)} kcal vs ${Math.round(targetCalories!)} kcal target)` : ""}${latestNutritionModifier ? ` — Shield nutrition_modifier=${latestNutritionModifier}` : ""}. Do not programme to failure. Reflect this in progression_note ("stop 2-3 reps short of failure") and avoid aggressive metabolic finishers.`
-      : "";
+    // Rolling plan start date in user's local timezone
+    const { data: todayWorkout } = await supa
+      .from("workout_set_logs")
+      .select("id")
+      .eq("user_id", user_id)
+      .eq("completed", true)
+      .gte("entry_date", new Date().toISOString().slice(0, 10))
+      .limit(1);
+    const hasCompletedWorkoutToday = Array.isArray(todayWorkout) && todayWorkout.length > 0;
+    const { planStartISO } = resolvePlanStartISO(new Date(), timezone, hasCompletedWorkoutToday);
 
     const historyNote = Object.keys(exerciseHistory).length > 0
       ? `\nRecent exercise history (last 30 days, best sets and avg RIR):\n${JSON.stringify(exerciseHistory, null, 2)}\n` +
@@ -322,48 +285,107 @@ Deno.serve(async (req) => {
       `- low-confidence days: ${lowConfidenceDays7}\n` +
       `- latest systemic load carryover: ${latestSystemicLoad}\n` +
       `- latest nutrition modifier: ${latestNutritionModifier ?? "n/a"}\n` +
-      `- dominant reason codes: ${dominantReasonCodes.join(", ") || "none"}\n` +
-      `Use this as context only. Do not invent new plan JSON fields — express all adjustments via existing schema (sets, reps, rest_seconds, cue, progression_note, exercise selection, session_name, volume_gate_alert).`;
+      `- dominant reason codes: ${dominantReasonCodes.join(", ") || "none"}`;
 
-    const prompt =
-      `Build a 7-day workout plan.\n` +
-      `Goal: ${goal}. Training days per week: ${days}. Equipment: ${equip}. Experience: ${experience}.\n` +
-      `Programming rule: ${goalRule}\n` +
-      `Equipment rule: ${equipRule}\n` +
-      `Experience rule: ${experienceRule}\n` +
-      `Include muscle_group for each exercise (e.g. "chest", "quads", "back", "shoulders", "hamstrings", "glutes", "biceps", "triceps", "full_body", "cardio").` +
-      `${shieldContext}${readinessNote}${fuelNote}${historyNote}\n` +
-      `Exactly ${days} training days with named sessions (e.g. Push/Pull/Legs, Upper/Lower, or Full Body depending on frequency), ` +
-      `each with 4-6 exercises (name, sets, reps, rest_seconds, cue, muscle_group, progression_note). The remaining ${7 - days} days are rest. ` +
-      `Return JSON matching the schema.`;
+    const envelopeBlock =
+      `\nDETERMINISTIC TRAINING ENVELOPE (hard constraints — violating any of these = invalid output):\n- ` +
+      envelope.guardrails.join("\n- ");
 
-    let plan: any;
-    try {
-      plan = await callClaude(anth, prompt);
-    } catch (e1) {
-      try {
-        plan = await callClaude(anth, prompt);
-      } catch (e2) {
-        return new Response(JSON.stringify({ error: "Claude failed twice", detail: String(e2 instanceof Error ? e2.message : e2) }), {
-          status: 502, headers: { ...cors, "Content-Type": "application/json" },
-        });
-      }
+    // Compute expected calendar for the prompt (day/date/day_name)
+    const calendar = Array.from({ length: 7 }, (_, i) => {
+      const dt = new Date(planStartISO + "T00:00:00Z");
+      dt.setUTCDate(dt.getUTCDate() + i);
+      const iso = dt.toISOString().slice(0, 10);
+      const dn = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][dt.getUTCDay()];
+      return { day: i + 1, date: iso, day_name: dn };
+    });
+
+    const promptSchemaNote =
+      `Return ONLY a JSON object of shape: { "plan_start_date": "${planStartISO}", "plan_timezone": "${timezone}", "days": [7 items], "volume_gate_alert": string|null }. ` +
+      `Each day: { "day": 1-7, "date": string (YYYY-MM-DD, use the calendar below), "day_name": string, "rest": boolean, "session_name": string|null, "exercises": [] }. ` +
+      `Each exercise: { "name": string, "sets": int, "reps": string, "rest_seconds": int, "cue": string, "muscle_group": string, "progression_note": string, "target_rir": int }. ` +
+      `No other top-level or exercise fields. Do NOT emit session_note, notes, description, tempo, or anything not in this schema.`;
+
+    const basePrompt =
+      `Build a rolling 7-day workout plan starting ${planStartISO} (user timezone ${timezone}).\n` +
+      `Use exactly this calendar (day/date/day_name):\n${JSON.stringify(calendar)}\n` +
+      `${envelopeBlock}\n` +
+      `${shieldContext}\n` +
+      `${(underFuelled || shieldFuellingCaution) ? `\nFUELLING CAUTION${underFuelled && targetCalories ? ` (avg intake ${Math.round(avgIntake!)} kcal vs ${Math.round(targetCalories!)} kcal target)` : ""}${latestNutritionModifier ? ` — Shield nutrition_modifier=${latestNutritionModifier}` : ""}. Do not programme to failure.` : ""}` +
+      historyNote + "\n" +
+      `Exactly ${days} training days with APEX-named sessions (e.g. "APEX Push A", "APEX Lower A", "APEX Full Body A"), each with ${envelope.exercisesPerSession[0]}-${envelope.exercisesPerSession[1]} exercises. Remaining ${7 - days} days are rest (rest=true, session_name=null, exercises=[]).\n` +
+      `Include muscle_group per exercise. target_rir must be an integer inside [${envelope.targetRir[0]}, ${envelope.targetRir[1]}].\n` +
+      promptSchemaNote;
+
+    async function tryClaude(promptText: string) {
+      return await callClaude(anth, promptText);
     }
 
-    const week_start_date = upcomingMonday();
-    const unlock_date = addDays(week_start_date, 7);
+    let plan: any = null;
+    let violations: string[] = [];
+    let usedFallback = false;
 
-    const { days: planDays, volume_gate_alert: planAlert } = plan ?? {};
-    const emitAlert = weeklyReduce || acuteRecover;
-    const defaultAlert = weeklyReduce
-      ? "Low readiness detected — keeping volume conservative this week. Reduce to 3 sets per exercise instead of 4-5 if needed."
-      : "Recovery day flagged — first training session is light/mobility focused.";
-    const normalized = {
-      days: planDays ?? [],
-      volume_gate_alert: emitAlert
-        ? (typeof planAlert === "string" && planAlert.trim().length > 0 ? planAlert : defaultAlert)
-        : null,
-    };
+    try {
+      plan = await tryClaude(basePrompt);
+    } catch (e) {
+      plan = null;
+    }
+    if (plan) {
+      const v1 = validateGeneratedPlan(plan, envelope, planStartISO);
+      if (!v1.ok) {
+        violations = v1.violations;
+        const reprompt = basePrompt +
+          `\n\nPREVIOUS OUTPUT WAS INVALID. Fix all of these violations and return corrected JSON only:\n- ` +
+          violations.join("\n- ");
+        try {
+          plan = await tryClaude(reprompt);
+        } catch {
+          plan = null;
+        }
+      }
+    }
+    if (plan) {
+      const v2 = validateGeneratedPlan(plan, envelope, planStartISO);
+      if (!v2.ok) {
+        violations = v2.violations;
+        plan = null;
+      }
+    }
+    if (!plan) {
+      plan = buildFallbackPlan(envelope, planStartISO, timezone, days);
+      usedFallback = true;
+    }
+
+    // Ensure top-level plan_start_date / plan_timezone are set
+    plan.plan_start_date = planStartISO;
+    plan.plan_timezone = timezone;
+
+    // Determine volume_gate_alert
+    const emitAlert = weeklyReduce || envelope.sessionType === "recovery" || usedFallback;
+    const defaultAlert = usedFallback
+      ? (envelope.sessionType === "recovery"
+          ? "Safe fallback plan generated — first training day is recovery/mobility focused."
+          : "Safe fallback plan generated — conservative sets and load. Review before next week.")
+      : weeklyReduce
+        ? "Low readiness detected — keeping volume conservative this week. Reduce to 3 sets per exercise instead of 4-5 if needed."
+        : "Recovery day flagged — first training session is light/mobility focused.";
+    if (emitAlert) {
+      if (typeof plan.volume_gate_alert !== "string" || plan.volume_gate_alert.trim().length === 0) {
+        plan.volume_gate_alert = defaultAlert;
+      }
+    } else {
+      plan.volume_gate_alert = null;
+    }
+
+    // DB row keys stay compatible: week_start_date = Monday of planStartISO's ISO week
+    const week_start_date = (() => {
+      const d = new Date(planStartISO + "T00:00:00Z");
+      const dow = d.getUTCDay(); // 0=Sun..6=Sat
+      const delta = dow === 0 ? -6 : 1 - dow;
+      d.setUTCDate(d.getUTCDate() + delta);
+      return d.toISOString().slice(0, 10);
+    })();
+    const unlock_date = addDays(week_start_date, 7);
 
     const { error: upErr } = await supa
       .from("weekly_plans")
@@ -372,12 +394,21 @@ Deno.serve(async (req) => {
         week_start_date,
         unlock_date,
         is_locked: true,
-        plan_data: normalized,
+        plan_data: plan,
         generated_by: "claude-plan-v1",
       }, { onConflict: "user_id,week_start_date" });
     if (upErr) throw upErr;
 
-    return new Response(JSON.stringify({ ok: true, week_start_date, unlock_date, plan: normalized }), {
+    return new Response(JSON.stringify({
+      ok: true,
+      week_start_date,
+      unlock_date,
+      plan_start_date: planStartISO,
+      plan_timezone: timezone,
+      used_fallback: usedFallback,
+      violations: usedFallback ? violations : [],
+      plan,
+    }), {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {
