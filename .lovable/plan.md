@@ -1,174 +1,292 @@
-## APEX Engine Bridge v1A — generate-plan consumes Shield v6.3
+## APEX Workout Generation Bridge v1B — Evidence-Informed Rules + Shield v6.3
 
-Backend-only patch to `supabase/functions/generate-plan/index.ts`. No other files, no schema, no UI, no changes to `calculate-score`. Existing `weekly_plans` upsert shape and plan JSON schema preserved.
+Backend-only. Two files:
 
-### File to change
+1. `supabase/functions/_shared/training-rules.ts` — NEW, pure helper (no I/O, no Deno APIs beyond types). Contains envelope resolution + plan validator + fallback template.
+2. `supabase/functions/generate-plan/index.ts` — replace the "prompt → Claude → normalize" tail (lines ~234–353). Everything before line 234 (auth, queries, Shield derivation, exercise history, fuelling) stays as-is.
 
-- `supabase/functions/generate-plan/index.ts` — only this file.
+`calculate-score`, DB schema, `plan_data` JSON contract, and `weekly_plans` upsert shape all unchanged.
 
-### Exact logic changes
+### 0. Confirmed profile values (from live DB)
 
-**1) Expand readiness query (lines 105–109)**
+- `goal`: `fat_loss` | `muscle_gain` | `strength` | `recomposition` | `athletic_performance`
+- `experience_level`: `beginner` | `intermediate` | `advanced` | null → default `intermediate`
+- `equipment_access`: `commercial_gym` | `home_gym_db_only` | `bodyweight_only` | null → default `commercial_gym`. (`limited_equipment` is referenced by existing prompt but not present in DB — treat as valid alias mapping to home_gym_db_only rules.)
+- `training_days_per_week`: 3–6
 
-Replace the current select:
+### 1. `_shared/training-rules.ts` — exports
 
-```ts
-.select("final_score")
 ```
+type Goal = 'fat_loss' | 'muscle_gain' | 'strength' | 'recomposition' | 'athletic_performance';
+type Experience = 'beginner' | 'intermediate' | 'advanced';
+type Equipment = 'commercial_gym' | 'home_gym_db_only' | 'bodyweight_only' | 'limited_equipment';
+type Permission = 'green_train' | 'yellow_modify' | 'orange_reduce' | 'red_recover' | null;
+type Confidence = 'LOW' | 'MEDIUM' | 'HIGH' | null;
 
-with:
-
-```ts
-.select("score_date, final_score, confidence_level, training_permission, nutrition_modifier, load_carryover, fuelling_status, top_drivers, reason_codes, signal_quality")
-.order("score_date", { ascending: false })
-```
-
-`avgReadiness` calculation (lines 110–112) remains untouched — it still averages `final_score` across returned rows.
-
-**2) Derive Shield context (insert after line 112)**
-
-```ts
-const rowsSorted = readinessRows ?? []; // already DESC by score_date
-const latestReadiness: any = rowsSorted[0] ?? null;
-const latestTrainingPermission: string | null = latestReadiness?.training_permission ?? null;
-const latestConfidenceLevel: string | null = latestReadiness?.confidence_level ?? null;
-const latestNutritionModifier: string | null = latestReadiness?.nutrition_modifier ?? null;
-const latestFuellingStatus: string | null = latestReadiness?.fuelling_status ?? null;
-const latestSystemicLoad: number = Number(latestReadiness?.load_carryover?.systemic_load ?? 0);
-const latestTopDrivers: any[] = Array.isArray(latestReadiness?.top_drivers) ? latestReadiness.top_drivers : [];
-const latestReasonCodes: string[] = Array.isArray(latestReadiness?.reason_codes) ? latestReadiness.reason_codes : [];
-
-const redDays7 = rowsSorted.filter(r => r.training_permission === "red_recover").length;
-const orangeDays7 = rowsSorted.filter(r => r.training_permission === "orange_reduce").length;
-const yellowDays7 = rowsSorted.filter(r => r.training_permission === "yellow_modify").length;
-const lowConfidenceDays7 = rowsSorted.filter(r => r.confidence_level === "LOW").length;
-
-// Frequency-ranked reason codes across the 7-day window
-const rcFreq: Record<string, number> = {};
-for (const r of rowsSorted) {
-  for (const c of (Array.isArray(r.reason_codes) ? r.reason_codes : [])) {
-    rcFreq[c] = (rcFreq[c] ?? 0) + 1;
-  }
+interface EnvelopeInput {
+  goal, experience, equipment, trainingDaysPerWeek,
+  permission, confidence, nutritionModifier, fuellingCaution,
+  systemicLoad, weeklyReduce, redDays7, orangeDays7,
 }
-const dominantReasonCodes = Object.entries(rcFreq)
-  .sort((a, b) => b[1] - a[1])
-  .slice(0, 5)
-  .map(([code]) => code);
+
+interface Envelope {
+  sessionType: 'train' | 'modify' | 'reduce' | 'recovery';
+  targetRir: [number, number];           // e.g. [1,3]
+  setsPerExercise: [number, number];      // e.g. [2,4]
+  exercisesPerSession: [number, number];  // e.g. [4,6]
+  restSeconds: [number, number];
+  repRange: [number, number];             // canonical rep window
+  progressionModel: 'linear' | 'double_progression' | 'autoregulated' | 'hold';
+  allowedPatterns: string[];              // e.g. ['squat','hinge','push','pull','carry','lunge','core','mobility','conditioning']
+  allowedTechniques: string[];            // ['straight_sets', 'antagonistic_superset', 'drop_set', 'rest_pause']
+  equipmentPool: 'barbell+db+machine+cable' | 'db+bench+bands' | 'bodyweight_only' | 'db+bodyweight';
+  weeklyVolumeCutPct: number;             // 0 or 20
+  guardrails: string[];                   // free-text lines for prompt
+}
+
+resolveTrainingEnvelope(input): Envelope
+validateGeneratedPlan(plan, envelope, weekStartISO): { ok: true } | { ok: false, violations: string[] }
+buildFallbackPlan(envelope, weekStartISO, trainingDaysPerWeek, equipment): Plan  // deterministic safe template
 ```
 
-All accesses are null/array-guarded, so old rows with null/empty JSON never crash.
+### 2. `resolveTrainingEnvelope` decision tree
 
-**3) Replace the blunt weekly gate (lines 178, 202–204)**
+**Session type (Shield first):**
 
-Remove `lowReadiness = avgReadiness < 45` as the sole driver. Compute a structured decision:
+- `red_recover` → `recovery`
+- `orange_reduce` → `reduce`
+- `yellow_modify` → `modify`
+- else → `train`
 
-```ts
-const trendLow = avgReadiness != null && avgReadiness < 45;
+**Target RIR:**
 
-// Whole-week volume reduction only when the trend supports it
-const weeklyReduce =
-  redDays7 >= 2 ||
-  orangeDays7 >= 2 ||
-  (orangeDays7 >= 1 && redDays7 >= 1) ||
-  trendLow;
+- recovery: [4,5]; reduce: [2,4]; modify: [2,3]; train: goal default (strength [1,3], hypertrophy/muscle_gain/recomp [1,3], fat_loss [1,3], athletic mixed [2,4])
+- Beginner: floor RIR at 2 regardless of goal.
+- LOW confidence: floor at 2, ceiling +1.
 
-// Acute (today / next session) guardrail from latest permission
-const acuteRecover = latestTrainingPermission === "red_recover";
-const acuteReduce  = latestTrainingPermission === "orange_reduce";
-const acuteModify  = latestTrainingPermission === "yellow_modify";
+**Sets/exercises per session:**
 
-const lowConfidenceGate = latestConfidenceLevel === "LOW";
+- recovery: sets [1,2], exercises [3,5], mostly mobility/technique/light conditioning.
+- reduce: sets [2,3], drop 1 vs train baseline.
+- modify/train: baseline by goal × experience.
+- Beginner cap: sets ≤ 3, exercises ≤ 5, no advanced techniques.
+
+**Weekly volume cut:** 20% if `weeklyReduce` (redDays7≥2 OR orangeDays7≥2 OR (red≥1 AND orange≥1) OR trendLow); else 0.
+
+**Progression model:**
+
+- Beginner → `linear`.
+- Intermediate → `double_progression`.
+- Advanced → `autoregulated`, unless recovery/reduce → `hold`.
+- Any session_type ∈ {recovery, reduce} or LOW confidence → override to `hold`.
+
+**Allowed patterns:**
+
+- strength: squat, hinge, horizontal_push, horizontal_pull, vertical_push, vertical_pull + light accessories.
+- muscle_gain / recomposition: full pattern set incl. isolation.
+- fat_loss: full patterns + optional conditioning finisher (removed on reduce/recovery).
+- athletic_performance: adds power/explosive patterns; removed on orange/red.
+- recovery session_type: mobility, technique, light conditioning only.
+
+**Allowed techniques:**
+
+- Always: `straight_sets`.
+- Intermediate+: `antagonistic_superset`.
+- Advanced only: `drop_set`, `rest_pause`. Never on high-risk barbell compounds (deadlift/squat/clean). Never on recovery/reduce or LOW confidence.
+
+**Equipment pool:**
+
+- `commercial_gym` → barbell+db+machine+cable.
+- `home_gym_db_only` / `limited_equipment` → db+bench+bands.
+- `bodyweight_only` → bodyweight_only.
+
+**Rest seconds:** strength [150,240]; hypertrophy [60,120]; fat_loss [45,90]; recovery [30,60]; athletic power [120,180].
+
+**Fuelling caution** (`nutrition_modifier ∈ {hydration_priority, protein_priority, fuel_more, deficit_caution, recovery_day_refeed}` OR fuelling under/deficit): forbid training-to-failure (RIR ≥ 2), forbid metabolic finishers, remove drop_set / rest_pause.
+
+**High systemic load (≥25):** force `hold` progression on first non-rest day, RIR ≥ 3.
+
+**Guardrails array:** stringified summary of everything above so it can be injected into the prompt.
+
+### 3. `validateGeneratedPlan` checks
+
+Returns violations list; empty = ok.
+
+Schema/shape:
+
+- `plan.days` is array length 7.
+- `day` ∈ 1..7 unique and ordered.
+- `date === addDays(weekStart, day-1)` and `day_name` matches JS Date weekday for that ISO date.
+- `rest` boolean; if `rest === true`: `session_name === null` and `exercises === []`.
+- If `rest === false`: `session_name` non-empty string, `exercises` length ∈ envelope.exercisesPerSession.
+- Only whitelisted top-level plan fields present (`days`, `volume_gate_alert`). Only whitelisted exercise fields (`name, sets, reps, rest_seconds, cue, muscle_group, progression_note`). Reject `session_note` and any extras.
+
+Exercise-level:
+
+- `sets` int ∈ envelope.setsPerExercise.
+- `reps` string. Parse leading integer; if `session_type === recovery` allow "10-15" or time-based ("30s"). Otherwise numeric range must fall inside envelope.repRange (allow ±1).
+- `rest_seconds` int ∈ envelope.restSeconds (±10s tolerance).
+- `cue` non-empty ≤ 200 chars.
+- `muscle_group` non-empty.
+- `progression_note` non-empty.
+- If `target_rir` field present (optional): must be inside envelope.targetRir.
+- Equipment match: name must not contain forbidden tokens for pool (e.g. bodyweight_only rejects "barbell", "dumbbell", "cable", "machine"; db-only rejects "barbell", "cable", "machine"; etc.). Simple substring blocklist.
+
+Beginner safety:
+
+- No exercise name matches deny-list `["snatch","clean & jerk","clean and jerk","deficit deadlift","jefferson","zercher","muscle-up"]`.
+- No `drop set`, `rest-pause`, `giant set` tokens in `cue`/`progression_note`.
+
+Shield permission enforcement:
+
+- If `sessionType === 'recovery'`: at least the first non-rest day must be mobility/technique/light (heuristic: all exercises `sets ≤ 2`, `reps` string contains "s" or number ≥ 8, `progression_note` matches /recovery|light|technique|mobility/i, and no compound heavy lift names).
+- If `sessionType === 'reduce'`: first non-rest day sets ≤ baseline − 1, progression_note contains "hold" or "RIR" hint.
+- If `sessionType === 'modify'`: first non-rest day progression_note contains readiness/warm-up hint.
+
+Techniques:
+
+- Reject any `cue`/`progression_note` mentioning drop set / rest-pause / cluster / myo-rep unless technique is in `envelope.allowedTechniques`.
+
+### 4. Generation loop (replaces existing try/catch in generate-plan)
+
+```
+envelope = resolveTrainingEnvelope(...)
+prompt = buildPrompt(envelope, historyNote, shieldContext, fuelNote, weekStartISO)
+plan = await callClaude(prompt)
+res  = validateGeneratedPlan(plan, envelope, weekStartISO)
+if (!res.ok) {
+   prompt2 = prompt + "\nPREVIOUS OUTPUT WAS INVALID. Violations:\n- " + res.violations.join("\n- ") + "\nReturn a corrected JSON object."
+   plan = await callClaude(prompt2)
+   res  = validateGeneratedPlan(plan, envelope, weekStartISO)
+}
+if (!res.ok) {
+   plan = buildFallbackPlan(envelope, weekStartISO, days, equip)
+   // set volume_gate_alert with a note that a safe fallback was used
+}
 ```
 
-**4) New `readinessNote` block replacing lines 202–204**
+Sonnet never self-validates — validator is deterministic and runs after every generation.
 
-Build a layered prompt fragment:
+### 5. `buildFallbackPlan` (deterministic template)
 
-- If `acuteRecover`: instruct Claude to make Day 1 (today / next scheduled session) a recovery / mobility / light technique / rest day; leave later days progressing unless `weeklyReduce`.
-- Else if `acuteReduce`: reduce next-session volume/intensity (drop 1 set on compounds, cap RIR ≥ 2); rest of week unchanged unless `weeklyReduce`.
-- Else if `acuteModify`: keep training as planned, avoid forced progression, add "warm-up readiness check" note on the first session.
-- Else (`green_train`): normal programming unless `lowConfidenceGate`, in which case avoid aggressive unqualified progression but do not punish (no volume cut just for LOW confidence — manual-only users must not be penalised).
-- If `weeklyReduce`: append the existing "-20%/drop 1 set" whole-week reduction rule and populate `volume_gate_alert`.
-- If `latestSystemicLoad >= 25` (matches Shield `HIGH_LOAD_CARRYOVER` threshold from v6.3): add "acute high load carryover — start week conservative, first session should feel like RPE 6".
-- If `latestSystemicLoad > 0` and < 25: soft note only, no volume change.
+- Pure function, no LLM.
+- Picks pattern from envelope + equipment:
+  - `bodyweight_only` → bodyweight progression (squat, push-up, row (band/inverted), hinge (single-leg RDL), core, mobility).
+  - `home_gym_db_only` / `limited_equipment` → DB upper/lower or DB full-body based on `trainingDaysPerWeek`.
+  - `commercial_gym` → PPL (6d), U/L (4d), full body (3d), U/L + PPL hybrid (5d).
+- Straight sets only, RIR clamped to envelope, no advanced techniques.
+- Every exercise: `progression_note = "safe fallback — hold weight, RIR " + rir`.
+- Rest days filled with `rest:true, session_name:null, exercises:[]`.
+- `volume_gate_alert` set to explain fallback was used.
 
-**5) Nutrition modifier context (append to prompt near line 208)**
+Uses APEX-owned pattern names (`APEX Push A`, `APEX Lower A`, `APEX Full Body A`) — no external program branding.
 
-Add a `nutritionContextNote`:
+### 6. Prompt changes in `generate-plan/index.ts`
 
-- If `latestNutritionModifier` ∈ {`hydration_priority`, `protein_priority`, `fuel_more`, `deficit_caution`, `recovery_day_refeed`} or `latestFuellingStatus` indicates under-fuelling / deficit: append a session_note discouraging failure sets and aggressive metabolic finishers. Never compute macros here.
-- Existing `underFuelled` check based on `daily_macro_targets` vs intake is preserved and merged with the Shield modifier: the more conservative rule wins.
+- Compute envelope early using existing derived Shield vars.
+- Replace the ad-hoc `goalRule` / `experienceRule` / `equipRule` strings with a serialised envelope block (`envelope.guardrails.join("\n")`).
+- Keep existing `shieldContext`, `readinessNote`, `fuelNote`, `historyNote` for context.
+- Extend the system prompt to reject any field outside the schema and to state RIR/technique constraints. No change to output schema.
+- On fallback, still write to `weekly_plans` with `generated_by: "claude-plan-v1"` (unchanged) — the contract on disk is identical.
 
-**6) Prompt additions (line 223 area)**
+### 7. Plan JSON contract
 
-Concatenate a compact Shield summary passed to Claude so it can reason but not recompute:
+No changes proposed. Existing keys retained: `days[]` with `day, day_name, rest, session_name, exercises[]`, and `volume_gate_alert`. Exercise keys: `name, sets, reps, rest_seconds, cue, muscle_group, progression_note`. No new fields.
 
-```
-Shield 7-day context:
-- avg readiness: {avgReadiness}
-- latest permission: {latestTrainingPermission} (confidence {latestConfidenceLevel})
-- red/orange/yellow days: {redDays7}/{orangeDays7}/{yellowDays7}
-- low-confidence days: {lowConfidenceDays7}
-- latest systemic load carryover: {latestSystemicLoad}
-- latest nutrition modifier: {latestNutritionModifier}
-- dominant reason codes: {dominantReasonCodes.join(", ")}
-```
+### 8. Thresholds (single source of truth in training-rules.ts)
 
-**7) `volume_gate_alert` (lines 245–252)**
+- Weekly volume cut trigger: `redDays7 ≥ 2 || orangeDays7 ≥ 2 || (redDays7 ≥ 1 && orangeDays7 ≥ 1) || avgReadiness < 45`.
+- High systemic load: `systemic_load ≥ 25` (matches Shield v6.3 `HIGH_LOAD_CARRYOVER`).
+- Weekly cut magnitude: −20% sets (drop 1 set/exercise).
 
-Replace `lowReadiness` gate with `weeklyReduce || acuteRecover`:
+### 9. Assumptions / risks
 
-- When `acuteRecover` only: alert text explains today/next session is recovery-focused; rest of week normal.
-- When `weeklyReduce`: existing conservative-volume alert copy retained.
-- Else: `null`.
+- `limited_equipment` legacy alias survives even though DB never stores it.
+- Sonnet may still produce fields the validator strips; we choose to reject and reprompt rather than silently drop, so bad LLM output surfaces via fallback.
+- Fallback template is intentionally conservative — some advanced users may see reduced variety when the LLM output is invalid twice. Acceptable safety trade-off.
+- Reps parsing is heuristic (leading integer / hyphen range / "30s"); we tolerate ±1 on range bounds.
+- Equipment substring blocklist is coarse (e.g. rejects "barbell row" for db-only). Documented in helper comments.
 
-Existing upsert shape (lines 254–263), plan JSON schema, `generated_by: "claude-plan-v1"`, and the final response shape remain identical.
+### 10. Validation steps (manual, after build)
 
-### Thresholds used
+1. Envelope unit smoke: call `resolveTrainingEnvelope` with each `(goal, experience, permission)` combination and log the returned envelope. Confirm:
+  - beginner never gets `drop_set` / `rest_pause`.
+  - `red_recover` → sessionType=recovery, progression=hold, no compounds allowed.
+  - `bodyweight_only` → equipmentPool=bodyweight_only.
+  - `systemic_load=30, green_train` → progression=hold, RIR floor ≥ 3.
+2. End-to-end for a user with green readiness → plan generates once, validator passes, no fallback.
+3. Force validator failure by mocking Claude output missing `progression_note` → verify reprompt fires and passes.
+4. Force double failure (mock invalid twice) → verify `buildFallbackPlan` writes a schema-valid `plan_data` and `volume_gate_alert` mentions fallback.
+5. Row with `training_permission='red_recover'` → generated first non-rest day contains only mobility/technique/light work; validator passes.
+6. Row with 2× `orange_reduce` in 7 days → `volume_gate_alert` populated, sets reduced by 1 vs baseline.
+7. `equipment_access='bodyweight_only'` + LLM returns a barbell → validator rejects, reprompt succeeds or fallback returns a bodyweight plan.
+8. `nutrition_modifier='recovery_day_refeed'` → progression_note across all exercises reads "stop 2-3 reps short" / equivalent; no drop_set.
+9. Legacy user with all readiness fields null → envelope defaults to normal `train`, validator passes.
+10. `plan_data` in `weekly_plans` matches existing UI expectations (spot-check `Workouts` route rendering).
 
-- `avgReadiness < 45` → trend low (retained).
-- `redDays7 >= 2` OR `orangeDays7 >= 2` OR (`orangeDays7 >= 1` AND `redDays7 >= 1`) → weekly volume cut.
-- `latestSystemicLoad >= 25` → acute high-load guardrail (matches Shield v6.3 `HIGH_LOAD_CARRYOVER`).
-- `latestConfidenceLevel === "LOW"` → block aggressive/unqualified progression but never cut volume by itself.
+### Do NOT change
 
-### Robustness
+- Any DB schema, migrations, RLS.
+- `calculate-score`, `parse-device-upload`, `_shared/signal-quality.ts`.
+- `plan_data` shape / `weekly_plans` upsert / `generated_by` string.
+- UI files.  
 
-- All Shield fields optional; missing/null/legacy rows fall back to today's blunt behaviour (avgReadiness gate only).
-- No new dependencies. No shared helper needed.
 
-### Validation steps
-
-1. Row with `training_permission='red_recover'` on today, others green → plan generated: Day 1 recovery/rest, remaining days normal, `volume_gate_alert` mentions recovery, no whole-week cut.
-2. 2× `red_recover` in past 7 days → plan reduces sets across the week; `volume_gate_alert` set.
-3. Latest `orange_reduce` alone → next session reduced, week unchanged.
-4. Latest `green_train` + `LOW` confidence → plan built normally, prompt tells Claude to avoid forced progression, `volume_gate_alert=null`.
-5. `latestSystemicLoad = 30`, permission green → prompt includes high-load guardrail; no weekly cut.
-6. No readiness rows at all (new user) → falls through to prior behaviour; no crash.
-7. Row with `load_carryover=null`, `top_drivers=null`, `reason_codes=null` → no exception; systemic load = 0.
-8. `nutrition_modifier='recovery_day_refeed'` → prompt appends fuelling-context note; macros untouched.
-
-# Deploy: `generate-plan` only. `calculate-score` untouched.  
+# Do not change the Sonnet model id.
+Keep max_tokens at 3000 unless the generated JSON is being truncated.
+If increasing max_tokens is required, state the reason clearly before build.  
   
-**Before build, apply these corrections to the plan:**
 
-1. fuelling_status is jsonb, not text. Treat latestFuellingStatus as an object with null-safe guards, not string | null.
 
-2. Do not assume Day 1 is today. generate-plan returns a Monday-starting 7-day plan. Acute red/orange/yellow guardrails should apply to the first non-rest training session in the generated plan, not blindly Day 1.
-
-3. Do not add session_note or any field outside the existing plan JSON schema. Preserve schema exactly. Use volume_gate_alert, progression_note, cue, sets/reps/rest, and exercise selection to express recovery/fuelling/readiness changes.
-
-Everything else in the plan is approved:
-
-- generate-plan only
-
-- no schema change
-
-- calculate-score untouched
-
-- avgReadiness retained
-
-- Shield context added
-
-- systemic_load used only as acute guardrail
-
-- weekly volume reduction only from repeated red/orange or low weekly trend
+- 1. Fix timezone/actionable start:
+  - Include profiles.timezone in the profile SELECT.
+  - Do not use upcomingMonday() as the user-facing plan start.
+  - Compute plan_start_date from the user's local timezone.
+  - If local hour is before 12:00 and no completed workout exists today, plan_start_date = local today.
+  - Else plan_start_date = local tomorrow.
+  - Keep weekly_plans.week_start_date only for DB compatibility if needed, but the actual plan_data must be rolling from plan_start_date.
+  2. Fix plan_data contract deliberately:
+  - Add top-level plan_data.plan_start_date.
+  - Add top-level plan_data.plan_timezone.
+  - Add date to every day object.
+  - day remains 1..7.
+  - day_name is derived from local date.
+  This is a JSON contract expansion, not a DB schema migration. State that clearly.
+  3. Update validator whitelist:
+  Top-level allowed keys:
+  days, volume_gate_alert, plan_start_date, plan_timezone.
+  Day allowed keys:
+  day, date, day_name, rest, session_name, exercises.
+  4. Decide RIR contract:
+  Preferred: add target_rir to each exercise object and validate it.
+  If UI does not display it, that is okay. It can be stored for engine logic.
+  Exercise allowed keys become:
+  name, sets, reps, rest_seconds, cue, muscle_group, progression_note, target_rir.
+  5. Acute Shield rules:
+  Apply red/orange/yellow to the first upcoming non-rest training day in the rolling local-date plan.
+  Do not apply to Monday by default.
+  Everything else is approved:
+  - new _shared/training-rules.ts
+  - deterministic rules first
+  - Sonnet second
+  - validator after Sonnet
+  - retry once
+  - fallback template
+  - no DB schema migration
+  - calculate-score untouched
+  - no training_blocks yet  
+  6. Equipment and goal constraints must be applied before generation, not only after validation.
+  Before calling Sonnet:
+  - Resolve equipment_access into an allowed exercise pool.
+  - Resolve goal into allowed training patterns.
+  - Resolve experience_level into allowed complexity.
+  - Pass these as hard constraints in the prompt.
+  Examples:
+  - bodyweight_only must never generate sled push, barbell squat, cable row, leg press, machine chest press, dumbbell press, or treadmill-only prescriptions.
+  - home_gym_db_only must never generate sled push, barbell movements, cable/machine exercises, or equipment the user does not have.
+  - commercial_gym may use barbell, dumbbell, cable, machine, sled, cardio equipment if appropriate.
+  - fat_loss can include conditioning only if equipment supports it; for home/db-only, use alternatives like loaded carries if available, step-ups, intervals, brisk walking, circuits, or bodyweight conditioning.
+  - athletic_performance can include power/conditioning patterns, but only with equipment available and only if Shield permission allows it.
+  Validator must also reject equipment-incompatible exercises after generation.
+  If Sonnet violates this once, reprompt with the exact equipment violation.
+  If it violates twice, fallback template must use only equipment-safe exercises.
