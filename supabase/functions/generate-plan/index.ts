@@ -104,12 +104,41 @@ Deno.serve(async (req) => {
     const sevenDaysAgoISO = sevenDaysAgo.toISOString().slice(0, 10);
     const { data: readinessRows } = await supa
       .from("readiness_scores")
-      .select("final_score")
+      .select("score_date, final_score, confidence_level, training_permission, nutrition_modifier, load_carryover, fuelling_status, top_drivers, reason_codes, signal_quality")
       .eq("user_id", user_id)
-      .gte("score_date", sevenDaysAgoISO);
+      .gte("score_date", sevenDaysAgoISO)
+      .order("score_date", { ascending: false });
     const avgReadiness = readinessRows && readinessRows.length > 0
       ? readinessRows.reduce((s: number, r: any) => s + Number(r.final_score ?? 0), 0) / readinessRows.length
       : null;
+
+    // Shield v6.3 derived context (null/empty-safe for legacy rows)
+    const rowsSorted: any[] = readinessRows ?? [];
+    const latestReadiness: any = rowsSorted[0] ?? null;
+    const latestTrainingPermission: string | null = latestReadiness?.training_permission ?? null;
+    const latestConfidenceLevel: string | null = latestReadiness?.confidence_level ?? null;
+    const latestNutritionModifier: string | null = latestReadiness?.nutrition_modifier ?? null;
+    const latestFuellingStatus: Record<string, any> | null =
+      latestReadiness?.fuelling_status && typeof latestReadiness.fuelling_status === "object"
+        ? latestReadiness.fuelling_status
+        : null;
+    const latestSystemicLoad: number = Number(latestReadiness?.load_carryover?.systemic_load ?? 0) || 0;
+    const latestReasonCodes: string[] = Array.isArray(latestReadiness?.reason_codes) ? latestReadiness.reason_codes : [];
+
+    const redDays7 = rowsSorted.filter((r: any) => r?.training_permission === "red_recover").length;
+    const orangeDays7 = rowsSorted.filter((r: any) => r?.training_permission === "orange_reduce").length;
+    const yellowDays7 = rowsSorted.filter((r: any) => r?.training_permission === "yellow_modify").length;
+    const lowConfidenceDays7 = rowsSorted.filter((r: any) => r?.confidence_level === "LOW").length;
+
+    const rcFreq: Record<string, number> = {};
+    for (const r of rowsSorted) {
+      const codes = Array.isArray(r?.reason_codes) ? r.reason_codes : [];
+      for (const c of codes) rcFreq[c] = (rcFreq[c] ?? 0) + 1;
+    }
+    const dominantReasonCodes = Object.entries(rcFreq)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([code]) => code);
 
     // Workout history: last 30 days, group by exercise for progressive overload.
     const thirtyDaysAgo = new Date();
