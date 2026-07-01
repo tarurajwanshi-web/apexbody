@@ -2,6 +2,18 @@
 // Input: { user_id }. Writes a row into public.weekly_plans.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { authorizeCaller, corsAllowHeaders } from "../_shared/authorize.ts";
+import {
+  resolveTrainingEnvelope,
+  validateGeneratedPlan,
+  buildFallbackPlan,
+  resolvePlanStartISO,
+  type Envelope,
+  type Goal,
+  type Experience,
+  type Equipment,
+  type Permission,
+  type Confidence,
+} from "../_shared/training-rules.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
