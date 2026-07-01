@@ -96,7 +96,7 @@ Deno.serve(async (req) => {
 
     const { data: p, error } = await supa
       .from("profiles")
-      .select("goal, training_days_per_week, equipment_access, experience_level")
+      .select("goal, training_days_per_week, equipment_access, experience_level, timezone")
       .eq("user_id", user_id)
       .maybeSingle();
     if (error || !p) {
@@ -105,10 +105,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    const goal = p.goal ?? "recomposition";
+    const goal: Goal = (p.goal ?? "recomposition") as Goal;
     const days = p.training_days_per_week ?? 3;
-    const equip = p.equipment_access ?? "commercial_gym";
-    const experience = p.experience_level ?? "intermediate";
+    const equip: Equipment = (p.equipment_access ?? "commercial_gym") as Equipment;
+    const experience: Experience = (p.experience_level ?? "intermediate") as Experience;
+    const timezone: string = (p as any).timezone ?? "UTC";
 
     // Readiness: avg final_score last 7 days
     const sevenDaysAgo = new Date();
