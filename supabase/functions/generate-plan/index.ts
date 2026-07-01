@@ -341,12 +341,14 @@ Deno.serve(async (req) => {
     const unlock_date = addDays(week_start_date, 7);
 
     const { days: planDays, volume_gate_alert: planAlert } = plan ?? {};
+    const emitAlert = weeklyReduce || acuteRecover;
+    const defaultAlert = weeklyReduce
+      ? "Low readiness detected — keeping volume conservative this week. Reduce to 3 sets per exercise instead of 4-5 if needed."
+      : "Recovery day flagged — first training session is light/mobility focused.";
     const normalized = {
       days: planDays ?? [],
-      volume_gate_alert: lowReadiness
-        ? (typeof planAlert === "string" && planAlert.trim().length > 0
-            ? planAlert
-            : "Low readiness detected — keeping volume conservative this week. Reduce to 3 sets per exercise instead of 4-5 if needed.")
+      volume_gate_alert: emitAlert
+        ? (typeof planAlert === "string" && planAlert.trim().length > 0 ? planAlert : defaultAlert)
         : null,
     };
 
