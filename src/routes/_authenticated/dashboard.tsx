@@ -192,7 +192,7 @@ function Dashboard() {
   const readiness = data.readiness?.final_score ?? null;
   const trainingPlanned = !!data.todayPlannedSession && !data.todayPlannedSession.rest;
 
-  const loop = buildClosedLoop(recovery, fuel, effort, readiness, trainingPlanned);
+  const loop = buildClosedLoop(data.readiness?.training_permission ?? null, data.readiness?.nutrition_modifier ?? null, data.readiness?.confidence_level ?? null, trainingPlanned);
 
   // Today rows
   const planned = data.todayPlannedSession;
