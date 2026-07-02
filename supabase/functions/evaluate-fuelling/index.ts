@@ -4,6 +4,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { requireInternalSecret, corsAllowHeaders } from "../_shared/authorize.ts";
+import { buildApexSystemPrompt } from "../_shared/apex-voice.ts";
 import { DEFAULT_TIMEZONE } from "../_shared/time-helpers.ts";
 
 const cors = {
@@ -38,43 +39,35 @@ function addDays(iso: string, n: number): string {
 }
 
 async function miniExplain(
-  lovableKey: string,
+  openaiKey: string,
   ctx: {
     total_sets: number; total_calories: number; bmr: number;
     training_cost: number; shortfall: number; goal: string | null;
-    avg_rir: number | null;
+    avg_rir: number | null; name: string | null; proficiency: string | null;
   },
 ): Promise<{ explanation: string; protocol: string } | null> {
-  if (!lovableKey) return null;
-  const sys =
-    "Explain fuelling adequacy in simple language for a fitness enthusiast. " +
-    "User did heavy training. Explain why calories matter for recovery. " +
-    "Be specific to their data. " +
-    'Output ONLY JSON: { "explanation": string, "protocol": string }. ' +
-    "Plain text, no markdown, no emoji. Keep each field under 240 chars.";
-  const user =
+  const userPrompt =
     `Yesterday the user did ${ctx.total_sets} sets and ate ${Math.round(ctx.total_calories)} kcal. ` +
     `BMR is ${Math.round(ctx.bmr)} kcal, training cost is ~${Math.round(ctx.training_cost)} kcal, ` +
     `total energy need ~${Math.round(ctx.bmr + ctx.training_cost)} kcal. ` +
     `Shortfall: ${Math.round(ctx.shortfall)} kcal. ` +
     `Goal: ${ctx.goal ?? "general"}. ` +
     `Avg RIR: ${ctx.avg_rir != null ? ctx.avg_rir.toFixed(1) : "unknown"}. ` +
-    "Explain why this matters for recovery and strength. What should they do?";
+    "Explain why this matters for recovery and strength, and what to do about it. " +
+    'Output ONLY a JSON object with this exact shape, no prose outside it: { "explanation": string, "protocol": string }. ' +
+    "Keep each field under 240 characters.";
   try {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Lovable-API-Key": lovableKey,
-        "X-Lovable-AIG-SDK": "vercel-ai-sdk",
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
       body: JSON.stringify({
-        model: "openai/gpt-5-mini",
-        messages: [
-          { role: "system", content: sys },
-          { role: "user", content: user },
-        ],
+        model: "gpt-4o-mini",
+        max_tokens: 300,
         response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: buildApexSystemPrompt({ proficiency: ctx.proficiency, name: ctx.name }) },
+          { role: "user", content: userPrompt },
+        ],
       }),
     });
     if (!res.ok) { console.error("miniExplain failed", res.status, await res.text()); return null; }
