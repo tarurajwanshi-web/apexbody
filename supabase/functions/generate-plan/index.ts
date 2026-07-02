@@ -7,12 +7,18 @@ import {
   validateGeneratedPlan,
   buildFallbackPlan,
   resolvePlanStartISO,
+  MUSCLE_GROUPS,
+  MOVEMENT_PATTERNS,
+  EXERCISE_ROLES,
+  PLAN_DATA_VERSION,
   type Envelope,
   type Goal,
   type Experience,
   type Equipment,
   type Permission,
   type Confidence,
+  type MuscleGroup,
+  type MovementPattern,
 } from "../_shared/training-rules.ts";
 
 const cors = {
