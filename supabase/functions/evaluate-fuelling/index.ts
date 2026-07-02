@@ -151,7 +151,7 @@ Deno.serve(async (req) => {
 
   const url = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const lovableKey = Deno.env.get("LOVABLE_API_KEY") ?? "";
+  const openaiKey = Deno.env.get("OPENAI_API_KEY")!;
   const supa = createClient(url, serviceKey, { auth: { persistSession: false } });
 
   // Internal-secret only (cron / manual admin trigger)
@@ -170,7 +170,7 @@ Deno.serve(async (req) => {
   // Profile set to evaluate
   let profileQuery = supa
     .from("profiles")
-    .select("user_id, timezone, goal, experience_level");
+    .select("user_id, timezone, goal, experience_level, name");
   if (body.user_id) profileQuery = profileQuery.eq("user_id", body.user_id);
   const { data: profiles, error: profErr } = await profileQuery;
   if (profErr) {
