@@ -1047,6 +1047,7 @@ export type Database = {
           id: string
           message: string | null
           mini_explanation: string | null
+          readiness_modifier_at_eval: string | null
           severity: string | null
           severity_score: number | null
           shortfall: number | null
@@ -1065,6 +1066,7 @@ export type Database = {
           id?: string
           message?: string | null
           mini_explanation?: string | null
+          readiness_modifier_at_eval?: string | null
           severity?: string | null
           severity_score?: number | null
           shortfall?: number | null
@@ -1083,6 +1085,7 @@ export type Database = {
           id?: string
           message?: string | null
           mini_explanation?: string | null
+          readiness_modifier_at_eval?: string | null
           severity?: string | null
           severity_score?: number | null
           shortfall?: number | null
