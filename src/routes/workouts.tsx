@@ -364,12 +364,14 @@ function WorkoutsPage() {
   );
 }
 
-function VolumeNudge({ plan, weekLogs, todayIdx }: { plan: WeeklyPlan; weekLogs: SetLog[]; todayIdx: number }) {
+function VolumeNudge({ plan, weekLogs, todayIdx, hadShieldCut }: { plan: WeeklyPlan; weekLogs: SetLog[]; todayIdx: number; hadShieldCut: boolean }) {
   const days = plan.plan_data?.days ?? [];
   let plannedThroughToday = 0;
+  let elapsedTrainingDays = 0;
   for (let i = 0; i <= todayIdx; i++) {
     const d = days[i];
     if (!d || d.rest) continue;
+    elapsedTrainingDays++;
     for (const ex of d.exercises ?? []) plannedThroughToday += ex.sets;
   }
   const completed = weekLogs.filter((l) => l.completed).length;
@@ -379,11 +381,16 @@ function VolumeNudge({ plan, weekLogs, todayIdx }: { plan: WeeklyPlan; weekLogs:
   for (let i = todayIdx + 1; i < days.length; i++) {
     if (!days[i].rest) { nextDayLabel = days[i].day_name || DAY_NAMES[i]; break; }
   }
+  const setWord = (n: number) => (n === 1 ? "set" : "sets");
   let msg: ReactNode;
   if (gap >= 4) {
     msg = <>You're <span className="text-text-primary font-medium">{gap} sets behind plan</span> this week. Add an extra set or two on {nextDayLabel} to catch up.</>;
+  } else if (gap >= 1 && hadShieldCut) {
+    msg = <>You're <span className="text-text-primary font-medium">{gap} {setWord(gap)} short</span> — today's session was reduced for recovery, so that's expected.</>;
+  } else if (gap >= 1 && elapsedTrainingDays <= 1) {
+    msg = <>You're <span className="text-text-primary font-medium">{gap} {setWord(gap)}</span> into the week's plan — plenty of runway. {nextDayLabel} is next.</>;
   } else if (gap >= 1) {
-    msg = <>You're <span className="text-text-primary font-medium">{gap} {gap === 1 ? "set" : "sets"} short</span> of plan through today. Knock them out before {nextDayLabel}.</>;
+    msg = <>You're <span className="text-text-primary font-medium">{gap} {setWord(gap)} short</span> of plan through today. Knock them out before {nextDayLabel}.</>;
   } else {
     msg = <>You're <span className="text-text-primary font-medium">on track</span> — {completed}/{plannedThroughToday} planned sets logged this week. Keep it up.</>;
   }
