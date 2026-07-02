@@ -983,22 +983,31 @@ function RestDaySwapCard({
     try {
       const sourceDay = days[sourceIdx];
       if (!sourceDay) return;
-      const todayDay = days[todayIdx];
-      const newDays = days.map((d, i) => {
-        if (i === todayIdx) {
-          return { ...sourceDay, day: todayDay.day, day_name: todayDay.day_name, rest: false };
-        }
-        if (i === sourceIdx) {
-          return { ...sourceDay, rest: true, session_name: null, exercises: [] };
-        }
-        return d;
-      });
-      const newPlanData = { ...plan.plan_data, days: newDays };
-      const { error } = await supabase
-        .from("weekly_plans")
-        .update({ plan_data: newPlanData as any })
-        .eq("id", plan.id);
-      if (error) throw error;
+
+      const { data: session } = await supabase.auth.getSession();
+      const token = session?.session?.access_token;
+      const userId = session?.session?.user?.id;
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      if (!token || !userId || !supabaseUrl) throw new Error("Not authenticated");
+
+      const response = await fetch(
+        `${supabaseUrl}/functions/v1/swap-plan-day`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            plan_id: plan.id,
+            source_day_index: sourceIdx,
+            target_day_index: todayIdx,
+          }),
+        },
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result?.error ?? "Swap failed");
       toast.success(`Moved ${sourceDay.session_name ?? "session"} to today`);
       await onSwapped();
     } catch (e) {
