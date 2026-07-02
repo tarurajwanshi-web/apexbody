@@ -1,25 +1,30 @@
-# Shared TZ helpers + per-user Monday gate for weekly macro cron
+# Switch mini-explanation calls from Lovable Gateway to OpenAI (APEX voice)
 
-## 1. `supabase/functions/_shared/time-helpers.ts`
-Append `DEFAULT_TIMEZONE = "Asia/Dubai"` and `userLocalDayOfWeek(tz, now)` verbatim.
+Scope: three files. Only the small "mini explanation / pattern explanation" AI calls change. Pattern detection math, main weekly card generation, contradiction logic, cadence gating, idempotency, `generate-plan`, `training-rules.ts`, and all SQL/schema stay untouched.
 
-## 2. `supabase/functions/trigger-weekly-macro-review/index.ts`
-- Extend the `time-helpers.ts` import to include `userLocalDayOfWeek, DEFAULT_TIMEZONE`.
-- Delete the local `userLocalDayOfWeek` function.
-- Swap `|| "UTC"` → `|| DEFAULT_TIMEZONE` on the `tz` line.
+## FILE 1 — `supabase/functions/check-permission-slip/index.ts`
 
-## 3. `supabase/functions/evaluate-fuelling/index.ts`
-- Add `import { DEFAULT_TIMEZONE } from "../_shared/time-helpers.ts";` right after the `authorize.ts` import.
-- Swap `|| "UTC"` → `|| DEFAULT_TIMEZONE` on the `tz` line.
+Delete the `- Start with 🎯` bullet from the Haiku prompt text. No other changes.
 
-## 4. `supabase/functions/calculate-macros-weekly/index.ts`
-- Add `import { userLocalDayOfWeek, DEFAULT_TIMEZONE } from "../_shared/time-helpers.ts";` after the macro-calculation import.
-- Inside `for (const profile of profiles)` at line 72, as first lines inside `try {` (before `const result = await calculateMacrosForUser(`), insert the tz + `userLocalDayOfWeek(tz) !== 1` skip gate honoring `!force`. Uses the existing `force` variable (line 38).
+## FILE 2 — `supabase/functions/evaluate-fuelling/index.ts`
 
-## Not in scope
-`calculateMacrosForUser`, macro math, week_start_date logic, cron schedule, any other files.
+1. Add import after `authorize.ts` import:
+   `import { buildApexSystemPrompt } from "../_shared/apex-voice.ts";`
+2. Extend profile select to include `name`.
+3. Add `const openaiKey = Deno.env.get("OPENAI_API_KEY")!;` next to existing env reads.
+4. Replace `miniExplain` entirely: new signature takes `openaiKey` plus `name` and `proficiency` in ctx; calls `https://api.openai.com/v1/chat/completions` with `gpt-4o-mini`, `response_format: json_object`, system prompt = `buildApexSystemPrompt({ proficiency, name })`, user prompt unchanged in substance.
+5. Update the call site to pass `openaiKey`, and add `name` / `proficiency` from the profile row.
+6. Check whether `lovableKey` is referenced elsewhere in the file; if not, remove the declaration. (Confirmed from the file shown: only `miniExplain` uses it — remove the `const lovableKey = ...` line.)
 
-## Verify
-- `rg -n "userLocalDayOfWeek|DEFAULT_TIMEZONE" supabase/functions` → helper + 3 call sites (trigger-weekly-macro-review, calculate-macros-weekly, plus DEFAULT_TIMEZONE in evaluate-fuelling).
-- No `|| "UTC"` remaining in the three edited edge functions.
-- No duplicate `userLocalDayOfWeek` local definition in trigger-weekly-macro-review.
+## FILE 3 — `supabase/functions/generate-weekly-pattern/index.ts`
+
+1. Replace `generatePatternExplanation` entirely: new signature takes `openaiKey` and `ctx` including `name`; calls OpenAI `gpt-4o-mini` with `response_format: json_object`, system = `buildApexSystemPrompt({ proficiency, name })`, user prompt unchanged in substance.
+2. Add `const openaiKey = Deno.env.get("OPENAI_API_KEY") || "";` inside `Deno.serve` next to existing env reads.
+3. Update the call site to pass `openaiKey` and `name: (profile as any).name ?? null`.
+4. Remove the existing `lovableKey` declaration/env read from this file (nothing else uses it here).
+
+## Notes
+
+- `OPENAI_API_KEY` already exists in project secrets — no `add_secret` needed.
+- `buildApexSystemPrompt` already exists in `_shared/apex-voice.ts`.
+- No changes to `generate-training-sync`, `calculate-macros-weekly`, or `_shared/time-helpers.ts`.
