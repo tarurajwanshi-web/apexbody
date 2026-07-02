@@ -254,15 +254,20 @@ export async function calculateMacrosForUser(
 
   const { data: readinessDays, error: readinessError } = await supa
     .from("readiness_scores")
-    .select("final_score")
+    .select("final_score, nutrition_modifier, training_permission, score_date")
     .eq("user_id", user_id)
     .gte("score_date", week_start_date)
-    .lt("score_date", window_end_exclusive);
+    .lt("score_date", window_end_exclusive)
+    .order("score_date", { ascending: false });
   if (readinessError) console.error("[calculateMacrosForUser] readiness fetch failed", readinessError);
 
   const avgReadiness = readinessDays && readinessDays.length > 0
     ? readinessDays.reduce((sum, r) => sum + Number(r.final_score ?? 0), 0) / readinessDays.length
     : 50;
+
+  // Most recent day's modifier — same-day directive, not blended.
+  const latestReadiness = readinessDays && readinessDays.length > 0 ? readinessDays[0] : null;
+  const latestModifier = (latestReadiness?.nutrition_modifier ?? null) as NutritionModifier | null;
 
   if (avgReadiness < 45 && trainingLoadIndex > 1.0) {
     trainingLoadIndex = Math.max(0.85, trainingLoadIndex * 0.85);
