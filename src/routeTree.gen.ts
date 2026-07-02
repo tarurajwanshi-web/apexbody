@@ -17,7 +17,6 @@ import { Route as ResourcesRouteImport } from './routes/resources'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as NutritionRouteImport } from './routes/nutrition'
 import { Route as MeetCoachRouteImport } from './routes/meet-coach'
-import { Route as HomeRouteImport } from './routes/home'
 import { Route as HealthDataRouteImport } from './routes/health-data'
 import { Route as DisclaimerRouteImport } from './routes/disclaimer'
 import { Route as CoachRouteImport } from './routes/coach'
@@ -66,11 +65,6 @@ const MeetCoachRoute = MeetCoachRouteImport.update({
   path: '/meet-coach',
   getParentRoute: () => rootRouteImport,
 } as any)
-const HomeRoute = HomeRouteImport.update({
-  id: '/home',
-  path: '/home',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const HealthDataRoute = HealthDataRouteImport.update({
   id: '/health-data',
   path: '/health-data',
@@ -111,7 +105,6 @@ export interface FileRoutesByFullPath {
   '/coach': typeof CoachRoute
   '/disclaimer': typeof DisclaimerRoute
   '/health-data': typeof HealthDataRoute
-  '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
   '/nutrition': typeof NutritionRoute
   '/privacy': typeof PrivacyRoute
@@ -128,7 +121,6 @@ export interface FileRoutesByTo {
   '/coach': typeof CoachRoute
   '/disclaimer': typeof DisclaimerRoute
   '/health-data': typeof HealthDataRoute
-  '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
   '/nutrition': typeof NutritionRoute
   '/privacy': typeof PrivacyRoute
@@ -147,7 +139,6 @@ export interface FileRoutesById {
   '/coach': typeof CoachRoute
   '/disclaimer': typeof DisclaimerRoute
   '/health-data': typeof HealthDataRoute
-  '/home': typeof HomeRoute
   '/meet-coach': typeof MeetCoachRoute
   '/nutrition': typeof NutritionRoute
   '/privacy': typeof PrivacyRoute
@@ -166,7 +157,6 @@ export interface FileRouteTypes {
     | '/coach'
     | '/disclaimer'
     | '/health-data'
-    | '/home'
     | '/meet-coach'
     | '/nutrition'
     | '/privacy'
@@ -183,7 +173,6 @@ export interface FileRouteTypes {
     | '/coach'
     | '/disclaimer'
     | '/health-data'
-    | '/home'
     | '/meet-coach'
     | '/nutrition'
     | '/privacy'
@@ -201,7 +190,6 @@ export interface FileRouteTypes {
     | '/coach'
     | '/disclaimer'
     | '/health-data'
-    | '/home'
     | '/meet-coach'
     | '/nutrition'
     | '/privacy'
@@ -220,7 +208,6 @@ export interface RootRouteChildren {
   CoachRoute: typeof CoachRoute
   DisclaimerRoute: typeof DisclaimerRoute
   HealthDataRoute: typeof HealthDataRoute
-  HomeRoute: typeof HomeRoute
   MeetCoachRoute: typeof MeetCoachRoute
   NutritionRoute: typeof NutritionRoute
   PrivacyRoute: typeof PrivacyRoute
@@ -287,13 +274,6 @@ declare module '@tanstack/react-router' {
       path: '/meet-coach'
       fullPath: '/meet-coach'
       preLoaderRoute: typeof MeetCoachRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/home': {
-      id: '/home'
-      path: '/home'
-      fullPath: '/home'
-      preLoaderRoute: typeof HomeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/health-data': {
@@ -367,7 +347,6 @@ const rootRouteChildren: RootRouteChildren = {
   CoachRoute: CoachRoute,
   DisclaimerRoute: DisclaimerRoute,
   HealthDataRoute: HealthDataRoute,
-  HomeRoute: HomeRoute,
   MeetCoachRoute: MeetCoachRoute,
   NutritionRoute: NutritionRoute,
   PrivacyRoute: PrivacyRoute,
