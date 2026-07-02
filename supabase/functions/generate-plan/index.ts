@@ -7,6 +7,10 @@ import {
   validateGeneratedPlan,
   buildFallbackPlan,
   resolvePlanStartISO,
+  MUSCLE_GROUPS,
+  MOVEMENT_PATTERNS,
+  EXERCISE_ROLES,
+  PLAN_DATA_VERSION,
   type Envelope,
   type Goal,
   type Experience,
@@ -55,10 +59,16 @@ async function callClaude(apiKey: string, prompt: string) {
       system:
         "You are an expert evidence-based strength & conditioning coach. " +
         "Respond with ONLY a single JSON object, no prose, no markdown fences. " +
-        "Schema: { \"plan_start_date\": string (YYYY-MM-DD), \"plan_timezone\": string, \"days\": [ { \"day\": 1-7, \"date\": string (YYYY-MM-DD), \"day_name\": string, \"session_name\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string, \"progression_note\": string, \"target_rir\": int } ] } ], \"volume_gate_alert\": string|null }. " +
+        "Schema: { \"plan_data_version\": 2, \"plan_start_date\": string (YYYY-MM-DD), \"plan_timezone\": string, \"days\": [ { \"day\": 1-7, \"date\": string (YYYY-MM-DD), \"day_name\": string, \"session_name\": string|null, \"session_purpose\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string, \"movement_pattern\": string, \"exercise_role\": string, \"progression_note\": string, \"target_rir\": int } ] } ], \"volume_gate_alert\": string|null }. " +
         "No other fields allowed. Do NOT emit session_note, notes, description, tempo, or any field outside this schema. " +
+        "Do NOT emit training_volume_summary, exercise_media_summary, or any summary / aggregate / count field — those are computed downstream. " +
+        `muscle_group MUST be one of: ${MUSCLE_GROUPS.join(", ")}. ` +
+        `movement_pattern MUST be one of: ${MOVEMENT_PATTERNS.join(", ")}. ` +
+        `exercise_role MUST be one of: ${EXERCISE_ROLES.join(", ")}. ` +
+        "All text fields (cue, progression_note, session_purpose) must be plain prose — no markdown, no asterisks, no bold syntax, no bullet lists, no backticks, no headings. " +
         "progression_note is short (max ~10 words) — e.g. \"+2.5% from last week\", \"hold weight, RIR 2-3\", \"recovery — light technique only\", or \"new exercise — start moderate\". " +
-        "Always return exactly 7 days matching the provided calendar. Rest days have rest=true, session_name=null, exercises=[]. " +
+        "session_purpose is ONE plain-prose sentence (max ~20 words) describing what this session is training and why. On rest days session_purpose must be null. " +
+        "Always return exactly 7 days matching the provided calendar. Rest days have rest=true, session_name=null, session_purpose=null, exercises=[]. " +
         "The 'cue' field is ONE sharp coaching correction — the single thing you'd shout mid-set to fix that exercise's most common failure point. " +
         "Not a checklist. Not a description of correct form. One real spoken sentence, max ~18 words, second person, lead with the action.",
       messages: [{ role: "user", content: prompt }],
@@ -332,10 +342,11 @@ Deno.serve(async (req) => {
       : "";
 
     const promptSchemaNote =
-      `Return ONLY a JSON object of shape: { "plan_start_date": "${planStartISO}", "plan_timezone": "${timezone}", "days": [7 items], "volume_gate_alert": string|null }. ` +
-      `Each day: { "day": 1-7, "date": string (YYYY-MM-DD, use the calendar below), "day_name": string, "rest": boolean, "session_name": string|null, "exercises": [] }. ` +
-      `Each exercise: { "name": string, "sets": int, "reps": string, "rest_seconds": int, "cue": string, "muscle_group": string, "progression_note": string, "target_rir": int }. ` +
-      `No other top-level or exercise fields. Do NOT emit session_note, notes, description, tempo, or anything not in this schema.`;
+      `Return ONLY a JSON object of shape: { "plan_data_version": ${PLAN_DATA_VERSION}, "plan_start_date": "${planStartISO}", "plan_timezone": "${timezone}", "days": [7 items], "volume_gate_alert": string|null }. ` +
+      `Each day: { "day": 1-7, "date": string (YYYY-MM-DD, use the calendar below), "day_name": string, "rest": boolean, "session_name": string|null, "session_purpose": string|null, "exercises": [] }. ` +
+      `Each exercise: { "name": string, "sets": int, "reps": string, "rest_seconds": int, "cue": string, "muscle_group": one of [${MUSCLE_GROUPS.join("|")}], "movement_pattern": one of [${MOVEMENT_PATTERNS.join("|")}], "exercise_role": one of [${EXERCISE_ROLES.join("|")}], "progression_note": string, "target_rir": int }. ` +
+      `No other top-level or exercise fields. Do NOT emit session_note, notes, description, tempo, training_volume_summary, exercise_media_summary, or anything not in this schema. ` +
+      `All text (cue, progression_note, session_purpose) is plain prose — no markdown/asterisks/bullets/backticks.`;
 
     const basePrompt =
       `Build a rolling 7-day workout plan starting ${planStartISO} (user timezone ${timezone}).\n` +
@@ -344,9 +355,10 @@ Deno.serve(async (req) => {
       `${shieldContext}\n` +
       `${(underFuelled || shieldFuellingCaution) ? `\nFUELLING CAUTION${underFuelled && targetCalories ? ` (avg intake ${Math.round(avgIntake!)} kcal vs ${Math.round(targetCalories!)} kcal target)` : ""}${latestNutritionModifier ? ` — Shield nutrition_modifier=${latestNutritionModifier}` : ""}. Do not programme to failure.` : ""}` +
       historyNote + "\n" +
-      `Exactly ${trainingDaysCount} training days with APEX-named sessions (e.g. "APEX Push A", "APEX Lower A", "APEX Full Body A"), each with ${envelope.exercisesPerSession[0]}-${envelope.exercisesPerSession[1]} exercises. Remaining ${7 - trainingDaysCount} days are rest (rest=true, session_name=null, exercises=[]).\n` +
-      `Include muscle_group per exercise. target_rir must be an integer inside [${envelope.targetRir[0]}, ${envelope.targetRir[1]}].\n` +
+      `Exactly ${trainingDaysCount} training days with APEX-named sessions (e.g. "APEX Push A", "APEX Lower A", "APEX Full Body A"), each with ${envelope.exercisesPerSession[0]}-${envelope.exercisesPerSession[1]} exercises. Each training day carries a session_purpose (one plain-prose sentence describing what the session trains and why). Remaining ${7 - trainingDaysCount} days are rest (rest=true, session_name=null, session_purpose=null, exercises=[]).\n` +
+      `Include muscle_group, movement_pattern, and exercise_role per exercise (all from the closed enum lists in the schema). target_rir must be an integer inside [${envelope.targetRir[0]}, ${envelope.targetRir[1]}].\n` +
       promptSchemaNote;
+
 
     async function tryClaude(promptText: string) {
       return await callClaude(anth, promptText);
@@ -387,9 +399,48 @@ Deno.serve(async (req) => {
       usedFallback = true;
     }
 
-    // Ensure top-level plan_start_date / plan_timezone are set
+    // Ensure top-level plan_start_date / plan_timezone / plan_data_version are set
     plan.plan_start_date = planStartISO;
     plan.plan_timezone = timezone;
+    plan.plan_data_version = PLAN_DATA_VERSION;
+
+    // Post-validation computed summaries — never asked of Sonnet.
+    // Pure aggregation over the (now validated / fallback-emitted) days.
+    {
+      const setsPerMuscle: Record<string, number> = {};
+      const setsPerPattern: Record<string, number> = {};
+      let totalSets = 0;
+      let totalExercises = 0;
+      let trainingDays = 0;
+      for (const d of (plan.days ?? []) as any[]) {
+        if (!d || d.rest === true) continue;
+        trainingDays += 1;
+        for (const ex of (d.exercises ?? []) as any[]) {
+          const s = Number(ex?.sets);
+          const nSets = Number.isFinite(s) && s > 0 ? s : 0;
+          totalSets += nSets;
+          totalExercises += 1;
+          const mg = typeof ex?.muscle_group === "string" ? ex.muscle_group : "unknown";
+          const mp = typeof ex?.movement_pattern === "string" ? ex.movement_pattern : "unknown";
+          setsPerMuscle[mg] = (setsPerMuscle[mg] ?? 0) + nSets;
+          setsPerPattern[mp] = (setsPerPattern[mp] ?? 0) + nSets;
+        }
+      }
+      plan.training_volume_summary = {
+        total_sets: totalSets,
+        training_days: trainingDays,
+        sets_per_muscle: setsPerMuscle,
+        sets_per_movement_pattern: setsPerPattern,
+      };
+      // Source-agnostic media summary. Real matching is the async
+      // sync-exercise-images job's responsibility; at generation time we
+      // simply record that nothing is matched yet.
+      plan.exercise_media_summary = {
+        media_status: "missing" as const,
+        missing_count: totalExercises,
+      };
+    }
+
 
     // Determine volume_gate_alert
     const emitAlert = weeklyReduce || envelope.sessionType === "recovery" || usedFallback;
