@@ -306,10 +306,16 @@ function ProfileSetup() {
         if (macroRes.status === "rejected") console.warn("calculate-macros failed", macroRes.reason);
         if (planRes.status === "rejected") console.warn("generate-plan failed", planRes.reason);
       } else {
-        const planRes = await Promise.allSettled([
+        // Skip-body path still needs a starting macro target. calculate-macros
+        // falls back to default anthropometrics (170cm / 70kg / 30y / male)
+        // when measurements are absent — the user updates these in Settings
+        // later and the weekly review recalibrates from actual intake.
+        const [macroRes, planRes] = await Promise.allSettled([
+          supabase.functions.invoke("calculate-macros", { body: { user_id: userId } }),
           supabase.functions.invoke("generate-plan", { body: { user_id: userId } }),
         ]);
-        if (planRes[0].status === "rejected") console.warn("generate-plan failed", planRes[0].reason);
+        if (macroRes.status === "rejected") console.warn("calculate-macros failed", macroRes.reason);
+        if (planRes.status === "rejected") console.warn("generate-plan failed", planRes.reason);
       }
 
       navigate({ to: "/dashboard" });
