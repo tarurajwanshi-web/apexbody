@@ -519,9 +519,14 @@ export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartIS
 // -------- fallback --------
 interface FallbackExercise {
   name: string; sets: number; reps: string; rest_seconds: number;
-  cue: string; muscle_group: string; progression_note: string; target_rir: number;
+  cue: string; muscle_group: MuscleGroup; progression_note: string;
+  target_rir: number; exercise_role: ExerciseRole; movement_pattern: MovementPattern;
 }
-interface FallbackDayTemplate { session_name: string; exercises: FallbackExercise[]; }
+interface FallbackDayTemplate {
+  session_name: string;
+  session_purpose: string;
+  exercises: FallbackExercise[];
+}
 
 function pickPool(equipmentPool: EquipmentPool): "bw" | "db" | "gym" {
   if (equipmentPool === "bodyweight_only") return "bw";
@@ -529,7 +534,17 @@ function pickPool(equipmentPool: EquipmentPool): "bw" | "db" | "gym" {
   return "gym";
 }
 
-function baseExercise(nameByPool: { bw: string; db: string; gym: string }, muscle: string, envelope: Envelope): FallbackExercise {
+interface ExMeta {
+  muscle: MuscleGroup;
+  role: ExerciseRole;
+  pattern: MovementPattern;
+}
+
+function baseExercise(
+  nameByPool: { bw: string; db: string; gym: string },
+  meta: ExMeta,
+  envelope: Envelope,
+): FallbackExercise {
   const pool = pickPool(envelope.equipmentPool);
   const setsBase = envelope.setsPerExercise;
   const setCount = Math.max(setsBase[0], Math.min(setsBase[1], envelope.sessionType === "recovery" ? 2 : envelope.sessionType === "reduce" ? setsBase[0] : setsBase[0] + 1));
@@ -549,79 +564,150 @@ function baseExercise(nameByPool: { bw: string; db: string; gym: string }, muscl
     reps,
     rest_seconds: clamp(rest, envelope.restSeconds[0], envelope.restSeconds[1]),
     cue: "Move with intent — full range, controlled tempo.",
-    muscle_group: muscle,
+    muscle_group: meta.muscle,
     progression_note: noteBase,
     target_rir: rir,
+    exercise_role: meta.role,
+    movement_pattern: meta.pattern,
   };
 }
 
-function fallbackSession(kind: "push" | "pull" | "lower" | "full", envelope: Envelope): FallbackDayTemplate {
+type SessionKind =
+  | "push" | "pull" | "lower" | "full"
+  | "upper" | "power" | "conditioning" | "recovery";
+
+function fallbackSession(kind: SessionKind, envelope: Envelope): FallbackDayTemplate {
   const E = envelope;
-  const ex = (n: any, m: string) => baseExercise(n, m, E);
+  const ex = (n: any, m: ExMeta) => baseExercise(n, m, E);
   if (kind === "push") return {
     session_name: "APEX Push A",
+    session_purpose: "Train horizontal and vertical push patterns with triceps accessory work.",
     exercises: [
-      ex({ bw: "Push-up",           db: "DB Bench Press",    gym: "Barbell Bench Press" }, "chest"),
-      ex({ bw: "Pike Push-up",      db: "DB Shoulder Press", gym: "DB Shoulder Press"   }, "shoulders"),
-      ex({ bw: "Decline Push-up",   db: "DB Incline Press",  gym: "Machine Chest Press" }, "chest"),
-      ex({ bw: "Bench Dip",         db: "DB Overhead Extension", gym: "Cable Triceps Pushdown" }, "triceps"),
+      ex({ bw: "Push-up",           db: "DB Bench Press",    gym: "Barbell Bench Press" }, { muscle: "chest",     role: "primary",   pattern: "horizontal_push" }),
+      ex({ bw: "Pike Push-up",      db: "DB Shoulder Press", gym: "DB Shoulder Press"   }, { muscle: "shoulders", role: "secondary", pattern: "vertical_push"   }),
+      ex({ bw: "Decline Push-up",   db: "DB Incline Press",  gym: "Machine Chest Press" }, { muscle: "chest",     role: "accessory", pattern: "horizontal_push" }),
+      ex({ bw: "Bench Dip",         db: "DB Overhead Extension", gym: "Cable Triceps Pushdown" }, { muscle: "triceps", role: "isolation", pattern: "horizontal_push" }),
     ],
   };
   if (kind === "pull") return {
     session_name: "APEX Pull A",
+    session_purpose: "Train horizontal and vertical pull patterns with biceps accessory work.",
     exercises: [
-      ex({ bw: "Inverted Row",      db: "DB Bent-Over Row",  gym: "Barbell Row"         }, "back"),
-      ex({ bw: "Pull-up (assisted OK)", db: "DB One-Arm Row", gym: "Lat Pulldown"       }, "back"),
-      ex({ bw: "Band Face Pull",    db: "DB Rear Delt Fly",  gym: "Cable Face Pull"     }, "shoulders"),
-      ex({ bw: "Chin-up (assisted OK)", db: "DB Hammer Curl", gym: "Barbell Curl"       }, "biceps"),
+      ex({ bw: "Inverted Row",      db: "DB Bent-Over Row",  gym: "Barbell Row"         }, { muscle: "back",      role: "primary",   pattern: "horizontal_pull" }),
+      ex({ bw: "Pull-up (assisted OK)", db: "DB One-Arm Row", gym: "Lat Pulldown"       }, { muscle: "back",      role: "secondary", pattern: "vertical_pull"   }),
+      ex({ bw: "Band Face Pull",    db: "DB Rear Delt Fly",  gym: "Cable Face Pull"     }, { muscle: "shoulders", role: "accessory", pattern: "horizontal_pull" }),
+      ex({ bw: "Chin-up (assisted OK)", db: "DB Hammer Curl", gym: "Barbell Curl"       }, { muscle: "biceps",    role: "isolation", pattern: "vertical_pull"   }),
     ],
   };
   if (kind === "lower") return {
     session_name: "APEX Lower A",
+    session_purpose: "Train squat, hinge, and lunge patterns for quads, hamstrings, and glutes.",
     exercises: [
-      ex({ bw: "Bodyweight Squat",  db: "DB Goblet Squat",   gym: "Barbell Back Squat"  }, "quads"),
-      ex({ bw: "Single-Leg RDL",    db: "DB Romanian Deadlift", gym: "Romanian Deadlift" }, "hamstrings"),
-      ex({ bw: "Reverse Lunge",     db: "DB Walking Lunge",  gym: "DB Walking Lunge"    }, "quads"),
-      ex({ bw: "Glute Bridge",      db: "DB Hip Thrust",     gym: "Barbell Hip Thrust"  }, "glutes"),
+      ex({ bw: "Bodyweight Squat",  db: "DB Goblet Squat",   gym: "Barbell Back Squat"  }, { muscle: "quads",      role: "primary",   pattern: "squat"  }),
+      ex({ bw: "Single-Leg RDL",    db: "DB Romanian Deadlift", gym: "Romanian Deadlift" }, { muscle: "hamstrings", role: "secondary", pattern: "hinge"  }),
+      ex({ bw: "Reverse Lunge",     db: "DB Walking Lunge",  gym: "DB Walking Lunge"    }, { muscle: "quads",      role: "accessory", pattern: "lunge"  }),
+      ex({ bw: "Glute Bridge",      db: "DB Hip Thrust",     gym: "Barbell Hip Thrust"  }, { muscle: "glutes",     role: "accessory", pattern: "hinge"  }),
     ],
   };
+  if (kind === "upper") return {
+    session_name: "APEX Upper A",
+    session_purpose: "Balance push and pull upper-body patterns in one session.",
+    exercises: [
+      ex({ bw: "Push-up",           db: "DB Bench Press",    gym: "Barbell Bench Press" }, { muscle: "chest",     role: "primary",   pattern: "horizontal_push" }),
+      ex({ bw: "Inverted Row",      db: "DB Bent-Over Row",  gym: "Barbell Row"         }, { muscle: "back",      role: "primary",   pattern: "horizontal_pull" }),
+      ex({ bw: "Pike Push-up",      db: "DB Shoulder Press", gym: "DB Shoulder Press"   }, { muscle: "shoulders", role: "secondary", pattern: "vertical_push"   }),
+      ex({ bw: "Pull-up (assisted OK)", db: "DB One-Arm Row", gym: "Lat Pulldown"       }, { muscle: "back",      role: "secondary", pattern: "vertical_pull"   }),
+    ],
+  };
+  if (kind === "power") return {
+    session_name: "APEX Power A",
+    session_purpose: "Develop explosive lower-body power and athletic force production.",
+    exercises: [
+      ex({ bw: "Broad Jump",        db: "DB Goblet Squat Jump", gym: "Trap Bar Jump"     }, { muscle: "quads",      role: "power",     pattern: "squat" }),
+      ex({ bw: "Bodyweight Squat",  db: "DB Goblet Squat",   gym: "Barbell Back Squat"  }, { muscle: "quads",      role: "primary",   pattern: "squat" }),
+      ex({ bw: "Single-Leg RDL",    db: "DB Romanian Deadlift", gym: "Romanian Deadlift" }, { muscle: "hamstrings", role: "secondary", pattern: "hinge" }),
+      ex({ bw: "Plank",             db: "DB Suitcase Carry", gym: "Barbell Suitcase Carry" }, { muscle: "core",   role: "core",      pattern: "carry" }),
+    ],
+  };
+  if (kind === "conditioning") return {
+    session_name: "APEX Conditioning A",
+    session_purpose: "Build work capacity through repeated full-body conditioning intervals.",
+    exercises: [
+      ex({ bw: "Burpee",            db: "DB Thruster",       gym: "DB Thruster"         }, { muscle: "full_body", role: "conditioning", pattern: "conditioning" }),
+      ex({ bw: "Mountain Climber",  db: "DB Renegade Row",   gym: "Rower Interval"      }, { muscle: "full_body", role: "conditioning", pattern: "locomotion"   }),
+      ex({ bw: "Jumping Jacks",     db: "DB Farmer Carry",   gym: "Sled Push"           }, { muscle: "full_body", role: "conditioning", pattern: "carry"        }),
+      ex({ bw: "Plank",             db: "DB Plank Pull-through", gym: "Cable Pallof Press" }, { muscle: "core",   role: "core",         pattern: "anti_rotation" }),
+    ],
+  };
+  if (kind === "recovery") return recoverySession(envelope);
+  // "full"
   return {
     session_name: "APEX Full Body A",
+    session_purpose: "Cover the main lower and upper patterns in one balanced session.",
     exercises: [
-      ex({ bw: "Bodyweight Squat",  db: "DB Goblet Squat",   gym: "Barbell Back Squat"  }, "quads"),
-      ex({ bw: "Push-up",           db: "DB Bench Press",    gym: "Barbell Bench Press" }, "chest"),
-      ex({ bw: "Inverted Row",      db: "DB Bent-Over Row",  gym: "Barbell Row"         }, "back"),
-      ex({ bw: "Glute Bridge",      db: "DB Romanian Deadlift", gym: "Romanian Deadlift" }, "glutes"),
+      ex({ bw: "Bodyweight Squat",  db: "DB Goblet Squat",   gym: "Barbell Back Squat"  }, { muscle: "quads",     role: "primary",   pattern: "squat"           }),
+      ex({ bw: "Push-up",           db: "DB Bench Press",    gym: "Barbell Bench Press" }, { muscle: "chest",     role: "primary",   pattern: "horizontal_push" }),
+      ex({ bw: "Inverted Row",      db: "DB Bent-Over Row",  gym: "Barbell Row"         }, { muscle: "back",      role: "primary",   pattern: "horizontal_pull" }),
+      ex({ bw: "Glute Bridge",      db: "DB Romanian Deadlift", gym: "Romanian Deadlift" }, { muscle: "glutes",    role: "secondary", pattern: "hinge"           }),
     ],
   };
 }
 
 function recoverySession(envelope: Envelope): FallbackDayTemplate {
   const rir = envelope.targetRir[0];
-  const mk = (name: string, muscle: string): FallbackExercise => ({
+  const mk = (name: string, muscle: MuscleGroup, pattern: MovementPattern, role: ExerciseRole): FallbackExercise => ({
     name, sets: 2, reps: "10-15", rest_seconds: 45,
     cue: "Move slow, breathe deep, keep tension low.",
     muscle_group: muscle,
     progression_note: `safe fallback — recovery/light technique, RIR ${rir}`,
     target_rir: rir,
+    exercise_role: role,
+    movement_pattern: pattern,
   });
   return {
     session_name: "APEX Recovery",
+    session_purpose: "Light mobility and technique work to promote recovery.",
     exercises: [
-      mk("Cat-Cow Flow", "mobility"),
-      mk("World's Greatest Stretch", "mobility"),
-      mk("Bird Dog", "core"),
-      mk("Easy Walk / Bike (10 min)", "cardio"),
+      mk("Cat-Cow Flow", "mobility", "mobility", "mobility"),
+      mk("World's Greatest Stretch", "mobility", "mobility", "mobility"),
+      mk("Bird Dog", "core", "anti_rotation", "core"),
+      mk("Easy Walk / Bike (10 min)", "cardio", "locomotion", "conditioning"),
     ],
   };
 }
 
-function pickWeekPatterns(days: number): Array<"push"|"pull"|"lower"|"full"> {
-  if (days <= 3) return ["full","full","full"];
-  if (days === 4) return ["upper" as any === "upper" ? "full" : "full", "lower","full","lower"] as any;
-  // Simpler: fall back to Push/Pull/Lower rotation
-  if (days === 4) return ["push","pull","lower","full"];
-  if (days === 5) return ["push","pull","lower","full","full"];
+// Goal-aware pattern selection.
+function pickPatternsByGoal(goal: Goal, daysCount: number): SessionKind[] {
+  const n = clamp(daysCount, 2, 6);
+  if (goal === "strength") {
+    // Compound-heavy, no isolation/conditioning.
+    if (n === 2) return ["full","full"];
+    if (n === 3) return ["lower","upper","full"];
+    if (n === 4) return ["lower","upper","lower","upper"];
+    if (n === 5) return ["lower","upper","lower","upper","full"];
+    return ["lower","upper","lower","upper","lower","full"];
+  }
+  if (goal === "athletic_performance") {
+    // Power + conditioning bias — never generic PPL.
+    if (n === 2) return ["full","full"];
+    if (n === 3) return ["lower","power","full"];
+    if (n === 4) return ["lower","power","upper","conditioning"];
+    if (n === 5) return ["lower","power","upper","conditioning","full"];
+    return ["lower","power","upper","conditioning","lower","full"];
+  }
+  if (goal === "fat_loss") {
+    // PPL + conditioning finisher; full-body on ≤3 day.
+    if (n === 2) return ["full","full"];
+    if (n === 3) return ["full","full","conditioning"];
+    if (n === 4) return ["push","pull","lower","conditioning"];
+    if (n === 5) return ["push","pull","lower","full","conditioning"];
+    return ["push","pull","lower","push","pull","conditioning"];
+  }
+  // muscle_gain / recomposition (default): PPL rotation with isolation, full-body on ≤3 day.
+  if (n === 2) return ["full","full"];
+  if (n === 3) return ["full","full","full"];
+  if (n === 4) return ["push","pull","lower","full"];
+  if (n === 5) return ["push","pull","lower","push","lower"];
   return ["push","pull","lower","push","pull","lower"];
 }
 
@@ -633,12 +719,7 @@ export function buildFallbackPlan(
   restMask?: boolean[],
 ): any {
   const daysCount = clamp(trainingDaysPerWeek || 3, 2, 6);
-  const patterns: Array<"push"|"pull"|"lower"|"full"> =
-    daysCount === 2 ? ["full","full"]
-    : daysCount === 3 ? ["full","full","full"]
-    : daysCount === 4 ? ["push","pull","lower","full"]
-    : daysCount === 5 ? ["push","pull","lower","full","full"]
-    : ["push","pull","lower","push","pull","lower"];
+  const patterns: SessionKind[] = pickPatternsByGoal(envelope.input.goal, daysCount);
 
   // Rest/train indices. If a caller-supplied restMask is valid, honour it
   // exactly (deterministic pin from profile.training_day_codes). Otherwise
@@ -668,7 +749,10 @@ export function buildFallbackPlan(
     const date = isoAddDays(planStartISO, i);
     const day_name = isoWeekdayName(date);
     if (!trainingIdx.has(i)) {
-      days.push({ day: i + 1, date, day_name, rest: true, session_name: null, exercises: [] });
+      days.push({
+        day: i + 1, date, day_name, rest: true,
+        session_name: null, session_purpose: null, exercises: [],
+      });
       continue;
     }
     let template: FallbackDayTemplate;
@@ -682,11 +766,13 @@ export function buildFallbackPlan(
     days.push({
       day: i + 1, date, day_name, rest: false,
       session_name: template.session_name,
+      session_purpose: template.session_purpose,
       exercises: template.exercises,
     });
   }
 
   return {
+    plan_data_version: PLAN_DATA_VERSION,
     plan_start_date: planStartISO,
     plan_timezone: planTimezone,
     days,
@@ -695,6 +781,7 @@ export function buildFallbackPlan(
       : "Safe fallback plan generated — conservative sets and load. Review before next week.",
   };
 }
+
 
 // -------- rolling start date --------
 export function resolvePlanStartISO(
