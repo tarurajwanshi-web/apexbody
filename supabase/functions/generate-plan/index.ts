@@ -96,7 +96,7 @@ Deno.serve(async (req) => {
 
     const { data: p, error } = await supa
       .from("profiles")
-      .select("goal, training_days_per_week, equipment_access, experience_level, timezone")
+      .select("goal, training_days_per_week, equipment_access, experience_level, timezone, training_day_codes")
       .eq("user_id", user_id)
       .maybeSingle();
     if (error || !p) {
