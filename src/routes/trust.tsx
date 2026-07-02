@@ -24,7 +24,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 function TrustPage() {
   return (
     <div className="mx-auto min-h-screen max-w-2xl bg-bg-1 px-5 pb-24 pt-6 text-text-primary">
-      <Link to="/home" className="inline-flex items-center gap-1 text-[14px] text-text-secondary">
+      <Link to="/dashboard" className="inline-flex items-center gap-1 text-[14px] text-text-secondary">
         <ChevronLeft className="size-4" /> Back
       </Link>
       <h1 className="mt-4 text-[24px] font-bold">Trust & Security</h1>
