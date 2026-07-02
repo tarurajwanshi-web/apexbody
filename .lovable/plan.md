@@ -1,30 +1,25 @@
-# Switch mini-explanation calls from Lovable Gateway to OpenAI (APEX voice)
+# Wire Shield readiness enums into buildClosedLoop + surface red_recover from swap-plan-day
 
-Scope: three files. Only the small "mini explanation / pattern explanation" AI calls change. Pattern detection math, main weekly card generation, contradiction logic, cadence gating, idempotency, `generate-plan`, `training-rules.ts`, and all SQL/schema stay untouched.
+## FILE 1 — `src/lib/dashboard-data.ts`
 
-## FILE 1 — `supabase/functions/check-permission-slip/index.ts`
+1. Extend `DashboardReadiness` type with three new fields:
+   - `training_permission: string | null`
+   - `nutrition_modifier: string | null`
+   - `confidence_level: string | null`
+2. Extend the `readiness_scores` select to include those three columns.
+3. Extend the `readiness` object construction to read them the same way as `final_score`.
 
-Delete the `- Start with 🎯` bullet from the Haiku prompt text. No other changes.
+## FILE 2 — `src/routes/_authenticated/dashboard.tsx`
 
-## FILE 2 — `supabase/functions/evaluate-fuelling/index.ts`
+1. Replace `buildClosedLoop` entirely with the new signature `(trainingPermission, nutritionModifier, confidenceLevel, trainingPlanned)` — branching on Shield enums `red_recover` / `orange_reduce` / `green_train`, `deficit_caution` / `fuel_more` / `recovery_day_refeed`, and `confidence_level === "LOW"`.
+2. Update the call site to pass `data.readiness?.training_permission`, `data.readiness?.nutrition_modifier`, `data.readiness?.confidence_level`, `trainingPlanned`.
+3. Leave `recovery`, `fuel`, `effort`, and the numeric `readiness` locals untouched — still used for Today row labels.
 
-1. Add import after `authorize.ts` import:
-   `import { buildApexSystemPrompt } from "../_shared/apex-voice.ts";`
-2. Extend profile select to include `name`.
-3. Add `const openaiKey = Deno.env.get("OPENAI_API_KEY")!;` next to existing env reads.
-4. Replace `miniExplain` entirely: new signature takes `openaiKey` plus `name` and `proficiency` in ctx; calls `https://api.openai.com/v1/chat/completions` with `gpt-4o-mini`, `response_format: json_object`, system prompt = `buildApexSystemPrompt({ proficiency, name })`, user prompt unchanged in substance.
-5. Update the call site to pass `openaiKey`, and add `name` / `proficiency` from the profile row.
-6. Check whether `lovableKey` is referenced elsewhere in the file; if not, remove the declaration. (Confirmed from the file shown: only `miniExplain` uses it — remove the `const lovableKey = ...` line.)
+## FILE 3 — `supabase/functions/swap-plan-day/index.ts`
 
-## FILE 3 — `supabase/functions/generate-weekly-pattern/index.ts`
+1. After the `sourceDay` validation block and before the transform comment, add a fetch of the latest `readiness_scores` row and derive `readinessWarning = training_permission === "red_recover" ? "red_recover" : null`.
+2. Extend the final success response body to include `readiness_warning: readinessWarning`. No auth/validation/transform logic changes.
 
-1. Replace `generatePatternExplanation` entirely: new signature takes `openaiKey` and `ctx` including `name`; calls OpenAI `gpt-4o-mini` with `response_format: json_object`, system = `buildApexSystemPrompt({ proficiency, name })`, user prompt unchanged in substance.
-2. Add `const openaiKey = Deno.env.get("OPENAI_API_KEY") || "";` inside `Deno.serve` next to existing env reads.
-3. Update the call site to pass `openaiKey` and `name: (profile as any).name ?? null`.
-4. Remove the existing `lovableKey` declaration/env read from this file (nothing else uses it here).
+## Out of scope
 
-## Notes
-
-- `OPENAI_API_KEY` already exists in project secrets — no `add_secret` needed.
-- `buildApexSystemPrompt` already exists in `_shared/apex-voice.ts`.
-- No changes to `generate-training-sync`, `calculate-macros-weekly`, or `_shared/time-helpers.ts`.
+Shield scoring, `calculate-score`, other consumers of `DashboardReadiness`, and how the client renders `readiness_warning` (this only adds it to the response payload).
