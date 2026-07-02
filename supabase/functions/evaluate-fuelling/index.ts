@@ -204,15 +204,19 @@ Deno.serve(async (req) => {
       .eq("completed", true);
     const total_sets = sets?.length ?? 0;
 
-    // Volume tier filters
+    // Volume tier filter — high-volume day only
     if (total_sets < 15) { continue; }
-    const userTotal30 = setsByUser.get(p.user_id) ?? 0;
-    if (userTotal30 < p80) { continue; }
 
     const rirs = (sets ?? [])
       .map((s) => (s as { rir: number | null }).rir)
       .filter((v): v is number => typeof v === "number");
-    const avg_rir = rirs.length ? rirs.reduce((a, b) => a + b, 0) / rirs.length : null;
+    const avg_rir_check = rirs.length ? rirs.reduce((a, b) => a + b, 0) / rirs.length : null;
+
+    // Eligibility: high volume AND pushed near failure (RIR ≤2) — the actual
+    // overreaching/recovery-risk case, not a population percentile.
+    if (avg_rir_check === null || avg_rir_check > 2) { continue; }
+
+    const avg_rir = avg_rir_check;
 
     const { data: meals } = await supa
       .from("shield_nutrition_logs")
