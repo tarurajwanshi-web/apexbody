@@ -312,6 +312,7 @@ Deno.serve(async (req) => {
           message: ev.message,
           action: ev.action,
           mini_explanation,
+          readiness_modifier_at_eval,
         },
         { onConflict: "user_id,evaluation_date" },
       );
