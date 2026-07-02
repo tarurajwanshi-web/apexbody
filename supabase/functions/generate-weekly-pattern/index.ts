@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import Anthropic from "https://esm.sh/@anthropic-ai/sdk@0.24.0";
 import { requireInternalSecret, corsAllowHeaders } from "../_shared/authorize.ts";
 import { buildApexSystemPrompt } from "../_shared/apex-voice.ts";
+import { isRollingCadenceDue } from "../_shared/time-helpers.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -21,23 +22,6 @@ function getUserLocalDate(timezone: string): string {
   }
 }
 
-function isUserLocalFridayEvening(timezone: string): boolean {
-  try {
-    const now = new Date();
-    const fmt = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      weekday: "long",
-      hour: "numeric",
-      hour12: false,
-    });
-    const parts = fmt.formatToParts(now);
-    const weekday = parts.find(p => p.type === "weekday")?.value;
-    const hour = parseInt(parts.find(p => p.type === "hour")?.value || "0");
-    return weekday === "Friday" && hour === 20;
-  } catch {
-    return false;
-  }
-}
 
 function addDays(isoDate: string, days: number): string {
   const d = new Date(`${isoDate}T00:00:00Z`);
@@ -239,7 +223,7 @@ Deno.serve(async (req) => {
 
   const profileQuery = supa
     .from("profiles")
-    .select("user_id, timezone, goal, measurement_weight_kg, biological_sex, age, name, experience_level")
+    .select("user_id, timezone, goal, measurement_weight_kg, biological_sex, age, name, experience_level, profile_completed_at")
     .not("profile_completed_at", "is", null);
   if (body.user_id) profileQuery.eq("user_id", body.user_id);
   const { data: profiles, error: profileErr } = await profileQuery;
@@ -256,10 +240,20 @@ Deno.serve(async (req) => {
     const tz = profile.timezone || "Asia/Dubai";
     const today = getUserLocalDate(tz);
     const weekStart = addDays(today, -7);
+    const now = new Date();
 
-    // Time gate: Friday 8 PM user local time
-    if (!force && !isUserLocalFridayEvening(tz)) {
-      results.push({ user_id: profile.user_id, status: "skipped", reason: "not_friday_8pm" });
+    // Rolling cadence gate: fire at 8 PM local, ≥7 days since last card (or profile completion)
+    const { data: lastCard } = await supa
+      .from("daily_coaching_cards")
+      .select("created_at")
+      .eq("user_id", profile.user_id)
+      .eq("card_type", "weekly_pattern")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!force && !isRollingCadenceDue(tz, now, lastCard?.created_at ?? null, profile.profile_completed_at, 20, 7)) {
+      results.push({ user_id: profile.user_id, status: "skipped", reason: "cadence_not_due" });
       continue;
     }
 

@@ -41,3 +41,29 @@ export function getISOWeek(date: Date): number {
   const diff = (d.getTime() - firstThursday.getTime()) / 86400000;
   return 1 + Math.round((diff - ((firstThursday.getUTCDay() + 6) % 7) + 3) / 7);
 }
+
+/**
+ * Rolling cadence gate: fires only when it's `targetHour` in `tz` AND at least
+ * `intervalDays` have passed since the last card (or, if never, since profile
+ * completion). Replaces fixed weekday-of-week gates so users who miss a slot
+ * still get their card on the next available day at the target hour.
+ */
+export function isRollingCadenceDue(
+  tz: string,
+  now: Date,
+  lastCardAtIso: string | null,
+  profileCompletedAtIso: string | null,
+  targetHour = 20,
+  intervalDays = 7,
+): boolean {
+  const hour = parseInt(
+    new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false })
+      .formatToParts(now).find((p) => p.type === "hour")?.value ?? "0", 10,
+  );
+  if (hour !== targetHour) return false;
+  const anchorIso = lastCardAtIso ?? profileCompletedAtIso;
+  if (!anchorIso) return false;
+  const anchorLocalDate = tsToLocalDate(anchorIso, tz);
+  const todayLocalDate = tsToLocalDate(now.toISOString(), tz);
+  return todayLocalDate >= addDays(anchorLocalDate, intervalDays);
+}

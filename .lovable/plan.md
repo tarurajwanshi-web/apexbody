@@ -1,31 +1,36 @@
-# Batch: weekly-pattern prose conversion
+# Rolling 7-day cadence gate
 
-## Status of Fix 1 (evaluate-fuelling)
+Swap fixed weekday+hour gates in both weekly-cadence functions for a rolling "≥7 days since last card (or profile completion), fires at target hour local" gate.
 
-Already applied in this project earlier today — p80 population gate removed, replaced with `avg_rir_check <= 2` eligibility, duplicate `avg_rir` calc collapsed, `lookbackStart` removed. No action needed. Will re-verify by reading the file before closing.
+## 1. `supabase/functions/_shared/time-helpers.ts`
 
-## Fix 2 — `supabase/functions/generate-weekly-pattern/index.ts` lines 429–434
+Append the user's `isRollingCadenceDue(tz, now, lastCardAtIso, profileCompletedAtIso, targetHour=20, intervalDays=7)` verbatim. Uses existing `tsToLocalDate` and `addDays` from the same file.
 
-Replace the numbered-markdown structure block:
+## 2. `supabase/functions/generate-weekly-pattern/index.ts`
 
-```
-Generate a weekly pattern review (250-300 words). Structure:
+- Add `import { isRollingCadenceDue } from "../_shared/time-helpers.ts";`
+- Profile `.select(...)` (line ~240–243): add `profile_completed_at`.
+- Introduce `const now = new Date();` at the top of the per-profile loop (needed by the new helper).
+- Before the current `if (!force && !isUserLocalFridayEvening(tz))` at line 261: insert the `lastCard` lookup on `daily_coaching_cards` filtered to `card_type = "weekly_pattern"`.
+- Replace the condition with `!force && !isRollingCadenceDue(tz, now, lastCard?.created_at ?? null, profile.profile_completed_at, 20, 7)`.
+- Delete the `isUserLocalFridayEvening` function (lines ~24–42, or whatever range it occupies).
 
-1. **What's Working** (celebrate 3-4 specific wins — use their actual data, not generic)
-2. **Pattern to Notice** (one recurring pattern from their actual foods/flags — not judgment, just observation)
-3. **One Experiment to Try Next Week** (specific, actionable, with expected outcome)
-4. **Your Body This Week** (connect training + nutrition + weight trend — what actually happened)
-```
+## 3. `supabase/functions/generate-training-sync/index.ts`
 
-with the plain-prose instruction the user pasted (flowing paragraphs, no markdown, no numbering, no headers, same four beats in order).
+Identical pattern:
+- Add the same import.
+- Profile `.select(...)`: add `profile_completed_at`.
+- Introduce `const now = new Date();` at top of the per-profile loop.
+- Insert `lastCard` lookup with `card_type = "training_sync"` just before line 92.
+- Replace condition with `!force && !isRollingCadenceDue(tz, now, lastCard?.created_at ?? null, profile.profile_completed_at, 18, 7)`.
+- Delete the `isUserLocalThursdayEvening` function.
 
 ## Not in scope
 
-- Rules block (lines 436–448), Output line (450), the `📊` opener — untouched.
-- No other files.
-- No prompt changes to `evaluate-fuelling` or `generate-training-sync`.
+Prompt content, card writes, contradiction logic, idempotency check, macro/readiness queries, response payloads — all untouched.
 
 ## Verify after edit
 
-- `rg -n "What's Working|Pattern to Notice|\*\*" supabase/functions/generate-weekly-pattern/index.ts` → no matches inside the prompt body.
-- Re-read `evaluate-fuelling/index.ts` around the volume-tier filter to confirm Fix 1 is still in place.
+- `rg -n "isUserLocalFridayEvening|isUserLocalThursdayEvening"` → no matches.
+- `rg -n "isRollingCadenceDue" supabase/functions` → 3 hits (helper + two call sites).
+- TypeScript builds clean for both edge functions.
