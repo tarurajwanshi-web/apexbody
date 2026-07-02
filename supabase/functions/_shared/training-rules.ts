@@ -507,6 +507,11 @@ export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartIS
   if (plan.plan_start_date !== undefined && plan.plan_start_date !== planStartISO) {
     v.push(`plan_start_date must be ${planStartISO} (got ${plan.plan_start_date})`);
   }
+  // plan_data_version: if present, must equal 2 (round-trip re-validation friendly)
+  if (plan.plan_data_version !== undefined && plan.plan_data_version !== null
+      && plan.plan_data_version !== PLAN_DATA_VERSION) {
+    v.push(`plan_data_version must be ${PLAN_DATA_VERSION} (got ${plan.plan_data_version})`);
+  }
 
   return { ok: v.length === 0, violations: v };
 }
