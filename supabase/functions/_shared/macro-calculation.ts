@@ -536,6 +536,10 @@ export async function calculateMacrosForUser(
         applied_target_id: null,
         applied_at: null,
         timezone_used: tz,
+        weight_trend_kg_per_week: trend_delta_kg,
+        consecutive_deficit_weeks: consecutiveDeficitWeeks,
+        applied_modifier: latestModifier,
+        modifier_overrode_decision: modifierOverrode,
       })
       .select("id")
       .single();
