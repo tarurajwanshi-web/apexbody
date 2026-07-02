@@ -11,6 +11,7 @@ import {
   calculateMacrosForUser,
   type Profile,
 } from "../_shared/macro-calculation.ts";
+import { userLocalDayOfWeek, DEFAULT_TIMEZONE } from "../_shared/time-helpers.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -71,6 +72,11 @@ Deno.serve(async (req) => {
   const results: ProcessResult[] = [];
   for (const profile of profiles) {
     try {
+      const tz = profile.timezone || DEFAULT_TIMEZONE;
+      if (!force && userLocalDayOfWeek(tz) !== 1) {
+        results.push({ user_id: profile.user_id, status: "skipped", decision: "not_local_monday" });
+        continue;
+      }
       const result = await calculateMacrosForUser(
         profile.user_id,
         profile,

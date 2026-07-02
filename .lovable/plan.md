@@ -1,36 +1,25 @@
-# Rolling 7-day cadence gate
-
-Swap fixed weekday+hour gates in both weekly-cadence functions for a rolling "≥7 days since last card (or profile completion), fires at target hour local" gate.
+# Shared TZ helpers + per-user Monday gate for weekly macro cron
 
 ## 1. `supabase/functions/_shared/time-helpers.ts`
+Append `DEFAULT_TIMEZONE = "Asia/Dubai"` and `userLocalDayOfWeek(tz, now)` verbatim.
 
-Append the user's `isRollingCadenceDue(tz, now, lastCardAtIso, profileCompletedAtIso, targetHour=20, intervalDays=7)` verbatim. Uses existing `tsToLocalDate` and `addDays` from the same file.
+## 2. `supabase/functions/trigger-weekly-macro-review/index.ts`
+- Extend the `time-helpers.ts` import to include `userLocalDayOfWeek, DEFAULT_TIMEZONE`.
+- Delete the local `userLocalDayOfWeek` function.
+- Swap `|| "UTC"` → `|| DEFAULT_TIMEZONE` on the `tz` line.
 
-## 2. `supabase/functions/generate-weekly-pattern/index.ts`
+## 3. `supabase/functions/evaluate-fuelling/index.ts`
+- Add `import { DEFAULT_TIMEZONE } from "../_shared/time-helpers.ts";` right after the `authorize.ts` import.
+- Swap `|| "UTC"` → `|| DEFAULT_TIMEZONE` on the `tz` line.
 
-- Add `import { isRollingCadenceDue } from "../_shared/time-helpers.ts";`
-- Profile `.select(...)` (line ~240–243): add `profile_completed_at`.
-- Introduce `const now = new Date();` at the top of the per-profile loop (needed by the new helper).
-- Before the current `if (!force && !isUserLocalFridayEvening(tz))` at line 261: insert the `lastCard` lookup on `daily_coaching_cards` filtered to `card_type = "weekly_pattern"`.
-- Replace the condition with `!force && !isRollingCadenceDue(tz, now, lastCard?.created_at ?? null, profile.profile_completed_at, 20, 7)`.
-- Delete the `isUserLocalFridayEvening` function (lines ~24–42, or whatever range it occupies).
-
-## 3. `supabase/functions/generate-training-sync/index.ts`
-
-Identical pattern:
-- Add the same import.
-- Profile `.select(...)`: add `profile_completed_at`.
-- Introduce `const now = new Date();` at top of the per-profile loop.
-- Insert `lastCard` lookup with `card_type = "training_sync"` just before line 92.
-- Replace condition with `!force && !isRollingCadenceDue(tz, now, lastCard?.created_at ?? null, profile.profile_completed_at, 18, 7)`.
-- Delete the `isUserLocalThursdayEvening` function.
+## 4. `supabase/functions/calculate-macros-weekly/index.ts`
+- Add `import { userLocalDayOfWeek, DEFAULT_TIMEZONE } from "../_shared/time-helpers.ts";` after the macro-calculation import.
+- Inside `for (const profile of profiles)` at line 72, as first lines inside `try {` (before `const result = await calculateMacrosForUser(`), insert the tz + `userLocalDayOfWeek(tz) !== 1` skip gate honoring `!force`. Uses the existing `force` variable (line 38).
 
 ## Not in scope
+`calculateMacrosForUser`, macro math, week_start_date logic, cron schedule, any other files.
 
-Prompt content, card writes, contradiction logic, idempotency check, macro/readiness queries, response payloads — all untouched.
-
-## Verify after edit
-
-- `rg -n "isUserLocalFridayEvening|isUserLocalThursdayEvening"` → no matches.
-- `rg -n "isRollingCadenceDue" supabase/functions` → 3 hits (helper + two call sites).
-- TypeScript builds clean for both edge functions.
+## Verify
+- `rg -n "userLocalDayOfWeek|DEFAULT_TIMEZONE" supabase/functions` → helper + 3 call sites (trigger-weekly-macro-review, calculate-macros-weekly, plus DEFAULT_TIMEZONE in evaluate-fuelling).
+- No `|| "UTC"` remaining in the three edited edge functions.
+- No duplicate `userLocalDayOfWeek` local definition in trigger-weekly-macro-review.

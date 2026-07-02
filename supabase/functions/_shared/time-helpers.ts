@@ -67,3 +67,13 @@ export function isRollingCadenceDue(
   const todayLocalDate = tsToLocalDate(now.toISOString(), tz);
   return todayLocalDate >= addDays(anchorLocalDate, intervalDays);
 }
+
+export const DEFAULT_TIMEZONE = "Asia/Dubai";
+
+/** Day-of-week (0=Sun..6=Sat) for "now" in the given IANA timezone. */
+export function userLocalDayOfWeek(tz: string, now: Date = new Date()): number {
+  const wd = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" })
+    .format(now);
+  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return map[wd] ?? -1;
+}

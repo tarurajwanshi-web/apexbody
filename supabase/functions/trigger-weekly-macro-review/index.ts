@@ -10,21 +10,13 @@ import {
   calculateMacrosForUser,
   type Profile,
 } from "../_shared/macro-calculation.ts";
-import { userLocalMonday } from "../_shared/time-helpers.ts";
+import { userLocalMonday, userLocalDayOfWeek, DEFAULT_TIMEZONE } from "../_shared/time-helpers.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": corsAllowHeaders,
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-
-/** Day-of-week (0=Sun..6=Sat) for "now" in the given IANA timezone. */
-function userLocalDayOfWeek(tz: string, now: Date = new Date()): number {
-  const wd = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" })
-    .format(now);
-  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-  return map[wd] ?? -1;
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
@@ -66,7 +58,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const tz = (profile as Profile).timezone || "UTC";
+  const tz = (profile as Profile).timezone || DEFAULT_TIMEZONE;
   const now = new Date();
 
   // Gate: must be Monday in user's local timezone.
