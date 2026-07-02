@@ -10,7 +10,7 @@ import {
   calculateMacrosForUser,
   type Profile,
 } from "../_shared/macro-calculation.ts";
-import { userLocalMonday } from "../_shared/time-helpers.ts";
+import { userLocalMonday, userLocalDayOfWeek, DEFAULT_TIMEZONE } from "../_shared/time-helpers.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
