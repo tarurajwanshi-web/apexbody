@@ -172,22 +172,6 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { /* empty body ok */ }
 
   const now = new Date();
-  const lookbackStart = new Date(now.getTime() - 30 * 86400000).toISOString().slice(0, 10);
-
-  // Compute 80th percentile of trailing-30-day total sets across all users.
-  const { data: setRowsAll } = await supa
-    .from("workout_set_logs")
-    .select("user_id, entry_date")
-    .eq("completed", true)
-    .gte("entry_date", lookbackStart);
-  const setsByUser = new Map<string, number>();
-  for (const r of setRowsAll ?? []) {
-    const k = (r as { user_id: string }).user_id;
-    setsByUser.set(k, (setsByUser.get(k) ?? 0) + 1);
-  }
-  const totals = [...setsByUser.values()].filter((v) => v > 0).sort((a, b) => a - b);
-  const p80 =
-    totals.length === 0 ? Infinity : totals[Math.floor(totals.length * 0.8)];
 
   // Profile set to evaluate
   let profileQuery = supa
