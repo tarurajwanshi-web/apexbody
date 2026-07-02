@@ -1,101 +1,76 @@
+## E1 — Wire `nutrition_modifier` into weekly macro decision
 
-# BATCH B — Training Engine Prompt v2
+### Verified live state (before editing)
 
-Scope: `supabase/functions/_shared/training-rules.ts` + `supabase/functions/generate-plan/index.ts`. No schema migration. No DB write-shape change (still `weekly_plans.plan_data` jsonb).
+- `readiness_scores` row already exposes `final_score`, `nutrition_modifier`, `training_permission` (types.ts lines 619/626). ✅
+- `calculate-score/index.ts` writes exactly the six modifier values documented (lines 1030–1052). ✅
+- `_shared/macro-calculation.ts` line 246–254 currently selects **only** `final_score` from `readiness_scores` and averages across the 7-day window. `nutrition_modifier` / `training_permission` are never read. ✅
+- Return type is `CalculationResult = { user_id, status, decision?, flag_reason?, applied_target_id?, error? }` — no modifier field today.
+- `nutrition_weekly_reviews` table has no `applied_modifier` column (only `flag_reason`).
+- Weight-trend decision switch lives at lines ~307–325 (`fat_loss`/`muscle_gain`/`recomposition`/`strength`/`athletic_performance`).
+- Abnormal-week + adherence-floor + muscle-gain under-eat guards (lines ~326–390) — untouched by this batch.
 
-Verified pre-conditions:
-- `workout_set_logs` has no CHECK constraint on `muscle_group` — the enum values in B2 will land in an existing text column with no rejection risk.
-- `training-rules.ts` `pickWeekPatterns`/`buildFallbackPlan` currently reads `trainingDaysPerWeek` only; `goal` never enters pattern selection (B1 confirmed).
-- Validator `ALLOWED_TOP = {days, volume_gate_alert, plan_start_date, plan_timezone}` — anything else (e.g. `cue_version` written post-hoc by backfill-cues, or the new `plan_data_version`) would be rejected by re-validation if we ever re-ran it on a stored plan. B3 closes that gap for the new field.
-- `weekly_plans.plan_data` is jsonb — additive fields are free.
+### Change (additive, `_shared/macro-calculation.ts` only)
 
----
+1. **Extend readiness fetch (line 246–254)**
+  - Add `nutrition_modifier, training_permission, score_date` to the select.
+  - Keep the existing `avgReadiness` computation unchanged.
+  - Separately, take the most recent row (max `score_date`) as `latestModifier` / `latestPermission`. Same-day directive, not blended.
+2. **Decision override layer** (new block, placed **after** the weight-trend switch produces `decision`, and **before** the floor/ceiling capping — so caps still bound whatever we pick):
+  ```
+   const baseDecision = decision;
+   let modifierOverride: null | "deficit_caution_hold" | "fuel_more_bias" = null;
 
-## B1 — Goal-aware fallback patterns (isolated, first)
+   if (latestModifier === "deficit_caution" && decision === "reduce") {
+     decision = "hold";
+     modifierOverride = "deficit_caution_hold";
+   } else if (latestModifier === "fuel_more") {
+     if (decision === "reduce") { decision = "hold"; modifierOverride = "fuel_more_bias"; }
+     else if (decision === "hold") {
+       // bias toward increase only if goal + trend are compatible
+       // (goal ∈ muscle_gain|strength|athletic_performance|recomposition, trend not already > threshold)
+       if (goal !== "fat_loss" && weightTrendPerWeek < 0.5) {
+         decision = "increase";
+         modifierOverride = "fuel_more_bias";
+       }
+     }
+   }
+   // recovery_day_refeed | hydration_priority | protein_priority | normal → no decision change
+  ```
+  - Recompute `new_target_calories` from `raw_target_calories` only if `decision` changed to `increase` (hold uses `old_target_calories`; existing floor/ceiling capping continues to run).
+  - For `deficit_caution_hold` we set `new_target_calories = old_target_calories` (mirrors existing hold branches).
+3. **Surface reasoning (no schema change required)**
+  - `flag_reason`: if currently `null` and an override fired, set to `deficit_caution_override` or `fuel_more_override` (preserves any existing higher-priority flag like `abnormal_week`, `insufficient_data`, `refeed_candidate`, `floor_aware_low_adherence` — those come first). Never overwrite an existing `flag_reason`.
+  - `CalculationResult`: add two optional fields:
+    - `applied_modifier?: "recovery_day_refeed" | "hydration_priority" | "protein_priority" | "deficit_caution" | "fuel_more" | "normal" | null`
+    - `modifier_overrode_decision?: boolean`
+  - Also carry `applied_modifier` into the row inserted into `nutrition_weekly_reviews` via the existing `flag_reason` channel only (no new column this pass). If we later want a dedicated column, that's a follow-up migration.
+4. **Composition-only modifiers (`hydration_priority`, `protein_priority`, `recovery_day_refeed`)**
+  - No calorie decision change.
+  - Set `applied_modifier` on the return value so downstream coaching-card code (Engine 4) can pick it up. No new copy in this batch.
 
-`training-rules.ts` — replace the days-only `pickWeekPatterns` + inline pattern block in `buildFallbackPlan` with a goal-family lookup, then fall through to a days-count switch inside that family.
+### Explicitly NOT in this batch
 
-Pattern families:
-- `strength` → compound-heavy full/lower/upper rotation, no isolation/conditioning
-- `muscle_gain` / `recomposition` → PPL rotation with isolation on 5–6 day, full-body on ≤3 day
-- `fat_loss` → PPL + conditioning finisher day, full-body on ≤3 day
-- `athletic_performance` → lower/full/lower/upper with power+conditioning days (never generic PPL)
+- No change to weight-trend thresholds, TDEE blending, `trainingLoadIndex`, abnormal-week detection, refeed-candidate flag, muscle-gain under-eat guard.
+- No new column on `nutrition_weekly_reviews` (would be a separate migration + types regen).
+- No change to `generate-plan` or coaching-card copy.
+- No change to `calculate-macros-weekly` / `trigger-weekly-macro-review` callers — they just pass the extended result through.
 
-Signature stays the same; only the pattern array construction changes. `pickWeekPatterns` is removed (dead — the inline switch already replaced it). Rest-mask handling unchanged.
+### Test plan
 
-## B2 — Closed enums
+- Type-check `_shared/macro-calculation.ts`.
+- Unit-style smoke: fabricate readiness with each of the six modifiers + weight trend that would normally produce `reduce` and verify: `deficit_caution` → `hold`, `fuel_more` (non-fat-loss) → `hold`; with `hold` base + `fuel_more` + muscle_gain + flat trend → `increase`; `normal` → unchanged.
+- Confirm `flag_reason` precedence: abnormal week still wins over override.
 
-Add and export from `training-rules.ts`:
+### Files touched
 
-```ts
-export type MuscleGroup = "chest"|"back"|"shoulders"|"quads"|"hamstrings"|"glutes"
-  |"calves"|"biceps"|"triceps"|"forearms"|"core"|"full_body"|"cardio"|"mobility";
-export type MovementPattern = "squat"|"hinge"|"horizontal_push"|"vertical_push"
-  |"horizontal_pull"|"vertical_pull"|"lunge"|"carry"|"rotation"|"anti_rotation"
-  |"locomotion"|"conditioning"|"mobility";
-export type ExerciseRole = "primary"|"secondary"|"accessory"|"isolation"
-  |"core"|"conditioning"|"mobility"|"power";
-```
+- `supabase/functions/_shared/macro-calculation.ts` (only)
 
-Plus `MUSCLE_GROUPS`, `MOVEMENT_PATTERNS`, `EXERCISE_ROLES` as `readonly` string arrays (Set-backed helpers for O(1) validator membership checks).
+### Follow-up (not this batch)
 
-## B3 — plan_data shape v2
-
-- Day object: add `session_purpose: string` (short, prose; separate from display `session_name`). Rest days: `session_purpose = null`.
-- Exercise object: add `exercise_role: ExerciseRole`, `movement_pattern: MovementPattern`; `muscle_group` remains a string but now constrained to `MuscleGroup`.
-- Top level: add `plan_data_version: 2`. Set unconditionally after generation and after fallback, so every new row written by generate-plan is v2.
-
-Existing rows in `weekly_plans` stay untouched (readers must tolerate `plan_data_version` missing → treat as v1, meaning `exercise_role`/`movement_pattern`/`session_purpose` may be absent). Consumer changes are OUT OF SCOPE for this batch.
-
-## B4 — Post-validation computed summaries (never asked of Sonnet)
-
-After `validateGeneratedPlan` passes, generate-plan computes and attaches:
-
-- `training_volume_summary`: `{ total_sets, sets_per_muscle: Record<MuscleGroup, number>, sets_per_movement_pattern: Record<MovementPattern, number>, training_days: number }`. Pure sum from the now-enumerated fields.
-- `exercise_media_summary`: `{ media_status: "matched" | "missing", missing_count: number }`. Source-agnostic — no YMove references. In this batch the initial write is `media_status: "missing", missing_count: total_ex_count` (real matching stays the existing async `sync-exercise-images` job's job).
-
-Both are computed in code, in `generate-plan/index.ts` after validation succeeds AND after `buildFallbackPlan` returns. Also added to `ALLOWED_TOP` in the validator so a hypothetical re-validation pass doesn't reject them, but Sonnet is never asked for them (see B5) and validator does not require them (they are added after `validateGeneratedPlan`).
-
-## B5 — Sonnet prompt updates
-
-`callClaude` system + `basePrompt` in `generate-plan/index.ts`:
-
-1. Schema JSON string extended with `session_purpose`, `exercise_role`, `movement_pattern`, and `plan_data_version` fields. Enum values listed inline in the system prompt for `muscle_group`, `movement_pattern`, `exercise_role` — Sonnet must pick from these lists verbatim.
-2. Explicit no-markdown rule, alongside the existing "no session_note/notes/tempo" bans:
-   > All text fields (`cue`, `progression_note`, `session_purpose`) must be plain prose — no markdown, no asterisks, no bold syntax, no bullet lists.
-3. Explicit ban on aggregate fields: "Do NOT emit training_volume_summary, exercise_media_summary, or any summary/aggregate/count field. Those are computed downstream."
-4. `session_purpose` guidance: "one sentence, max ~20 words, what this session is training and why — plain prose."
-
-## B6 — Validator whitelist + enum membership
-
-`training-rules.ts` `validateGeneratedPlan`:
-
-- `ALLOWED_TOP += {plan_data_version, training_volume_summary, exercise_media_summary}` (last two tolerated for re-validation of stored plans).
-- `ALLOWED_DAY += {session_purpose}`.
-- `ALLOWED_EX  += {exercise_role, movement_pattern}`.
-- New membership checks against the enum sets:
-  - `muscle_group ∈ MUSCLE_GROUPS`
-  - `movement_pattern ∈ MOVEMENT_PATTERNS`
-  - `exercise_role ∈ EXERCISE_ROLES`
-- `session_purpose`: required non-empty string on training days, must equal null on rest days. Reject strings containing `**`, `__`, ``` ` ```, or leading `- ` (markdown guard). Same guard applied to `cue` and `progression_note`.
-- `plan_data_version`: if present, must equal `2`. Not required at validation time (generate-plan sets it after), but if Sonnet emits it, it must be right.
-
-Fallback (`buildFallbackPlan`) — every fallback exercise gets `exercise_role`, `movement_pattern`, and an enum-valid `muscle_group`; every training day gets a `session_purpose` string; top-level `plan_data_version: 2` and `session_purpose: null` on rest days.
-
----
-
-## Explicitly NOT in this batch
-
-- 4-week block periodization / `training_blocks` table.
-- Component redistribution (volume grid, weight trend, contradiction card).
-- PR detection, Home streak, day-by-day paged navigation.
-- `superset_group_id`, `swap_options_by_equipment`.
-- Any migration on `workout_set_logs` (no constraint change needed).
-- Consumer updates in `workouts.tsx` for the new `plan_data_version`/`session_purpose`/`exercise_role`/`movement_pattern` fields — readers tolerate missing, but no UI is added here.
-
-## Test / verify after implementation
-
-1. Type-only compile: enum types + arrays are exported.
-2. Manual `generate-plan` invocation for a synthetic profile per goal — inspect returned plan for: `plan_data_version=2`, `training_volume_summary` present, all exercises carry valid enum values, fallback path also v2-shaped.
-3. Re-validate a stored plan through `validateGeneratedPlan` (round-trip) — passes.
-4. Confirm existing v1 rows in `weekly_plans` still render (workouts.tsx already tolerates missing fields on the current fields it reads; this batch adds none it consumes yet).
+- Add `applied_modifier text` column to `nutrition_weekly_reviews` for structured audit, and surface it in review UI / coaching cards.  
+  
+**Two things to check before approving, not after:**
+  1. **The** `new_target_calories` **recompute when decision flips to** `hold`**.** The doc says this "mirrors existing hold branches" in prose — but that's the one line most likely to have a bug that doesn't show up until a real calculation runs (e.g., if it accidentally reuses a stale value from the original `reduce` branch instead of properly falling back to `old_target_calories`). Ask Lovable to paste the actual diff for that specific block before you approve — not the summary, the code.
+  2. **The test plan says "unit-style smoke" but doesn't show results.** That reads like a plan for what to test, not confirmation it was run. Ask for the actual output: fabricate a test user with each of the six `nutrition_modifier` values and a weight trend that would normally trigger `reduce`, run it, and paste the resulting `decision` + `applied_modifier` for each of the six cases. That's five minutes of work and it's the difference between "this should work" and "this works."
+  One design choice worth knowing about, not blocking: the `weightTrendPerWeek < 0.5` threshold for escalating `hold → increase` under `fuel_more` is a number Lovable picked, not one either of us specified. It's not unreasonable, but it's an invented parameter — know that going in, don't assume it was derived from something.

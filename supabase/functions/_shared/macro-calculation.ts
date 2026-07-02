@@ -23,12 +23,22 @@ export type Profile = {
   user_marked_abnormal_week_start: string | null;
 };
 
+export type NutritionModifier =
+  | "recovery_day_refeed"
+  | "hydration_priority"
+  | "protein_priority"
+  | "deficit_caution"
+  | "fuel_more"
+  | "normal";
+
 export type CalculationResult = {
   user_id: string;
   status: "hold" | "adjusted" | "skipped" | "error";
   decision?: string;
   flag_reason?: string | null;
   applied_target_id?: string | null;
+  applied_modifier?: NutritionModifier | null;
+  modifier_overrode_decision?: boolean;
   error?: string;
 };
 
@@ -244,15 +254,20 @@ export async function calculateMacrosForUser(
 
   const { data: readinessDays, error: readinessError } = await supa
     .from("readiness_scores")
-    .select("final_score")
+    .select("final_score, nutrition_modifier, training_permission, score_date")
     .eq("user_id", user_id)
     .gte("score_date", week_start_date)
-    .lt("score_date", window_end_exclusive);
+    .lt("score_date", window_end_exclusive)
+    .order("score_date", { ascending: false });
   if (readinessError) console.error("[calculateMacrosForUser] readiness fetch failed", readinessError);
 
   const avgReadiness = readinessDays && readinessDays.length > 0
     ? readinessDays.reduce((sum, r) => sum + Number(r.final_score ?? 0), 0) / readinessDays.length
     : 50;
+
+  // Most recent day's modifier — same-day directive, not blended.
+  const latestReadiness = readinessDays && readinessDays.length > 0 ? readinessDays[0] : null;
+  const latestModifier = (latestReadiness?.nutrition_modifier ?? null) as NutritionModifier | null;
 
   if (avgReadiness < 45 && trainingLoadIndex > 1.0) {
     trainingLoadIndex = Math.max(0.85, trainingLoadIndex * 0.85);
@@ -402,6 +417,43 @@ export async function calculateMacrosForUser(
     new_target_calories = old_target_calories;
   }
 
+  // ── Nutrition modifier override (Shield → macro engine) ─────────────────
+  // Same-day directive from Shield's readiness_scores.nutrition_modifier.
+  // Additive on top of weight-trend decision; never deepens a cut, never
+  // overrides higher-priority flags (abnormal_week, insufficient_data, etc).
+  let modifierOverrode = false;
+  if (!abnormal && days_logged >= 3 && weigh_in_count >= 2) {
+    if (latestModifier === "deficit_caution" && (decision === "reduce" || decision === "capped")) {
+      // Never deepen a cut on a deficit-caution day.
+      if (decision === "reduce" || (decision === "capped" && new_target_calories < old_target_calories)) {
+        decision = "hold";
+        new_target_calories = old_target_calories;
+        modifierOverrode = true;
+        if (!flagReason) flagReason = "deficit_caution_override";
+      }
+    } else if (latestModifier === "fuel_more") {
+      if (decision === "reduce" || (decision === "capped" && new_target_calories < old_target_calories)) {
+        decision = "hold";
+        new_target_calories = old_target_calories;
+        modifierOverrode = true;
+        if (!flagReason) flagReason = "fuel_more_override";
+      } else if (decision === "hold" && goal !== "fat_loss" && trend_delta_kg < 0.5) {
+        // Bias hold → increase for non-fat-loss goals with flat/negative trend.
+        decision = "increase";
+        // Recompute from raw, bounded by existing ceiling for this goal.
+        const _ceiling =
+          goal === "muscle_gain" ? blended_tdee * 1.2
+          : goal === "recomposition" ? blended_tdee * 1.05
+          : goal === "strength" || goal === "athletic_performance" ? blended_tdee * 1.1
+          : blended_tdee * 1.05;
+        const bumped = Math.max(raw_target_calories, old_target_calories + 100);
+        new_target_calories = Math.ceil(Math.min(_ceiling, bumped));
+        modifierOverrode = true;
+        if (!flagReason) flagReason = "fuel_more_override";
+      }
+    }
+  }
+
   // ── Muscle gain under-eat guard ──────────────────────────────────────────
   // Compute raw adjustment first so the guard can inspect its direction.
   // If a muscle gain user is eating below 75% of their target, the engine
@@ -512,6 +564,8 @@ export async function calculateMacrosForUser(
       decision,
       flag_reason: flagReason,
       applied_target_id: (appliedTargetId as string | null) ?? null,
+      applied_modifier: latestModifier,
+      modifier_overrode_decision: modifierOverrode,
     };
   }
 
@@ -522,5 +576,7 @@ export async function calculateMacrosForUser(
     status: decision === "hold" || decision === "capped" ? "hold" : "adjusted",
     decision,
     flag_reason: flagReason,
+    applied_modifier: latestModifier,
+    modifier_overrode_decision: modifierOverrode,
   };
 }
