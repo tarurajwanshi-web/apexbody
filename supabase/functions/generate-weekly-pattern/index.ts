@@ -22,23 +22,6 @@ function getUserLocalDate(timezone: string): string {
   }
 }
 
-function isUserLocalFridayEvening(timezone: string): boolean {
-  try {
-    const now = new Date();
-    const fmt = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      weekday: "long",
-      hour: "numeric",
-      hour12: false,
-    });
-    const parts = fmt.formatToParts(now);
-    const weekday = parts.find(p => p.type === "weekday")?.value;
-    const hour = parseInt(parts.find(p => p.type === "hour")?.value || "0");
-    return weekday === "Friday" && hour === 20;
-  } catch {
-    return false;
-  }
-}
 
 function addDays(isoDate: string, days: number): string {
   const d = new Date(`${isoDate}T00:00:00Z`);
