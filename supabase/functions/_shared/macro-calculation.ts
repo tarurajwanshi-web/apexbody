@@ -417,6 +417,48 @@ export async function calculateMacrosForUser(
     new_target_calories = old_target_calories;
   }
 
+  // ── Nutrition modifier override (Shield → macro engine) ─────────────────
+  // Same-day directive from Shield's readiness_scores.nutrition_modifier.
+  // Additive on top of weight-trend decision; never deepens a cut, never
+  // overrides higher-priority flags (abnormal_week, insufficient_data, etc).
+  let modifierOverrode = false;
+  if (!abnormal && days_logged >= 3 && weigh_in_count >= 2) {
+    if (latestModifier === "deficit_caution" && (decision === "reduce" || decision === "capped")) {
+      // Never deepen a cut on a deficit-caution day.
+      if (decision === "reduce" || (decision === "capped" && new_target_calories < old_target_calories)) {
+        decision = "hold";
+        new_target_calories = old_target_calories;
+        modifierOverrode = true;
+        if (!flagReason) flagReason = "deficit_caution_override";
+      }
+    } else if (latestModifier === "fuel_more") {
+      if (decision === "reduce" || (decision === "capped" && new_target_calories < old_target_calories)) {
+        decision = "hold";
+        new_target_calories = old_target_calories;
+        modifierOverrode = true;
+        if (!flagReason) flagReason = "fuel_more_override";
+      } else if (decision === "hold" && goal !== "fat_loss" && trend_delta_kg < 0.5) {
+        // Bias hold → increase for non-fat-loss goals with flat/negative trend.
+        decision = "increase";
+        // Recompute from raw, bounded by existing ceiling for this goal.
+        const _weight_floor = (p.measurement_weight_kg ?? current_weight_kg ?? 70) * 10;
+        const _sex_floor = p.biological_sex === "male" ? 1500
+                          : p.biological_sex === "female" ? 1200
+                          : 1350;
+        const _ceiling =
+          goal === "muscle_gain" ? blended_tdee * 1.2
+          : goal === "recomposition" ? blended_tdee * 1.05
+          : goal === "strength" || goal === "athletic_performance" ? blended_tdee * 1.1
+          : blended_tdee * 1.05;
+        const _floor = Math.max(blended_tdee * 0.95, _sex_floor, _weight_floor * 0);
+        const bumped = Math.max(raw_target_calories, old_target_calories + 100);
+        new_target_calories = Math.ceil(Math.min(_ceiling, Math.max(_floor, bumped)));
+        modifierOverrode = true;
+        if (!flagReason) flagReason = "fuel_more_override";
+      }
+    }
+  }
+
   // ── Muscle gain under-eat guard ──────────────────────────────────────────
   // Compute raw adjustment first so the guard can inspect its direction.
   // If a muscle gain user is eating below 75% of their target, the engine
