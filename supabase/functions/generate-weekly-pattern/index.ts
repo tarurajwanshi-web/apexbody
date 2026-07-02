@@ -509,10 +509,11 @@ Output: Plain text, 250-300 words. Start with 📊`;
 
       for (const p of detected) {
         if (p.data_points < 4) continue;
-        const explained = await generatePatternExplanation(lovableKey, p, {
+        const explained = await generatePatternExplanation(openaiKey, p, {
           age: (profile.age as number | null) ?? null,
           goal: (profile.goal as string | null) ?? null,
           proficiency,
+          name: (profile as any).name ?? null,
         });
         const { error: upsertErr } = await supa
           .from("user_recovery_patterns")
