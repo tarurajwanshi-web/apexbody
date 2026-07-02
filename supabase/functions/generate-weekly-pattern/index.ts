@@ -426,12 +426,9 @@ TRAINING THIS WEEK:
 - Total sets completed: ${totalSets}
 - Avg strain: ${avgStrain}
 
-Generate a weekly pattern review (250-300 words). Structure:
+Generate a weekly pattern review (250-300 words) as flowing plain-text paragraphs — no markdown, no numbering, no bold, no headers. Cover these four things in order, as natural prose transitions, not labeled sections:
 
-1. **What's Working** (celebrate 3-4 specific wins — use their actual data, not generic)
-2. **Pattern to Notice** (one recurring pattern from their actual foods/flags — not judgment, just observation)
-3. **One Experiment to Try Next Week** (specific, actionable, with expected outcome)
-4. **Your Body This Week** (connect training + nutrition + weight trend — what actually happened)
+Start by celebrating 3-4 specific wins from their actual data, not generic praise. Then note one recurring pattern from their actual foods or flags, framed as observation, not judgment. Then suggest one specific, actionable experiment to try next week with an expected outcome. Close by connecting training, nutrition, and weight trend into what actually happened to their body this week.
 
 Rules:
 - Use their actual foods by name (not "protein sources" — say "chicken" or "eggs")
