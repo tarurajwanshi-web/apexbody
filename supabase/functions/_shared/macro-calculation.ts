@@ -569,6 +569,8 @@ export async function calculateMacrosForUser(
       decision,
       flag_reason: flagReason,
       applied_target_id: (appliedTargetId as string | null) ?? null,
+      applied_modifier: latestModifier,
+      modifier_overrode_decision: modifierOverrode,
     };
   }
 
@@ -579,5 +581,7 @@ export async function calculateMacrosForUser(
     status: decision === "hold" || decision === "capped" ? "hold" : "adjusted",
     decision,
     flag_reason: flagReason,
+    applied_modifier: latestModifier,
+    modifier_overrode_decision: modifierOverrode,
   };
 }
