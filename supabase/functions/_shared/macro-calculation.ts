@@ -528,10 +528,9 @@ export async function calculateMacrosForUser(
         training_load_index: trainingLoadIndex,
         weekly_sets_avg: weeklySetAvg,
         avg_strain_value: avgStrain,
-        bmr: old_bmr,
-        target_protein_g: macros.target_protein_g,
-        target_carbs_g: macros.target_carbs_g,
-        target_fat_g: macros.target_fat_g,
+        // bmr + target_protein_g/carbs_g/fat_g intentionally omitted:
+        // those columns live on daily_macro_targets and are populated by
+        // the apply_existing_weekly_macro_review RPC, not on the review row.
         decision,
         flag_reason: overrideFlag ?? flagReason,
         applied_target_id: null,
