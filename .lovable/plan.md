@@ -1,41 +1,30 @@
-## Plan — one-off manual recompute
+## Fix — remove non-existent columns from `nutrition_weekly_reviews` insert
 
-`trigger-weekly-macro-review` can't do this: it's JWT-only, derives the user from the token, has no `force_recalculate`, and short-circuits off-Monday and when a review row already exists. The sibling `calculate-macros-weekly` is the correct entry — it accepts `{ user_id, force_recalculate }`, is gated by `x-internal-secret`, and calls the same shared `calculateMacrosForUser` engine.
+### Root cause
 
-### Step 1 — invoke it
+`supabase/functions/_shared/macro-calculation.ts` line 531 inserts `bmr: old_bmr` into `nutrition_weekly_reviews`. That table has no `bmr` column — PostgREST returns `Could not find the 'bmr' column ... in the schema cache`.
 
-Run via `supabase--insert` (uses `net.http_post`, so `public.get_dispatch_secret()` is fetched server-side; the secret never enters tool arguments):
+Cross-checking the full insert payload (lines 515–540) against the live `nutrition_weekly_reviews` schema, **four fields don't exist on the table**:
 
-```sql
-select net.http_post(
-  url := 'https://toixlzfmxtmtypmupcuc.supabase.co/functions/v1/calculate-macros-weekly',
-  headers := jsonb_build_object(
-    'Content-Type', 'application/json',
-    'x-internal-secret', public.get_dispatch_secret()
-  ),
-  body := jsonb_build_object(
-    'user_id', '00000000-0000-0000-0001-000000000006',
-    'force_recalculate', true
-  )
-);
-```
+- `bmr` (line 531)
+- `target_protein_g` (line 532)
+- `target_carbs_g` (line 533)
+- `target_fat_g` (line 534)
 
-This dispatches asynchronously.
+These belong on `daily_macro_targets`, which the `apply_existing_weekly_macro_review` RPC already populates from active target + review data. They should never have been on the review insert.
 
-### Step 2 — verify
+### Change
 
-Wait a few seconds, then in parallel:
+`supabase/functions/_shared/macro-calculation.ts` — delete lines 531–534 from the insert payload. Nothing else in the engine reads these fields back off the review row (the RPC re-derives macros from the active `daily_macro_targets`), so removal is safe.
 
-1. `supabase--edge_function_logs` for `calculate-macros-weekly`, filter on the user_id — confirm the summary line (`status: adjusted | hold | skipped | error` and `decision`).
-2. `supabase--read_query` on `nutrition_weekly_reviews` for that user, ordered by `week_start_date desc limit 2` — inspect `decision`, `applied_target_id`, `blended_tdee`, `new_target_calories`, and the newly-surfaced `applied_modifier` / `modifier_overrode_decision` fields from the E1 change (whichever column names the shared engine wrote — I'll verify shape from the row).
-3. If `applied_target_id` is set, `supabase--read_query` `daily_macro_targets` for that user to confirm the new active target row.
+### After edit
 
-### Notes / caveats
+1. Re-run the same `net.http_post` to `calculate-macros-weekly` for user `00000000-0000-0000-0001-000000000006` with `force_recalculate: true` (Lovable auto-deploys the shared module along with `calculate-macros-weekly` and `trigger-weekly-macro-review` on next invocation, since it's imported by both).
+2. Confirm via `edge_function_logs` (`status: adjusted | hold`) and `read_query` on `nutrition_weekly_reviews` that a new row for the current week exists with `decision` + `applied_target_id` populated.
+3. If `applied_target_id` is set, read `daily_macro_targets` for that user to confirm the newly-active target row.
 
-- `force_recalculate: true` in `calculate-macros-weekly` re-runs the engine even if a review row exists for this week; the shared engine's exact overwrite/insert behavior under `force` is what I'll observe in step 2. If the run fails with `review_exists:` despite `force`, that's an engine-level gap to flag — not something to work around by deleting the row without asking.
-- No code changes. No migration. Read-only verification after the one dispatch.
-- Nothing about the trigger endpoints, cron schedule, or shared engine is modified.
+### Not in this change
 
-### If you'd rather not touch SQL
-
-Alternative: `supabase--curl_edge_functions` to `/calculate-macros-weekly` with a manually-supplied `x-internal-secret` header. Requires reading `public.get_dispatch_secret()` first and passing the raw value in headers, which is slightly leakier than option 1. Same result.
+- No migration. Not adding `bmr`/macro columns to the reviews table — the RPC design deliberately keeps macros on `daily_macro_targets`.
+- No behavioral change to any of the E1 decision logic, weight-trend logic, TDEE blending, or applied-modifier surfacing.
+- No touching of `trigger-weekly-macro-review` or `calculate-macros-weekly` HTTP shells.
