@@ -250,7 +250,36 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const bmr = Number(targets?.bmr) || Math.round(((targets?.target_calories ?? 2000) as number) * 0.65);
 
+    // Most-recent readiness row (unbounded — same-day directive, not a trend).
+    const { data: latestReadinessRow } = await supa
+      .from("readiness_scores")
+      .select("nutrition_modifier, training_permission, final_score, score_date")
+      .eq("user_id", p.user_id)
+      .order("score_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const readinessNutritionMod =
+      (latestReadinessRow as { nutrition_modifier?: string | null } | null)?.nutrition_modifier ?? null;
+    const readinessTrainingPerm =
+      (latestReadinessRow as { training_permission?: string | null } | null)?.training_permission ?? null;
+    const readinessFlagged =
+      readinessNutritionMod === "deficit_caution" || readinessTrainingPerm === "red_recover";
+
     const ev = evaluate(total_sets, avg_rir, totalCalories, bmr);
+
+    // Severity nudge: promote marginal → underfuelled when readiness independently flags caution.
+    if (ev.severity === "marginal" && readinessFlagged) {
+      ev.severity = "underfuelled";
+      ev.severity_score = 3;
+    }
+
+    // Message reinforcement when both engines converge on a problem.
+    if (ev.severity_score >= 2 && readinessFlagged) {
+      ev.message = `${ev.message} This lines up with your readiness — Shield already flagged today for caution.`;
+    }
+
+    const readiness_modifier_at_eval: string | null =
+      readinessNutritionMod ?? readinessTrainingPerm ?? null;
 
     let mini_explanation: string | null = null;
     if (ev.severity_score >= 2) {
