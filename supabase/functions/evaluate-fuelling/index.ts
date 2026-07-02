@@ -172,22 +172,6 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { /* empty body ok */ }
 
   const now = new Date();
-  const lookbackStart = new Date(now.getTime() - 30 * 86400000).toISOString().slice(0, 10);
-
-  // Compute 80th percentile of trailing-30-day total sets across all users.
-  const { data: setRowsAll } = await supa
-    .from("workout_set_logs")
-    .select("user_id, entry_date")
-    .eq("completed", true)
-    .gte("entry_date", lookbackStart);
-  const setsByUser = new Map<string, number>();
-  for (const r of setRowsAll ?? []) {
-    const k = (r as { user_id: string }).user_id;
-    setsByUser.set(k, (setsByUser.get(k) ?? 0) + 1);
-  }
-  const totals = [...setsByUser.values()].filter((v) => v > 0).sort((a, b) => a - b);
-  const p80 =
-    totals.length === 0 ? Infinity : totals[Math.floor(totals.length * 0.8)];
 
   // Profile set to evaluate
   let profileQuery = supa
@@ -220,15 +204,19 @@ Deno.serve(async (req) => {
       .eq("completed", true);
     const total_sets = sets?.length ?? 0;
 
-    // Volume tier filters
+    // Volume tier filter — high-volume day only
     if (total_sets < 15) { continue; }
-    const userTotal30 = setsByUser.get(p.user_id) ?? 0;
-    if (userTotal30 < p80) { continue; }
 
     const rirs = (sets ?? [])
       .map((s) => (s as { rir: number | null }).rir)
       .filter((v): v is number => typeof v === "number");
-    const avg_rir = rirs.length ? rirs.reduce((a, b) => a + b, 0) / rirs.length : null;
+    const avg_rir_check = rirs.length ? rirs.reduce((a, b) => a + b, 0) / rirs.length : null;
+
+    // Eligibility: high volume AND pushed near failure (RIR ≤2) — the actual
+    // overreaching/recovery-risk case, not a population percentile.
+    if (avg_rir_check === null || avg_rir_check > 2) { continue; }
+
+    const avg_rir = avg_rir_check;
 
     const { data: meals } = await supa
       .from("shield_nutrition_logs")
@@ -329,7 +317,7 @@ Deno.serve(async (req) => {
   }
 
   return new Response(
-    JSON.stringify({ ok: true, processed: results.length, p80, results }),
+    JSON.stringify({ ok: true, processed: results.length, results }),
     { headers: { ...cors, "Content-Type": "application/json" } },
   );
 });
