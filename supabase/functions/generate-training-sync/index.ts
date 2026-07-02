@@ -140,10 +140,10 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    // Get this week's readiness trend
+    // Get this week's readiness trend (7-day avg of final_score)
     const { data: readiness } = await supa
       .from("readiness_scores")
-      .select("score_date, final_score")
+      .select("score_date, final_score, confidence_level, training_permission, nutrition_modifier, load_carryover")
       .eq("user_id", profile.user_id)
       .gte("score_date", addDays(today, -7))
       .lte("score_date", today)
@@ -152,6 +152,18 @@ Deno.serve(async (req) => {
     const avgReadiness = readiness && readiness.length > 0
       ? Math.round(readiness.reduce((s, r) => s + (r.final_score || 0), 0) / readiness.length)
       : null;
+
+    // Most-recent readiness row (unbounded — same-day directive, not a trend).
+    const { data: latestReadiness } = await supa
+      .from("readiness_scores")
+      .select("training_permission, confidence_level, nutrition_modifier, score_date")
+      .eq("user_id", profile.user_id)
+      .order("score_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const todayPermission = (latestReadiness as { training_permission?: string | null } | null)?.training_permission ?? "unknown";
+    const todayConfidence = (latestReadiness as { confidence_level?: string | null } | null)?.confidence_level ?? "unknown";
+    const todayNutritionMod = (latestReadiness as { nutrition_modifier?: string | null } | null)?.nutrition_modifier ?? "unknown";
 
     // Build Sonnet prompt
     const sonnetPrompt = `You are a performance nutrition coach helping your client prepare nutritionally for next week's training.
