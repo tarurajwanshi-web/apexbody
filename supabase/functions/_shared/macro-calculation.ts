@@ -23,12 +23,22 @@ export type Profile = {
   user_marked_abnormal_week_start: string | null;
 };
 
+export type NutritionModifier =
+  | "recovery_day_refeed"
+  | "hydration_priority"
+  | "protein_priority"
+  | "deficit_caution"
+  | "fuel_more"
+  | "normal";
+
 export type CalculationResult = {
   user_id: string;
   status: "hold" | "adjusted" | "skipped" | "error";
   decision?: string;
   flag_reason?: string | null;
   applied_target_id?: string | null;
+  applied_modifier?: NutritionModifier | null;
+  modifier_overrode_decision?: boolean;
   error?: string;
 };
 
