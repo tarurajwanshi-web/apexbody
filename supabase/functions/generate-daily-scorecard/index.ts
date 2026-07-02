@@ -147,18 +147,56 @@ Deno.serve(async (req) => {
       .eq("user_id", profile.user_id)
       .eq("entry_date", today);
 
-    // Edge case: no meals logged
+    // Edge case: no meals logged. Vary tone and frequency by prior streak
+    // so the feed doesn't fill with identical repetition.
     if (!meals || meals.length === 0) {
-      const noMealCard = "No meals logged today. Log something to get your daily coaching note. 📱";
+      // Count consecutive prior days whose scorecard was a no-meals card.
+      const { data: priorCards } = await supa
+        .from("daily_coaching_cards")
+        .select("card_date, content")
+        .eq("user_id", profile.user_id)
+        .eq("card_type", "daily_scorecard")
+        .lt("card_date", today)
+        .order("card_date", { ascending: false })
+        .limit(7);
 
-      await supa.from("daily_coaching_cards").upsert({
-        user_id: profile.user_id,
-        card_date: today,
-        card_type: "daily_scorecard",
-        content: noMealCard,
-      }, { onConflict: "user_id,card_date,card_type" });
+      let noMealStreak = 0;
+      let expectedDate = today;
+      for (const row of priorCards ?? []) {
+        // Step expected date back by one day; break on non-contiguous card.
+        const d = new Date(expectedDate + "T00:00:00Z");
+        d.setUTCDate(d.getUTCDate() - 1);
+        expectedDate = d.toISOString().slice(0, 10);
+        if ((row as any).card_date !== expectedDate) break;
+        const content = String((row as any).content ?? "");
+        if (!content.startsWith("No meals logged") && !content.startsWith("Still no meals logged") && !content.startsWith("We'll be here")) break;
+        noMealStreak++;
+      }
 
-      results.push({ user_id: profile.user_id, status: "no_meals", card: noMealCard });
+      let noMealCard: string | null;
+      if (noMealStreak <= 1) {
+        noMealCard = "No meals logged today. Log something to get your daily coaching note. 📱";
+      } else if (noMealStreak <= 3) {
+        noMealCard = "Still no meals logged this week — no pressure, just log your next one whenever works.";
+      } else {
+        // Day 5+ of no logging: write at most every third day so the feed
+        // doesn't fill with repetition.
+        noMealCard = noMealStreak % 3 === 0
+          ? "We'll be here when you're ready to log again."
+          : null;
+      }
+
+      if (noMealCard !== null) {
+        await supa.from("daily_coaching_cards").upsert({
+          user_id: profile.user_id,
+          card_date: today,
+          card_type: "daily_scorecard",
+          content: noMealCard,
+        }, { onConflict: "user_id,card_date,card_type" });
+        results.push({ user_id: profile.user_id, status: "no_meals", card: noMealCard, streak: noMealStreak });
+      } else {
+        results.push({ user_id: profile.user_id, status: "no_meals_muted", streak: noMealStreak });
+      }
       continue;
     }
 

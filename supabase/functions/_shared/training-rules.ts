@@ -308,7 +308,7 @@ export interface ValidationResult {
   violations: string[];
 }
 
-export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartISO: string): ValidationResult {
+export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartISO: string, restMask?: boolean[]): ValidationResult {
   const v: string[] = [];
   if (!plan || typeof plan !== "object") return { ok: false, violations: ["plan is not an object"] };
 
@@ -318,6 +318,10 @@ export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartIS
     v.push(`days must be an array of length 7 (got ${Array.isArray(days) ? days.length : typeof days})`);
     return { ok: false, violations: v };
   }
+
+  const useMask = Array.isArray(restMask)
+    && restMask.length === 7
+    && restMask.filter((r) => r === false).length > 0;
 
   // Locate first non-rest day for acute Shield checks.
   let firstNonRestIdx = -1;
@@ -332,6 +336,9 @@ export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartIS
     const expectedName = isoWeekdayName(expectedDate);
     if (d.day_name !== expectedName) v.push(`day[${i}].day_name must be ${expectedName} (got ${d.day_name})`);
     if (typeof d.rest !== "boolean") v.push(`day[${i}].rest must be boolean`);
+    if (useMask && typeof d.rest === "boolean" && d.rest !== restMask![i]) {
+      v.push(`day[${i}].rest must be ${restMask![i]} per user's chosen training days`);
+    }
     if (d.rest === true) {
       if (d.session_name !== null) v.push(`day[${i}] is rest — session_name must be null`);
       if (!Array.isArray(d.exercises) || d.exercises.length !== 0) v.push(`day[${i}] is rest — exercises must be []`);
@@ -554,6 +561,7 @@ export function buildFallbackPlan(
   planStartISO: string,
   planTimezone: string,
   trainingDaysPerWeek: number,
+  restMask?: boolean[],
 ): any {
   const daysCount = clamp(trainingDaysPerWeek || 3, 2, 6);
   const patterns: Array<"push"|"pull"|"lower"|"full"> =
@@ -563,16 +571,24 @@ export function buildFallbackPlan(
     : daysCount === 5 ? ["push","pull","lower","full","full"]
     : ["push","pull","lower","push","pull","lower"];
 
-  // Spread training days across the week: pick indices evenly starting index 0.
+  // Rest/train indices. If a caller-supplied restMask is valid, honour it
+  // exactly (deterministic pin from profile.training_day_codes). Otherwise
+  // fall back to the historical even-spread across the week.
+  const useMask = Array.isArray(restMask)
+    && restMask.length === 7
+    && restMask.filter((r) => r === false).length > 0;
   const trainingIdx = new Set<number>();
-  for (let i = 0; i < daysCount; i++) {
-    trainingIdx.add(Math.round((i * 7) / daysCount) % 7);
-  }
-  // Ensure exactly daysCount distinct indices
-  let cursor = 0;
-  while (trainingIdx.size < daysCount && cursor < 7) {
-    if (!trainingIdx.has(cursor)) trainingIdx.add(cursor);
-    cursor++;
+  if (useMask) {
+    for (let i = 0; i < 7; i++) if (restMask![i] === false) trainingIdx.add(i);
+  } else {
+    for (let i = 0; i < daysCount; i++) {
+      trainingIdx.add(Math.round((i * 7) / daysCount) % 7);
+    }
+    let cursor = 0;
+    while (trainingIdx.size < daysCount && cursor < 7) {
+      if (!trainingIdx.has(cursor)) trainingIdx.add(cursor);
+      cursor++;
+    }
   }
 
   // First non-rest gets recovery/reduce/modify treatment via envelope
