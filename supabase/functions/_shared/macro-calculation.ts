@@ -441,18 +441,13 @@ export async function calculateMacrosForUser(
         // Bias hold → increase for non-fat-loss goals with flat/negative trend.
         decision = "increase";
         // Recompute from raw, bounded by existing ceiling for this goal.
-        const _weight_floor = (p.measurement_weight_kg ?? current_weight_kg ?? 70) * 10;
-        const _sex_floor = p.biological_sex === "male" ? 1500
-                          : p.biological_sex === "female" ? 1200
-                          : 1350;
         const _ceiling =
           goal === "muscle_gain" ? blended_tdee * 1.2
           : goal === "recomposition" ? blended_tdee * 1.05
           : goal === "strength" || goal === "athletic_performance" ? blended_tdee * 1.1
           : blended_tdee * 1.05;
-        const _floor = Math.max(blended_tdee * 0.95, _sex_floor, _weight_floor * 0);
         const bumped = Math.max(raw_target_calories, old_target_calories + 100);
-        new_target_calories = Math.ceil(Math.min(_ceiling, Math.max(_floor, bumped)));
+        new_target_calories = Math.ceil(Math.min(_ceiling, bumped));
         modifierOverrode = true;
         if (!flagReason) flagReason = "fuel_more_override";
       }
