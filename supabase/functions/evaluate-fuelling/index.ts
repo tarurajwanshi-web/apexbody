@@ -265,11 +265,13 @@ Deno.serve(async (req) => {
 
     let mini_explanation: string | null = null;
     if (ev.severity_score >= 2) {
-      const explained = await miniExplain(lovableKey, {
+      const explained = await miniExplain(openaiKey, {
         total_sets, total_calories: totalCalories, bmr,
         training_cost: ev.training_cost, shortfall: ev.shortfall,
         goal: (p as { goal: string | null }).goal ?? null,
         avg_rir,
+        name: (p as { name?: string | null }).name ?? null,
+        proficiency: (p as { experience_level?: string | null }).experience_level ?? null,
       });
       if (explained) {
         mini_explanation = `${explained.explanation} ${explained.protocol}`.trim();
