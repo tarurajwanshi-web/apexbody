@@ -344,10 +344,11 @@ Deno.serve(async (req) => {
       : "";
 
     const promptSchemaNote =
-      `Return ONLY a JSON object of shape: { "plan_start_date": "${planStartISO}", "plan_timezone": "${timezone}", "days": [7 items], "volume_gate_alert": string|null }. ` +
-      `Each day: { "day": 1-7, "date": string (YYYY-MM-DD, use the calendar below), "day_name": string, "rest": boolean, "session_name": string|null, "exercises": [] }. ` +
-      `Each exercise: { "name": string, "sets": int, "reps": string, "rest_seconds": int, "cue": string, "muscle_group": string, "progression_note": string, "target_rir": int }. ` +
-      `No other top-level or exercise fields. Do NOT emit session_note, notes, description, tempo, or anything not in this schema.`;
+      `Return ONLY a JSON object of shape: { "plan_data_version": ${PLAN_DATA_VERSION}, "plan_start_date": "${planStartISO}", "plan_timezone": "${timezone}", "days": [7 items], "volume_gate_alert": string|null }. ` +
+      `Each day: { "day": 1-7, "date": string (YYYY-MM-DD, use the calendar below), "day_name": string, "rest": boolean, "session_name": string|null, "session_purpose": string|null, "exercises": [] }. ` +
+      `Each exercise: { "name": string, "sets": int, "reps": string, "rest_seconds": int, "cue": string, "muscle_group": one of [${MUSCLE_GROUPS.join("|")}], "movement_pattern": one of [${MOVEMENT_PATTERNS.join("|")}], "exercise_role": one of [${EXERCISE_ROLES.join("|")}], "progression_note": string, "target_rir": int }. ` +
+      `No other top-level or exercise fields. Do NOT emit session_note, notes, description, tempo, training_volume_summary, exercise_media_summary, or anything not in this schema. ` +
+      `All text (cue, progression_note, session_purpose) is plain prose — no markdown/asterisks/bullets/backticks.`;
 
     const basePrompt =
       `Build a rolling 7-day workout plan starting ${planStartISO} (user timezone ${timezone}).\n` +
@@ -356,9 +357,10 @@ Deno.serve(async (req) => {
       `${shieldContext}\n` +
       `${(underFuelled || shieldFuellingCaution) ? `\nFUELLING CAUTION${underFuelled && targetCalories ? ` (avg intake ${Math.round(avgIntake!)} kcal vs ${Math.round(targetCalories!)} kcal target)` : ""}${latestNutritionModifier ? ` — Shield nutrition_modifier=${latestNutritionModifier}` : ""}. Do not programme to failure.` : ""}` +
       historyNote + "\n" +
-      `Exactly ${trainingDaysCount} training days with APEX-named sessions (e.g. "APEX Push A", "APEX Lower A", "APEX Full Body A"), each with ${envelope.exercisesPerSession[0]}-${envelope.exercisesPerSession[1]} exercises. Remaining ${7 - trainingDaysCount} days are rest (rest=true, session_name=null, exercises=[]).\n` +
-      `Include muscle_group per exercise. target_rir must be an integer inside [${envelope.targetRir[0]}, ${envelope.targetRir[1]}].\n` +
+      `Exactly ${trainingDaysCount} training days with APEX-named sessions (e.g. "APEX Push A", "APEX Lower A", "APEX Full Body A"), each with ${envelope.exercisesPerSession[0]}-${envelope.exercisesPerSession[1]} exercises. Each training day carries a session_purpose (one plain-prose sentence describing what the session trains and why). Remaining ${7 - trainingDaysCount} days are rest (rest=true, session_name=null, session_purpose=null, exercises=[]).\n` +
+      `Include muscle_group, movement_pattern, and exercise_role per exercise (all from the closed enum lists in the schema). target_rir must be an integer inside [${envelope.targetRir[0]}, ${envelope.targetRir[1]}].\n` +
       promptSchemaNote;
+
 
     async function tryClaude(promptText: string) {
       return await callClaude(anth, promptText);
