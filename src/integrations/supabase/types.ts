@@ -379,6 +379,7 @@ export type Database = {
           adherence_pct: number
           adjustment_kcal: number
           applied_at: string | null
+          applied_modifier: string | null
           applied_target_id: string | null
           avg_rir: number | null
           avg_strain_value: number | null
@@ -391,6 +392,7 @@ export type Database = {
           eligible: boolean
           flag_reason: string | null
           id: string
+          modifier_overrode_decision: boolean
           new_observed_tdee: number | null
           new_target_calories: number | null
           old_observed_tdee: number | null
@@ -411,6 +413,7 @@ export type Database = {
           adherence_pct?: number
           adjustment_kcal?: number
           applied_at?: string | null
+          applied_modifier?: string | null
           applied_target_id?: string | null
           avg_rir?: number | null
           avg_strain_value?: number | null
@@ -423,6 +426,7 @@ export type Database = {
           eligible?: boolean
           flag_reason?: string | null
           id?: string
+          modifier_overrode_decision?: boolean
           new_observed_tdee?: number | null
           new_target_calories?: number | null
           old_observed_tdee?: number | null
@@ -443,6 +447,7 @@ export type Database = {
           adherence_pct?: number
           adjustment_kcal?: number
           applied_at?: string | null
+          applied_modifier?: string | null
           applied_target_id?: string | null
           avg_rir?: number | null
           avg_strain_value?: number | null
@@ -455,6 +460,7 @@ export type Database = {
           eligible?: boolean
           flag_reason?: string | null
           id?: string
+          modifier_overrode_decision?: boolean
           new_observed_tdee?: number | null
           new_target_calories?: number | null
           old_observed_tdee?: number | null
