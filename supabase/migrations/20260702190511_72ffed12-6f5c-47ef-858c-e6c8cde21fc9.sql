@@ -1,0 +1,1 @@
+ALTER TABLE public.user_fuelling_evaluations ADD COLUMN IF NOT EXISTS readiness_modifier_at_eval text;
