@@ -179,6 +179,7 @@ CURRENT DAILY MACRO TARGETS:
 - Calories: ${targets?.target_calories || 1800}
 
 THIS WEEK'S READINESS TREND: ${avgReadiness ? `avg ${avgReadiness}/100` : "no data"}
+TODAY'S READINESS STATE: permission=${todayPermission}, confidence=${todayConfidence}, nutrition_modifier=${todayNutritionMod}
 
 NEXT WEEK'S TRAINING PLAN:
 ${JSON.stringify(weeklyPlan, null, 2)}
