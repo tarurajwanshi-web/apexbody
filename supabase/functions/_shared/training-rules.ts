@@ -378,12 +378,24 @@ export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartIS
     }
     if (d.rest === true) {
       if (d.session_name !== null) v.push(`day[${i}] is rest — session_name must be null`);
+      if (d.session_purpose !== undefined && d.session_purpose !== null) {
+        v.push(`day[${i}] is rest — session_purpose must be null`);
+      }
       if (!Array.isArray(d.exercises) || d.exercises.length !== 0) v.push(`day[${i}] is rest — exercises must be []`);
       continue;
     }
     // Training day
     if (firstNonRestIdx === -1) firstNonRestIdx = i;
     if (typeof d.session_name !== "string" || d.session_name.trim().length === 0) v.push(`day[${i}].session_name required for training day`);
+    if (d.session_purpose !== undefined) {
+      if (typeof d.session_purpose !== "string" || !d.session_purpose.trim()) {
+        v.push(`day[${i}].session_purpose must be non-empty string on training day`);
+      } else if (d.session_purpose.length > 240) {
+        v.push(`day[${i}].session_purpose too long (max 240)`);
+      } else if (MARKDOWN_RX.test(d.session_purpose)) {
+        v.push(`day[${i}].session_purpose contains markdown syntax — plain prose only`);
+      }
+    }
     const exs = d.exercises;
     if (!Array.isArray(exs)) { v.push(`day[${i}].exercises must be array`); continue; }
     if (exs.length < envelope.exercisesPerSession[0] || exs.length > envelope.exercisesPerSession[1]) {
