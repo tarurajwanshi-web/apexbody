@@ -329,9 +329,16 @@ function parseRepsWindow(reps: string): [number, number] | null {
   return null;
 }
 
-const ALLOWED_TOP = new Set(["days","volume_gate_alert","plan_start_date","plan_timezone"]);
-const ALLOWED_DAY = new Set(["day","date","day_name","rest","session_name","exercises"]);
-const ALLOWED_EX = new Set(["name","sets","reps","rest_seconds","cue","muscle_group","progression_note","target_rir"]);
+const ALLOWED_TOP = new Set([
+  "days","volume_gate_alert","plan_start_date","plan_timezone",
+  "plan_data_version","training_volume_summary","exercise_media_summary",
+  "cue_version",
+]);
+const ALLOWED_DAY = new Set(["day","date","day_name","rest","session_name","session_purpose","exercises"]);
+const ALLOWED_EX = new Set([
+  "name","sets","reps","rest_seconds","cue","muscle_group",
+  "progression_note","target_rir","exercise_role","movement_pattern",
+]);
 
 export interface ValidationResult {
   ok: boolean;
