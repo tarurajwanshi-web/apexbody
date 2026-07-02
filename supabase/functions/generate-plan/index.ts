@@ -362,7 +362,7 @@ Deno.serve(async (req) => {
       plan = null;
     }
     if (plan) {
-      const v1 = validateGeneratedPlan(plan, envelope, planStartISO);
+      const v1 = validateGeneratedPlan(plan, envelope, planStartISO, restMask);
       if (!v1.ok) {
         violations = v1.violations;
         const reprompt = basePrompt +
@@ -376,14 +376,14 @@ Deno.serve(async (req) => {
       }
     }
     if (plan) {
-      const v2 = validateGeneratedPlan(plan, envelope, planStartISO);
+      const v2 = validateGeneratedPlan(plan, envelope, planStartISO, restMask);
       if (!v2.ok) {
         violations = v2.violations;
         plan = null;
       }
     }
     if (!plan) {
-      plan = buildFallbackPlan(envelope, planStartISO, timezone, days);
+      plan = buildFallbackPlan(envelope, planStartISO, timezone, trainingDaysCount, restMask);
       usedFallback = true;
     }
 
