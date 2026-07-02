@@ -1,59 +1,57 @@
-## Observability fix — persist modifier + weight trend to `nutrition_weekly_reviews`
+## Fix — decouple `latestModifier` from the review window
 
-### Change 1 — Migration
+### Root cause
 
-Add two columns to `nutrition_weekly_reviews`:
+`macro-calculation.ts` uses one readiness fetch (lines 255–261) for two different purposes:
 
-```sql
-alter table public.nutrition_weekly_reviews
-  add column if not exists applied_modifier text,
-  add column if not exists modifier_overrode_decision boolean not null default false;
-```
+1. `avgReadiness` — the mean of `final_score` **across the reviewed week** (correct: it's an aggregate stat about that week).
+2. `latestModifier` — the "most recent" `nutrition_modifier` (should be latest at compute time, but currently comes from `readinessDays[0]` of the same week-scoped query).
 
-Both nullable-friendly (boolean has a default so existing rows don't break); no backfill of historical values — those runs weren't captured, and inventing them would be wrong. Existing GRANTs on the table already cover new columns (Postgres inherits table-level grants). No RLS policy change needed (existing "own reviews" policy covers all columns).
+Because the fetch is bounded by `.gte("score_date", week_start_date).lt("score_date", window_end_exclusive)`, `latestModifier` is really "latest within the reviewed week," not "latest overall." When the review runs after the week has ended (typical Monday-cron case), newer readiness rows are ignored.
 
-### Change 2 — Populate on insert (`supabase/functions/_shared/macro-calculation.ts`)
+Verified for test user `00000000-0000-0000-0001-000000000006`, review window `2026-06-22 → 2026-06-28`:
+- Windowed fetch returns rows up to `2026-06-26` → `latestModifier = null` (all in-window rows have null modifier)
+- Real latest at compute time is `2026-07-01` with `nutrition_modifier = fuel_more`
 
-Add three fields to the insert payload at the `directInsertReview` builder (around lines 515–540):
+### Change
 
-```ts
-weight_trend_kg_per_week: trend_delta_kg,
-applied_modifier: latestModifier,
-modifier_overrode_decision: modifierOverrode,
-```
+Add a second, unbounded readiness fetch dedicated to `latestModifier`. Keep the existing windowed fetch for `avgReadiness` unchanged — that aggregate must stay week-scoped.
 
-`trend_delta_kg` is already computed at line 282 (and aliased to `weightTrendPerWeek` at line 357). `latestModifier` and `modifierOverrode` are already computed in the E1 override block. No new math.
-
-Also compute the other already-derived-but-unpersisted signals sitting in scope, since they're free:
+In `supabase/functions/_shared/macro-calculation.ts`, after the existing readiness block (~line 270), add:
 
 ```ts
-avg_rir: avgRir ?? null,
-consecutive_deficit_weeks: consecutiveDeficitWeeks ?? 0,
-weight_stall_detected: weightStallDetected ?? false,
+// Most recent modifier at compute time (unbounded by review window).
+// Same-day directive semantics: matches generate-plan's usage and the E1 spec.
+const { data: latestModifierRow } = await supa
+  .from("readiness_scores")
+  .select("nutrition_modifier, score_date")
+  .eq("user_id", user_id)
+  .order("score_date", { ascending: false })
+  .limit(1)
+  .maybeSingle();
+
+const latestModifier = (latestModifierRow?.nutrition_modifier ?? null) as NutritionModifier | null;
 ```
 
-I'll verify each of these variable names actually exists in scope before including — if any don't, that specific field is dropped from this batch, not renamed or invented.
+Then delete the two lines currently assigning `latestReadiness` / `latestModifier` from the windowed set (lines 268–270).
 
-### Change 3 — Re-run for the test user
+`avgReadiness` computation and the `if (avgReadiness < 45 && trainingLoadIndex > 1.0)` block stay exactly as they are.
 
-After deploy:
+### Verify
 
-```sql
-select net.http_post(
-  url := '.../functions/v1/calculate-macros-weekly',
-  headers := jsonb_build_object('Content-Type','application/json','x-internal-secret', public.get_dispatch_secret()),
-  body := jsonb_build_object('user_id','00000000-0000-0000-0001-000000000006','force_recalculate', true)
-);
-```
+After deploy, delete the current test row `f68b3eb1…` for the synthetic user and re-run `calculate-macros-weekly` with `force_recalculate: true`. Expected new row:
 
-Then read the new review row for that user and report `applied_modifier`, `modifier_overrode_decision`, `weight_trend_kg_per_week`, `decision`, `new_target_calories`.
+- `applied_modifier`: `fuel_more` (from `2026-07-01` readiness)
+- Base decision for goal `strength` at `weightTrendPerWeek ≈ 0` and `trainingLoadIndex 0.75` → strength branch (line 380): `weightTrendPerWeek < 0.2` so decision = `trainingLoadIndex > 1.1 ? "increase" : "hold"` → `hold`
+- E1 override (line 440): `fuel_more` + base `hold` + goal `strength` (≠ fat_loss) + `trend_delta_kg 0 < 0.5` → decision flips to `increase`, `modifierOverrode = true`
+- Expected recorded values: `decision: increase`, `modifier_overrode_decision: true`, `applied_modifier: fuel_more`, `weight_trend_kg_per_week: 0.00`, `new_target_calories > 2060`
 
-### Follow-up caveat
-
-`force_recalculate: true` currently inserts a **new** review row for the same week (as observed — we now have two rows for `2026-06-22` window territory: `dbc9aab6…` on `2026-06-15` and the new `6f62e0de…` on `2026-06-22`). If the intent is "overwrite the current week's row when forced," that's a separate engine change and I won't touch it here. Flagging so a second forced run doesn't surprise you with row proliferation.
+If the actual write doesn't match this, I'll report the mismatch rather than paper over it.
 
 ### Not in this change
 
-- No new `flag_reason` semantics — that channel keeps its existing role (`deficit_capped_for_safety`, `abnormal_week`, etc.), independent of `applied_modifier`.
-- No changes to `trigger-weekly-macro-review`, `calculate-macros-weekly` HTTP shells, decision logic, or E1 override thresholds.
-- No frontend/type changes yet — `nutrition_weekly_reviews` types regenerate automatically after the migration; UI can be wired up separately if you want the modifier surfaced anywhere.
+- No new column, no migration (`applied_modifier` column already exists from the last batch).
+- `avgReadiness` remains week-scoped — intentional.
+- No change to `deficit_caution` / `fuel_more` threshold values, TDEE blending, or weight-trend branches.
+- No change to `generate-plan` — it already fetches most-recent modifier the intended way; that behavior is what this fix is aligning to.
+- Not touching the separate `force_recalculate` upsert gap (still requires manual delete of the current week's row to re-run). That's a distinct engine limitation; flag but don't fix here.
