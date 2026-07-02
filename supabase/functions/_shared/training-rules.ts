@@ -445,8 +445,23 @@ export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartIS
       }
       // cue / muscle_group / progression_note
       if (typeof ex.cue !== "string" || !ex.cue.trim() || ex.cue.length > 240) v.push(`day[${i}].exercises[${j}].cue invalid`);
+      else if (MARKDOWN_RX.test(ex.cue)) v.push(`day[${i}].exercises[${j}].cue contains markdown syntax — plain prose only`);
       if (typeof ex.muscle_group !== "string" || !ex.muscle_group.trim()) v.push(`day[${i}].exercises[${j}].muscle_group required`);
+      else if (!MUSCLE_GROUP_SET.has(ex.muscle_group)) v.push(`day[${i}].exercises[${j}].muscle_group "${ex.muscle_group}" not in allowed enum`);
       if (typeof ex.progression_note !== "string" || !ex.progression_note.trim()) v.push(`day[${i}].exercises[${j}].progression_note required`);
+      else if (MARKDOWN_RX.test(ex.progression_note)) v.push(`day[${i}].exercises[${j}].progression_note contains markdown syntax — plain prose only`);
+      // movement_pattern (optional in v1 rows, required for v2 generation — validator tolerates missing)
+      if (ex.movement_pattern !== undefined && ex.movement_pattern !== null) {
+        if (typeof ex.movement_pattern !== "string" || !MOVEMENT_PATTERN_SET.has(ex.movement_pattern)) {
+          v.push(`day[${i}].exercises[${j}].movement_pattern "${ex.movement_pattern}" not in allowed enum`);
+        }
+      }
+      // exercise_role
+      if (ex.exercise_role !== undefined && ex.exercise_role !== null) {
+        if (typeof ex.exercise_role !== "string" || !EXERCISE_ROLE_SET.has(ex.exercise_role)) {
+          v.push(`day[${i}].exercises[${j}].exercise_role "${ex.exercise_role}" not in allowed enum`);
+        }
+      }
       // target_rir if present
       if (ex.target_rir !== undefined && ex.target_rir !== null) {
         const t = Number(ex.target_rir);
