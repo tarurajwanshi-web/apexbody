@@ -240,10 +240,20 @@ Deno.serve(async (req) => {
     const tz = profile.timezone || "Asia/Dubai";
     const today = getUserLocalDate(tz);
     const weekStart = addDays(today, -7);
+    const now = new Date();
 
-    // Time gate: Friday 8 PM user local time
-    if (!force && !isUserLocalFridayEvening(tz)) {
-      results.push({ user_id: profile.user_id, status: "skipped", reason: "not_friday_8pm" });
+    // Rolling cadence gate: fire at 8 PM local, ≥7 days since last card (or profile completion)
+    const { data: lastCard } = await supa
+      .from("daily_coaching_cards")
+      .select("created_at")
+      .eq("user_id", profile.user_id)
+      .eq("card_type", "weekly_pattern")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!force && !isRollingCadenceDue(tz, now, lastCard?.created_at ?? null, profile.profile_completed_at, 20, 7)) {
+      results.push({ user_id: profile.user_id, status: "skipped", reason: "cadence_not_due" });
       continue;
     }
 
