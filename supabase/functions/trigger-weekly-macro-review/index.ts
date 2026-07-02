@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const tz = (profile as Profile).timezone || "UTC";
+  const tz = (profile as Profile).timezone || DEFAULT_TIMEZONE;
   const now = new Date();
 
   // Gate: must be Monday in user's local timezone.
