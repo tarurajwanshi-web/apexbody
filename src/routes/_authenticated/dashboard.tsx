@@ -79,46 +79,38 @@ function truncate(s: string, n = 160): string {
 
 /** Closed-loop sentence — one line that names which engine influenced which. */
 function buildClosedLoop(
-  recovery: number | null,
-  fuel: number | null,
-  effort: number | null,
-  readiness: number | null,
+  trainingPermission: string | null,
+  nutritionModifier: string | null,
+  confidenceLevel: string | null,
   trainingPlanned: boolean,
 ): { sentence: string; engines: { readiness?: boolean; load?: boolean; nutrition?: boolean; recovery?: boolean } } {
-  if (readiness != null && readiness >= 75 && trainingPlanned) {
+  if (!trainingPermission) {
+    return { sentence: "Log recovery and nutrition so APEX can close the loop on today.", engines: {} };
+  }
+  if (trainingPermission === "red_recover") {
     return {
-      sentence: "Readiness is high — training load is pulling calories up today.",
-      engines: { readiness: true, load: true, nutrition: true },
+      sentence: nutritionModifier === "recovery_day_refeed"
+        ? "Readiness flagged recovery today — training is held back and nutrition added a refeed to support it."
+        : "Readiness flagged recovery today — training volume is held back, nutrition is holding steady.",
+      engines: { readiness: true, load: true, nutrition: nutritionModifier !== "normal" },
     };
   }
-  if (recovery != null && recovery < 50) {
+  if (trainingPermission === "orange_reduce") {
+    return { sentence: "Readiness is reduced today — training load is being trimmed to match.", engines: { readiness: true, load: true } };
+  }
+  if (nutritionModifier === "deficit_caution") {
+    return { sentence: "Nutrition is flagging caution today — training is factoring this into the plan.", engines: { readiness: true, nutrition: true, load: true } };
+  }
+  if (nutritionModifier === "fuel_more") {
+    return { sentence: "Training load is running high relative to fuel — nutrition is pushing calories up today.", engines: { readiness: true, load: true, nutrition: true } };
+  }
+  if (trainingPermission === "green_train" && trainingPlanned) {
     return {
-      sentence: "Recovery is low — APEX is easing training volume and holding fuel steady.",
-      engines: { recovery: true, load: true },
+      sentence: confidenceLevel === "LOW" ? "Readiness is clear, though confidence is still building — training as planned." : "Readiness is clear — training load is on plan today.",
+      engines: { readiness: true, load: true },
     };
   }
-  if (fuel != null && fuel < 50) {
-    return {
-      sentence: "Fuel score is low — log meals to keep training load on plan.",
-      engines: { nutrition: true, load: true },
-    };
-  }
-  if (effort != null && effort < 50 && trainingPlanned) {
-    return {
-      sentence: "Training planned today — readiness and recovery both clear.",
-      engines: { readiness: true, recovery: true, load: true },
-    };
-  }
-  if (recovery != null && fuel != null && effort != null) {
-    return {
-      sentence: "All four engines are steady. Keep the pattern.",
-      engines: { readiness: true, load: true, nutrition: true, recovery: true },
-    };
-  }
-  return {
-    sentence: "Log meals and recovery so APEX can close the loop on today.",
-    engines: { nutrition: true, recovery: true },
-  };
+  return { sentence: "All engines are steady today. Keep the pattern.", engines: { readiness: true, load: true, nutrition: true, recovery: true } };
 }
 
 function trendWord(values: (number | null)[]): string {
