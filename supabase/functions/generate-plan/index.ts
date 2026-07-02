@@ -291,14 +291,45 @@ Deno.serve(async (req) => {
       `\nDETERMINISTIC TRAINING ENVELOPE (hard constraints — violating any of these = invalid output):\n- ` +
       envelope.guardrails.join("\n- ");
 
-    // Compute expected calendar for the prompt (day/date/day_name)
+    // Compute expected calendar for the prompt (day/date/day_name).
+    // Deterministically pin rest/train per day from profile.training_day_codes
+    // (lowercase 3-letter codes: mon..sun). If codes are empty/invalid, we
+    // leave restMask undefined and Sonnet + fallback keep the historical
+    // even-spread behavior.
+    const DOW_TO_CODE = ["sun","mon","tue","wed","thu","fri","sat"] as const;
+    const rawCodes = Array.isArray((p as any).training_day_codes)
+      ? ((p as any).training_day_codes as unknown[])
+          .map((x) => (typeof x === "string" ? x.trim().toLowerCase() : ""))
+          .filter((x) => (DOW_TO_CODE as readonly string[]).includes(x))
+      : [];
+    const codeSet = new Set(rawCodes);
+    let restMask: boolean[] | undefined;
+    if (codeSet.size > 0) {
+      if (codeSet.size !== days) {
+        console.warn(`[generate-plan] training_day_codes size ${codeSet.size} != training_days_per_week ${days}; trusting codes`);
+      }
+    }
+
     const calendar = Array.from({ length: 7 }, (_, i) => {
       const dt = new Date(planStartISO + "T00:00:00Z");
       dt.setUTCDate(dt.getUTCDate() + i);
       const iso = dt.toISOString().slice(0, 10);
-      const dn = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][dt.getUTCDay()];
-      return { day: i + 1, date: iso, day_name: dn };
+      const dow = dt.getUTCDay();
+      const dn = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][dow];
+      const code = DOW_TO_CODE[dow];
+      const rest_flag = codeSet.size > 0 ? !codeSet.has(code) : undefined;
+      return rest_flag === undefined
+        ? { day: i + 1, date: iso, day_name: dn }
+        : { day: i + 1, date: iso, day_name: dn, rest_flag };
     });
+    if (codeSet.size > 0) {
+      restMask = calendar.map((c: any) => c.rest_flag === true);
+    }
+    const trainingDaysCount = restMask ? restMask.filter((r) => !r).length : days;
+
+    const restMaskBlock = restMask
+      ? `\nREST_MASK (hard): the rest flag per day is fixed by the user's chosen training days. Do not move rest days. calendar[i].rest_flag is authoritative — each day.rest MUST equal calendar[i].rest_flag.`
+      : "";
 
     const promptSchemaNote =
       `Return ONLY a JSON object of shape: { "plan_start_date": "${planStartISO}", "plan_timezone": "${timezone}", "days": [7 items], "volume_gate_alert": string|null }. ` +
@@ -308,12 +339,12 @@ Deno.serve(async (req) => {
 
     const basePrompt =
       `Build a rolling 7-day workout plan starting ${planStartISO} (user timezone ${timezone}).\n` +
-      `Use exactly this calendar (day/date/day_name):\n${JSON.stringify(calendar)}\n` +
-      `${envelopeBlock}\n` +
+      `Use exactly this calendar (day/date/day_name${restMask ? "/rest_flag" : ""}):\n${JSON.stringify(calendar)}\n` +
+      `${envelopeBlock}${restMaskBlock}\n` +
       `${shieldContext}\n` +
       `${(underFuelled || shieldFuellingCaution) ? `\nFUELLING CAUTION${underFuelled && targetCalories ? ` (avg intake ${Math.round(avgIntake!)} kcal vs ${Math.round(targetCalories!)} kcal target)` : ""}${latestNutritionModifier ? ` — Shield nutrition_modifier=${latestNutritionModifier}` : ""}. Do not programme to failure.` : ""}` +
       historyNote + "\n" +
-      `Exactly ${days} training days with APEX-named sessions (e.g. "APEX Push A", "APEX Lower A", "APEX Full Body A"), each with ${envelope.exercisesPerSession[0]}-${envelope.exercisesPerSession[1]} exercises. Remaining ${7 - days} days are rest (rest=true, session_name=null, exercises=[]).\n` +
+      `Exactly ${trainingDaysCount} training days with APEX-named sessions (e.g. "APEX Push A", "APEX Lower A", "APEX Full Body A"), each with ${envelope.exercisesPerSession[0]}-${envelope.exercisesPerSession[1]} exercises. Remaining ${7 - trainingDaysCount} days are rest (rest=true, session_name=null, exercises=[]).\n` +
       `Include muscle_group per exercise. target_rir must be an integer inside [${envelope.targetRir[0]}, ${envelope.targetRir[1]}].\n` +
       promptSchemaNote;
 
