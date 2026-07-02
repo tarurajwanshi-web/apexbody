@@ -264,7 +264,7 @@ function WorkoutsPage() {
       {!loading && plan && (
         <>
           <LockBanner plan={plan} />
-          <VolumeNudge plan={plan} weekLogs={weekLogs} todayIdx={todayIdx} />
+          <VolumeNudge plan={plan} weekLogs={weekLogs} todayIdx={todayIdx} hadShieldCut={volumeChoice === "recovery" || volumeChoice === "reduced"} />
 
           {/* Start Today's Workout — opens pre-workout readiness sheet.
               Rest days still expose an opt-in "Train anyway" path so users
