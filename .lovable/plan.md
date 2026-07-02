@@ -1,91 +1,101 @@
 
-# BATCH A2 — Five independent bug fixes
+# BATCH B — Training Engine Prompt v2
 
-Verified findings up front:
+Scope: `supabase/functions/_shared/training-rules.ts` + `supabase/functions/generate-plan/index.ts`. No schema migration. No DB write-shape change (still `weekly_plans.plan_data` jsonb).
 
-- **A2.1** — `training_day_codes` is stored as lowercase 3-letter strings (`["mon","tue","fri","sat"]`). Verified against a real row. `generate-plan` never reads it; `buildFallbackPlan` even-spreads days via `Math.round((i*7)/daysCount)`; Sonnet's prompt only pins `day/date/day_name`, not which days are rest.
-- **A2.2** — `calculate-macros` does NOT error with no measurements — it falls back to age 30, 170 cm, 70 kg, male. That's still a defaulted target, not the user's target. Better than nothing but worth surfacing in the plan.
-- **A2.3** — Debug button confirmed at `src/routes/_authenticated/dashboard.tsx` calling `test-seed-10-users`.
-- **A2.4** — `VolumeNudge` tiers today: `gap>=4` (behind), `gap>=1` (short), `gap<=0` (on track). No neutral tier and no Shield attribution.
-- **A2.5** — No-meals branch upserts `"No meals logged today. Log something to get your daily coaching note. 📱"`. Cron-driven (`isUserLocalHour(tz, coachingHour)`), with `existing && !force` idempotency skip on the same-day row.
+Verified pre-conditions:
+- `workout_set_logs` has no CHECK constraint on `muscle_group` — the enum values in B2 will land in an existing text column with no rejection risk.
+- `training-rules.ts` `pickWeekPatterns`/`buildFallbackPlan` currently reads `trainingDaysPerWeek` only; `goal` never enters pattern selection (B1 confirmed).
+- Validator `ALLOWED_TOP = {days, volume_gate_alert, plan_start_date, plan_timezone}` — anything else (e.g. `cue_version` written post-hoc by backfill-cues, or the new `plan_data_version`) would be rejected by re-validation if we ever re-ran it on a stored plan. B3 closes that gap for the new field.
+- `weekly_plans.plan_data` is jsonb — additive fields are free.
 
-## A2.1 — Pin training days from `training_day_codes`
+---
 
-**In `supabase/functions/generate-plan/index.ts`:**
+## B1 — Goal-aware fallback patterns (isolated, first)
 
-1. Extend the profile select to include `training_day_codes`.
-2. Read `profile.training_day_codes` as `string[]`. Normalise (lowercase, trim); accept the canonical set `mon|tue|wed|thu|fri|sat|sun`.
-3. Build a deterministic `restMask: boolean[7]` aligned to the `calendar` array already computed in the function. Mapping: for each entry `calendar[i]`, take `day_name` (e.g. "Monday") → lowercase 3-letter code → training if code ∈ `training_day_codes` else rest. Store `restMask[i] = !isTrain`.
-4. **Reconcile count vs codes** (defensive — DB shows some rows with `training_days_per_week=3` and empty `training_day_codes`):
-   - If `training_day_codes` is empty/invalid/mismatched length vs `training_days_per_week`, fall through to current even-spread behavior (no change) — do NOT block generation.
-   - If codes provided but count mismatch (e.g. codes has 4, `training_days_per_week=3`), trust the codes (they were the last direct user choice) and log a warning.
-5. Pass `restMask` into the prompt:
-   - Extend the `calendar` JSON block to include `rest_flag` per day, and add a hard constraint line: `"REST_MASK (hard): the rest flag per day is fixed by the user's chosen training days. Do not move rest days. calendar[i].rest_flag is authoritative."`
-6. Pass `restMask` into `buildFallbackPlan` and `validateGeneratedPlan`:
-   - `buildFallbackPlan(envelope, planStartISO, timezone, days, restMask?)` — when provided, iterate `i in 0..6`; rest iff `restMask[i]`; otherwise consume the next `patterns[pIdx]` slot. Preserves current behavior when `restMask` is undefined.
-   - `validateGeneratedPlan(plan, envelope, planStartISO, restMask?)` — when provided, add a rule: for each i, `days[i].rest === restMask[i]`. Violation surfaces in the existing reprompt loop.
-7. No schema change. No Shield/scoring change. Signature additions are optional params so `training-rules.ts` callers not passing `restMask` still work.
+`training-rules.ts` — replace the days-only `pickWeekPatterns` + inline pattern block in `buildFallbackPlan` with a goal-family lookup, then fall through to a days-count switch inside that family.
 
-## A2.2 — Skip-body-data onboarding still needs a macro target
+Pattern families:
+- `strength` → compound-heavy full/lower/upper rotation, no isolation/conditioning
+- `muscle_gain` / `recomposition` → PPL rotation with isolation on 5–6 day, full-body on ≤3 day
+- `fat_loss` → PPL + conditioning finisher day, full-body on ≤3 day
+- `athletic_performance` → lower/full/lower/upper with power+conditioning days (never generic PPL)
 
-**In `src/routes/_authenticated/onboarding.tsx`:**
+Signature stays the same; only the pattern array construction changes. `pickWeekPatterns` is removed (dead — the inline switch already replaced it). Rest-mask handling unchanged.
 
-1. In the `else` branch (skip-body-data), add `supabase.functions.invoke("calculate-macros", { body: { user_id: userId } })` in parallel with `generate-plan`, mirroring the `hasBody` branch.
-2. **Caveat to surface in UI copy on that step**: the produced target is based on defaults (170 cm / 70 kg / 30 y / male) until the user later provides body data. The skip-body screen already exists — add a single line under the CTA: "You can update this any time in Settings — until then we'll use a starting estimate." (No copy change to the confirmation toast.)
-3. No change to `calculate-macros` itself — its default-fallback behavior is intentional and already used by the hasBody path when a field is missing.
+## B2 — Closed enums
 
-## A2.3 — Gate debug seeder to dev
+Add and export from `training-rules.ts`:
 
-**In `src/routes/_authenticated/dashboard.tsx` around line 401–409:**
+```ts
+export type MuscleGroup = "chest"|"back"|"shoulders"|"quads"|"hamstrings"|"glutes"
+  |"calves"|"biceps"|"triceps"|"forearms"|"core"|"full_body"|"cardio"|"mobility";
+export type MovementPattern = "squat"|"hinge"|"horizontal_push"|"vertical_push"
+  |"horizontal_pull"|"vertical_pull"|"lunge"|"carry"|"rotation"|"anti_rotation"
+  |"locomotion"|"conditioning"|"mobility";
+export type ExerciseRole = "primary"|"secondary"|"accessory"|"isolation"
+  |"core"|"conditioning"|"mobility"|"power";
+```
 
-Wrap the "Seed 10 Edge Cases (90 days)" button in `import.meta.env.DEV && ( … )`. Do not delete. No other changes.
+Plus `MUSCLE_GROUPS`, `MOVEMENT_PATTERNS`, `EXERCISE_ROLES` as `readonly` string arrays (Set-backed helpers for O(1) validator membership checks).
 
-## A2.4 — VolumeNudge middle tier + Shield attribution
+## B3 — plan_data shape v2
 
-**In `src/routes/workouts.tsx` `VolumeNudge`:**
+- Day object: add `session_purpose: string` (short, prose; separate from display `session_name`). Rest days: `session_purpose = null`.
+- Exercise object: add `exercise_role: ExerciseRole`, `movement_pattern: MovementPattern`; `muscle_group` remains a string but now constrained to `MuscleGroup`.
+- Top level: add `plan_data_version: 2`. Set unconditionally after generation and after fallback, so every new row written by generate-plan is v2.
 
-1. Determine "first training day of the week that has elapsed" = smallest `i <= todayIdx` where `!days[i].rest`. Compute `elapsedTrainingDays = number of non-rest days in [0..todayIdx]`.
-2. Compute `shieldCut` = whether today's plan already has a Shield-driven volume reduction. Two signals available in this component's props path: (a) `plan.plan_data.volume_gate_alert` (already returned by generate-plan), (b) the top-level workouts.tsx already has `volumeChoice` in scope for the effective-plan reducer. We pass a boolean `hadShieldCut = volumeChoice === "recovery" || volumeChoice === "reduce"` via a new prop from the parent (single-line change where `<VolumeNudge …/>` renders at line 267).
-3. New tiers:
-   - `gap >= 4` → current "behind" copy, unchanged.
-   - `gap >= 1 && (elapsedTrainingDays <= 1)` → **neutral early**: "You're `{gap}` set{gap===1?"":"s"} into the week's plan — plenty of runway. `{nextDayLabel}` is next."
-   - `gap >= 1 && hadShieldCut` → **neutral Shield-attributed**: "You're `{gap}` set{gap===1?"":"s"} short — today's session was reduced for recovery, so that's expected."
-   - `gap >= 1` (else) → existing "short of plan" copy.
-   - `gap <= 0` → existing "on track" copy.
-4. Tier order in code: shield-attributed check before early-week check so Shield attribution wins when both apply.
+Existing rows in `weekly_plans` stay untouched (readers must tolerate `plan_data_version` missing → treat as v1, meaning `exercise_role`/`movement_pattern`/`session_purpose` may be absent). Consumer changes are OUT OF SCOPE for this batch.
 
-## A2.5 — Coaching feed no-meals streak
+## B4 — Post-validation computed summaries (never asked of Sonnet)
 
-**In `supabase/functions/generate-daily-scorecard/index.ts`, no-meals branch (line ~152):**
+After `validateGeneratedPlan` passes, generate-plan computes and attaches:
 
-1. Before writing, query the user's `daily_coaching_cards` where `card_type='daily_scorecard'` and `card_date < today`, ordered `card_date DESC LIMIT 7`. Walk back day-by-day: count consecutive rows whose `content` begins with the no-meals sentinel prefix (`"No meals logged"`). That gives `noMealStreak` (number of prior consecutive no-log days).
-2. Tone selection:
-   - `noMealStreak <= 1` (day 1 or 2): current copy.
-   - `noMealStreak === 2 || 3` (day 3–4): softer: `"Still no meals logged this week — no pressure, just log your next one whenever works."`
-   - `noMealStreak >= 4` (day 5+): write only every 3rd day. If `noMealStreak % 3 !== 0`, `continue` without upsert (leaves the day without a scorecard card, which is fine — feed shows other cards). When it does write, use: `"We'll be here when you're ready to log again."`
-3. Idempotency preserved: the `existing && !force` guard at line 125 already prevents duplicate writes on retriggers within the same day. Skipping the upsert on days that fail the mod-3 gate is compatible — the guard only fires when a row already exists.
-4. No cron/schedule change. No column/schema change. `card_type` and upsert conflict target unchanged.
+- `training_volume_summary`: `{ total_sets, sets_per_muscle: Record<MuscleGroup, number>, sets_per_movement_pattern: Record<MovementPattern, number>, training_days: number }`. Pure sum from the now-enumerated fields.
+- `exercise_media_summary`: `{ media_status: "matched" | "missing", missing_count: number }`. Source-agnostic — no YMove references. In this batch the initial write is `media_status: "missing", missing_count: total_ex_count` (real matching stays the existing async `sync-exercise-images` job's job).
 
-## Files touched
+Both are computed in code, in `generate-plan/index.ts` after validation succeeds AND after `buildFallbackPlan` returns. Also added to `ALLOWED_TOP` in the validator so a hypothetical re-validation pass doesn't reject them, but Sonnet is never asked for them (see B5) and validator does not require them (they are added after `validateGeneratedPlan`).
 
-- `supabase/functions/generate-plan/index.ts` (A2.1)
-- `supabase/functions/_shared/training-rules.ts` (A2.1 — optional param added to `buildFallbackPlan` and `validateGeneratedPlan`)
-- `supabase/functions/generate-daily-scorecard/index.ts` (A2.5)
-- `src/routes/_authenticated/onboarding.tsx` (A2.2)
-- `src/routes/_authenticated/dashboard.tsx` (A2.3)
-- `src/routes/workouts.tsx` (A2.4)
+## B5 — Sonnet prompt updates
 
-## Out of scope
+`callClaude` system + `basePrompt` in `generate-plan/index.ts`:
 
-- No schema migration, no RLS change, no new tables, no Shield/scoring changes.
-- Not touching `calculate-macros` defaults (A2.2 caveat is copy only).
-- Not changing cron frequency for `generate-daily-scorecard` (A2.5 varies write frequency at the write site, not at the trigger).
-- No changes to `plan_data` shape returned to the UI.
+1. Schema JSON string extended with `session_purpose`, `exercise_role`, `movement_pattern`, and `plan_data_version` fields. Enum values listed inline in the system prompt for `muscle_group`, `movement_pattern`, `exercise_role` — Sonnet must pick from these lists verbatim.
+2. Explicit no-markdown rule, alongside the existing "no session_note/notes/tempo" bans:
+   > All text fields (`cue`, `progression_note`, `session_purpose`) must be plain prose — no markdown, no asterisks, no bold syntax, no bullet lists.
+3. Explicit ban on aggregate fields: "Do NOT emit training_volume_summary, exercise_media_summary, or any summary/aggregate/count field. Those are computed downstream."
+4. `session_purpose` guidance: "one sentence, max ~20 words, what this session is training and why — plain prose."
 
-## Acceptance
+## B6 — Validator whitelist + enum membership
 
-- A2.1: user with `training_day_codes=['mon','tue','fri','sat']` and `training_days_per_week=4` gets a plan where Mon/Tue/Fri/Sat are training and Wed/Thu/Sun are rest, from both Sonnet output (validator rejects otherwise → reprompt) and fallback. User with empty `training_day_codes` sees no behavior change vs today.
-- A2.2: onboarding skip-body path leaves the user with an active `daily_macro_targets` row (source=`onboarding`, defaulted anthropometrics).
-- A2.3: seeder button hidden on preview + published; visible on `bun run dev`.
-- A2.4: on Day 1 with 1–3 set gap, message reads as neutral/early; on a Shield-cut day the message attributes the gap; otherwise unchanged from today.
-- A2.5: after 3+ consecutive no-log days the coaching card copy softens; after 5+ consecutive days the card is written at most every 3rd day.
+`training-rules.ts` `validateGeneratedPlan`:
+
+- `ALLOWED_TOP += {plan_data_version, training_volume_summary, exercise_media_summary}` (last two tolerated for re-validation of stored plans).
+- `ALLOWED_DAY += {session_purpose}`.
+- `ALLOWED_EX  += {exercise_role, movement_pattern}`.
+- New membership checks against the enum sets:
+  - `muscle_group ∈ MUSCLE_GROUPS`
+  - `movement_pattern ∈ MOVEMENT_PATTERNS`
+  - `exercise_role ∈ EXERCISE_ROLES`
+- `session_purpose`: required non-empty string on training days, must equal null on rest days. Reject strings containing `**`, `__`, ``` ` ```, or leading `- ` (markdown guard). Same guard applied to `cue` and `progression_note`.
+- `plan_data_version`: if present, must equal `2`. Not required at validation time (generate-plan sets it after), but if Sonnet emits it, it must be right.
+
+Fallback (`buildFallbackPlan`) — every fallback exercise gets `exercise_role`, `movement_pattern`, and an enum-valid `muscle_group`; every training day gets a `session_purpose` string; top-level `plan_data_version: 2` and `session_purpose: null` on rest days.
+
+---
+
+## Explicitly NOT in this batch
+
+- 4-week block periodization / `training_blocks` table.
+- Component redistribution (volume grid, weight trend, contradiction card).
+- PR detection, Home streak, day-by-day paged navigation.
+- `superset_group_id`, `swap_options_by_equipment`.
+- Any migration on `workout_set_logs` (no constraint change needed).
+- Consumer updates in `workouts.tsx` for the new `plan_data_version`/`session_purpose`/`exercise_role`/`movement_pattern` fields — readers tolerate missing, but no UI is added here.
+
+## Test / verify after implementation
+
+1. Type-only compile: enum types + arrays are exported.
+2. Manual `generate-plan` invocation for a synthetic profile per goal — inspect returned plan for: `plan_data_version=2`, `training_volume_summary` present, all exercises carry valid enum values, fallback path also v2-shaped.
+3. Re-validate a stored plan through `validateGeneratedPlan` (round-trip) — passes.
+4. Confirm existing v1 rows in `weekly_plans` still render (workouts.tsx already tolerates missing fields on the current fields it reads; this batch adds none it consumes yet).

@@ -32,6 +32,36 @@ export type ProgressionModel =
   | "autoregulated"
   | "hold";
 
+// -------- closed enums (plan_data v2) --------
+export const MUSCLE_GROUPS = [
+  "chest","back","shoulders","quads","hamstrings","glutes",
+  "calves","biceps","triceps","forearms","core","full_body",
+  "cardio","mobility",
+] as const;
+export type MuscleGroup = typeof MUSCLE_GROUPS[number];
+
+export const MOVEMENT_PATTERNS = [
+  "squat","hinge","horizontal_push","vertical_push",
+  "horizontal_pull","vertical_pull","lunge","carry",
+  "rotation","anti_rotation","locomotion","conditioning","mobility",
+] as const;
+export type MovementPattern = typeof MOVEMENT_PATTERNS[number];
+
+export const EXERCISE_ROLES = [
+  "primary","secondary","accessory","isolation",
+  "core","conditioning","mobility","power",
+] as const;
+export type ExerciseRole = typeof EXERCISE_ROLES[number];
+
+const MUSCLE_GROUP_SET = new Set<string>(MUSCLE_GROUPS);
+const MOVEMENT_PATTERN_SET = new Set<string>(MOVEMENT_PATTERNS);
+const EXERCISE_ROLE_SET = new Set<string>(EXERCISE_ROLES);
+
+export const PLAN_DATA_VERSION = 2 as const;
+
+// Markdown guard for plain-prose text fields.
+const MARKDOWN_RX = /(\*\*|__|`|^\s*[-*]\s|^\s*#{1,6}\s)/m;
+
 export interface EnvelopeInput {
   goal: Goal;
   experience: Experience;
