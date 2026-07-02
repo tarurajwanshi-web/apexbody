@@ -189,7 +189,7 @@ Deno.serve(async (req) => {
   const results: Array<Record<string, unknown>> = [];
 
   for (const p of profiles ?? []) {
-    const tz = (p as { timezone?: string }).timezone || "UTC";
+    const tz = (p as { timezone?: string }).timezone || DEFAULT_TIMEZONE;
     // Time gate (unless explicit user_id override)
     if (!body.user_id && localHour(tz, now) !== 6) {
       continue;
