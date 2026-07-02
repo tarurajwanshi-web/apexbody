@@ -61,10 +61,16 @@ async function callClaude(apiKey: string, prompt: string) {
       system:
         "You are an expert evidence-based strength & conditioning coach. " +
         "Respond with ONLY a single JSON object, no prose, no markdown fences. " +
-        "Schema: { \"plan_start_date\": string (YYYY-MM-DD), \"plan_timezone\": string, \"days\": [ { \"day\": 1-7, \"date\": string (YYYY-MM-DD), \"day_name\": string, \"session_name\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string, \"progression_note\": string, \"target_rir\": int } ] } ], \"volume_gate_alert\": string|null }. " +
+        "Schema: { \"plan_data_version\": 2, \"plan_start_date\": string (YYYY-MM-DD), \"plan_timezone\": string, \"days\": [ { \"day\": 1-7, \"date\": string (YYYY-MM-DD), \"day_name\": string, \"session_name\": string|null, \"session_purpose\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string, \"movement_pattern\": string, \"exercise_role\": string, \"progression_note\": string, \"target_rir\": int } ] } ], \"volume_gate_alert\": string|null }. " +
         "No other fields allowed. Do NOT emit session_note, notes, description, tempo, or any field outside this schema. " +
+        "Do NOT emit training_volume_summary, exercise_media_summary, or any summary / aggregate / count field — those are computed downstream. " +
+        `muscle_group MUST be one of: ${MUSCLE_GROUPS.join(", ")}. ` +
+        `movement_pattern MUST be one of: ${MOVEMENT_PATTERNS.join(", ")}. ` +
+        `exercise_role MUST be one of: ${EXERCISE_ROLES.join(", ")}. ` +
+        "All text fields (cue, progression_note, session_purpose) must be plain prose — no markdown, no asterisks, no bold syntax, no bullet lists, no backticks, no headings. " +
         "progression_note is short (max ~10 words) — e.g. \"+2.5% from last week\", \"hold weight, RIR 2-3\", \"recovery — light technique only\", or \"new exercise — start moderate\". " +
-        "Always return exactly 7 days matching the provided calendar. Rest days have rest=true, session_name=null, exercises=[]. " +
+        "session_purpose is ONE plain-prose sentence (max ~20 words) describing what this session is training and why. On rest days session_purpose must be null. " +
+        "Always return exactly 7 days matching the provided calendar. Rest days have rest=true, session_name=null, session_purpose=null, exercises=[]. " +
         "The 'cue' field is ONE sharp coaching correction — the single thing you'd shout mid-set to fix that exercise's most common failure point. " +
         "Not a checklist. Not a description of correct form. One real spoken sentence, max ~18 words, second person, lead with the action.",
       messages: [{ role: "user", content: prompt }],
