@@ -20,6 +20,9 @@ export type DashboardReadiness = {
   final_score: number | null;
   pillar_breakdown: Record<string, number | string | null> | null;
   score_date: string | null;
+  training_permission: string | null;
+  nutrition_modifier: string | null;
+  confidence_level: string | null;
 };
 
 export type DashboardMacros = {
@@ -112,7 +115,7 @@ export async function loadDashboardData(userId: string, tz: string): Promise<Das
       .maybeSingle(),
     supabase
       .from("readiness_scores")
-      .select("final_score, pillar_breakdown, score_date")
+      .select("final_score, pillar_breakdown, score_date, training_permission, nutrition_modifier, confidence_level")
       .eq("user_id", userId)
       .eq("score_date", today)
       .maybeSingle(),
@@ -207,6 +210,9 @@ export async function loadDashboardData(userId: string, tz: string): Promise<Das
         final_score: Number((readinessRes.data as any).final_score ?? 0),
         pillar_breakdown: (readinessRes.data as any).pillar_breakdown ?? null,
         score_date: (readinessRes.data as any).score_date ?? null,
+        training_permission: (readinessRes.data as any).training_permission ?? null,
+        nutrition_modifier: (readinessRes.data as any).nutrition_modifier ?? null,
+        confidence_level: (readinessRes.data as any).confidence_level ?? null,
       }
     : null;
 

@@ -100,6 +100,18 @@ Deno.serve(async (req) => {
       });
     }
 
+    const { data: latestReadiness } = await supa
+      .from("readiness_scores")
+      .select("training_permission")
+      .eq("user_id", user_id)
+      .order("score_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const readinessWarning =
+      (latestReadiness as { training_permission?: string | null } | null)?.training_permission === "red_recover"
+        ? "red_recover"
+        : null;
+
     // Same transform as the previous client-side logic.
     const newDays: Day[] = days.map((d, i) => {
       if (i === target_day_index) {
@@ -120,7 +132,7 @@ Deno.serve(async (req) => {
 
     if (updateErr) throw updateErr;
 
-    return new Response(JSON.stringify({ ok: true, plan_data: newPlanData }), {
+    return new Response(JSON.stringify({ ok: true, plan_data: newPlanData, readiness_warning: readinessWarning }), {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {
