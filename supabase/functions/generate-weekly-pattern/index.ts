@@ -39,48 +39,37 @@ type DetectedPattern = {
 };
 
 async function generatePatternExplanation(
-  lovableKey: string,
+  openaiKey: string,
   pattern: DetectedPattern,
-  ctx: { age: number | null; goal: string | null; proficiency: string | null },
+  ctx: { age: number | null; goal: string | null; proficiency: string | null; name: string | null },
 ): Promise<{ explanation: string; protocol: string } | null> {
-  if (!lovableKey) return null;
-  const sys =
-    "You're explaining a user's unique recovery pattern based on 4+ weeks of data. " +
-    "Be concrete and personal. Don't be generic. Explain the physiology simply. " +
-    "Provide a specific weekly protocol they can follow. " +
-    'Output ONLY JSON: { "explanation": string, "protocol": string }. ' +
-    "Plain text, no markdown, no emoji. Keep each field under 240 chars.";
-  const user =
+  const userPrompt =
     `Pattern: ${pattern.description}\n` +
     `Type: ${pattern.pattern_type}\n` +
     `Key: ${pattern.pattern_key}\n` +
     `Observations: ${pattern.data_points}\n` +
     `Metadata: ${JSON.stringify(pattern.metadata)}\n` +
     `User age: ${ctx.age ?? "unknown"}\n` +
-    `Goal: ${ctx.goal ?? "general"}\n` +
-    `Proficiency: ${ctx.proficiency ?? "intermediate"}\n\n` +
-    "Explain why this happens (physiology, 1-2 sentences). Provide a weekly protocol (1-2 sentences, specific days/intensities).";
+    `Goal: ${ctx.goal ?? "general"}\n\n` +
+    "Explain why this happens, physiologically, in 1-2 sentences — concrete and personal, not generic. " +
+    "Then give a specific weekly protocol they can follow, 1-2 sentences, naming actual days/intensities. " +
+    'Output ONLY a JSON object with this exact shape, no prose outside it: { "explanation": string, "protocol": string }. ' +
+    "Keep each field under 240 characters.";
   try {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Lovable-API-Key": lovableKey,
-        "X-Lovable-AIG-SDK": "vercel-ai-sdk",
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
       body: JSON.stringify({
-        model: "openai/gpt-5-mini",
-        messages: [
-          { role: "system", content: sys },
-          { role: "user", content: user },
-        ],
+        model: "gpt-4o-mini",
+        max_tokens: 300,
         response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: buildApexSystemPrompt({ proficiency: ctx.proficiency, name: ctx.name }) },
+          { role: "user", content: userPrompt },
+        ],
       }),
     });
-    if (!res.ok) {
-      console.error("pattern explanation failed:", res.status, await res.text());
-      return null;
-    }
+    if (!res.ok) { console.error("pattern explanation failed:", res.status, await res.text()); return null; }
     const json = await res.json();
     const text = json?.choices?.[0]?.message?.content ?? "";
     const parsed = JSON.parse(text);
@@ -88,10 +77,7 @@ async function generatePatternExplanation(
       return { explanation: parsed.explanation, protocol: parsed.protocol };
     }
     return null;
-  } catch (e) {
-    console.error("pattern explanation error:", e);
-    return null;
-  }
+  } catch (e) { console.error("pattern explanation error:", e); return null; }
 }
 
 function detectExerciseLagPatterns(
@@ -204,7 +190,7 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")!;
-  const lovableKey = Deno.env.get("LOVABLE_API_KEY") || "";
+  const openaiKey = Deno.env.get("OPENAI_API_KEY") || "";
 
   const supa = createClient(supabaseUrl, supabaseKey);
   const anthropic = new Anthropic({ apiKey: anthropicKey });
@@ -523,10 +509,11 @@ Output: Plain text, 250-300 words. Start with 📊`;
 
       for (const p of detected) {
         if (p.data_points < 4) continue;
-        const explained = await generatePatternExplanation(lovableKey, p, {
+        const explained = await generatePatternExplanation(openaiKey, p, {
           age: (profile.age as number | null) ?? null,
           goal: (profile.goal as string | null) ?? null,
           proficiency,
+          name: (profile as any).name ?? null,
         });
         const { error: upsertErr } = await supa
           .from("user_recovery_patterns")

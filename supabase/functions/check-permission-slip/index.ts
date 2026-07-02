@@ -167,7 +167,7 @@ Their stats today:
 
 Write ONE permission slip (2-3 sentences max).
 Rules:
-- Start with 🎯
+
 - Acknowledge their training effort (use actual numbers)
 - Acknowledge carbs are lower than usual
 - Give clear permission to enjoy a higher-carb meal tonight
