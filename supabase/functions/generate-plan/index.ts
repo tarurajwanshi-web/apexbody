@@ -17,8 +17,6 @@ import {
   type Equipment,
   type Permission,
   type Confidence,
-  type MuscleGroup,
-  type MovementPattern,
 } from "../_shared/training-rules.ts";
 
 const cors = {
