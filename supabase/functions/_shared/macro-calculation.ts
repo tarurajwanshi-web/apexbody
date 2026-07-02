@@ -265,9 +265,17 @@ export async function calculateMacrosForUser(
     ? readinessDays.reduce((sum, r) => sum + Number(r.final_score ?? 0), 0) / readinessDays.length
     : 50;
 
-  // Most recent day's modifier — same-day directive, not blended.
-  const latestReadiness = readinessDays && readinessDays.length > 0 ? readinessDays[0] : null;
-  const latestModifier = (latestReadiness?.nutrition_modifier ?? null) as NutritionModifier | null;
+  // Most recent modifier at compute time — unbounded by the review window.
+  // Matches generate-plan's semantics and the E1 "same-day directive" spec:
+  // a modifier issued after the reviewed week (e.g. today) still applies.
+  const { data: latestModifierRow } = await supa
+    .from("readiness_scores")
+    .select("nutrition_modifier, score_date")
+    .eq("user_id", user_id)
+    .order("score_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const latestModifier = (latestModifierRow?.nutrition_modifier ?? null) as NutritionModifier | null;
 
   if (avgReadiness < 45 && trainingLoadIndex > 1.0) {
     trainingLoadIndex = Math.max(0.85, trainingLoadIndex * 0.85);
