@@ -4,6 +4,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { requireInternalSecret, corsAllowHeaders } from "../_shared/authorize.ts";
+import { DEFAULT_TIMEZONE } from "../_shared/time-helpers.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
