@@ -308,7 +308,7 @@ export interface ValidationResult {
   violations: string[];
 }
 
-export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartISO: string): ValidationResult {
+export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartISO: string, restMask?: boolean[]): ValidationResult {
   const v: string[] = [];
   if (!plan || typeof plan !== "object") return { ok: false, violations: ["plan is not an object"] };
 
@@ -318,6 +318,10 @@ export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartIS
     v.push(`days must be an array of length 7 (got ${Array.isArray(days) ? days.length : typeof days})`);
     return { ok: false, violations: v };
   }
+
+  const useMask = Array.isArray(restMask)
+    && restMask.length === 7
+    && restMask.filter((r) => r === false).length > 0;
 
   // Locate first non-rest day for acute Shield checks.
   let firstNonRestIdx = -1;
@@ -332,6 +336,9 @@ export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartIS
     const expectedName = isoWeekdayName(expectedDate);
     if (d.day_name !== expectedName) v.push(`day[${i}].day_name must be ${expectedName} (got ${d.day_name})`);
     if (typeof d.rest !== "boolean") v.push(`day[${i}].rest must be boolean`);
+    if (useMask && typeof d.rest === "boolean" && d.rest !== restMask![i]) {
+      v.push(`day[${i}].rest must be ${restMask![i]} per user's chosen training days`);
+    }
     if (d.rest === true) {
       if (d.session_name !== null) v.push(`day[${i}] is rest — session_name must be null`);
       if (!Array.isArray(d.exercises) || d.exercises.length !== 0) v.push(`day[${i}] is rest — exercises must be []`);
