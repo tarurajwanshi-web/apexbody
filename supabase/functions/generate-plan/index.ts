@@ -401,9 +401,48 @@ Deno.serve(async (req) => {
       usedFallback = true;
     }
 
-    // Ensure top-level plan_start_date / plan_timezone are set
+    // Ensure top-level plan_start_date / plan_timezone / plan_data_version are set
     plan.plan_start_date = planStartISO;
     plan.plan_timezone = timezone;
+    plan.plan_data_version = PLAN_DATA_VERSION;
+
+    // Post-validation computed summaries — never asked of Sonnet.
+    // Pure aggregation over the (now validated / fallback-emitted) days.
+    {
+      const setsPerMuscle: Record<string, number> = {};
+      const setsPerPattern: Record<string, number> = {};
+      let totalSets = 0;
+      let totalExercises = 0;
+      let trainingDays = 0;
+      for (const d of (plan.days ?? []) as any[]) {
+        if (!d || d.rest === true) continue;
+        trainingDays += 1;
+        for (const ex of (d.exercises ?? []) as any[]) {
+          const s = Number(ex?.sets);
+          const nSets = Number.isFinite(s) && s > 0 ? s : 0;
+          totalSets += nSets;
+          totalExercises += 1;
+          const mg = typeof ex?.muscle_group === "string" ? ex.muscle_group : "unknown";
+          const mp = typeof ex?.movement_pattern === "string" ? ex.movement_pattern : "unknown";
+          setsPerMuscle[mg] = (setsPerMuscle[mg] ?? 0) + nSets;
+          setsPerPattern[mp] = (setsPerPattern[mp] ?? 0) + nSets;
+        }
+      }
+      plan.training_volume_summary = {
+        total_sets: totalSets,
+        training_days: trainingDays,
+        sets_per_muscle: setsPerMuscle,
+        sets_per_movement_pattern: setsPerPattern,
+      };
+      // Source-agnostic media summary. Real matching is the async
+      // sync-exercise-images job's responsibility; at generation time we
+      // simply record that nothing is matched yet.
+      plan.exercise_media_summary = {
+        media_status: "missing" as const,
+        missing_count: totalExercises,
+      };
+    }
+
 
     // Determine volume_gate_alert
     const emitAlert = weeklyReduce || envelope.sessionType === "recovery" || usedFallback;
