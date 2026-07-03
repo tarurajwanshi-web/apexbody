@@ -9,6 +9,8 @@ import { AICard } from "@/components/AIOrb";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { toast } from "sonner";
+import { useUserTimezone, getLocalDateISO } from "@/lib/dates";
+import { resolveTodayPlanDay } from "@/lib/plan.functions";
 
 
 export const Route = createFileRoute("/workouts")({
@@ -47,7 +49,9 @@ function WorkoutsPage() {
   const [ptrDelta, setPtrDelta] = useState(0);
   const ptrRef = useRef<HTMLDivElement>(null);
   const ptrStart = useRef<number | null>(null);
-  const todayIdx = todayMondayIndex();
+  const tz = useUserTimezone();
+  const todayLocalISO = getLocalDateISO(tz);
+  const todayIdx = resolveTodayPlanDay(plan?.plan_data?.days, todayLocalISO)?.idx ?? todayMondayIndex();
 
   const loadAll = useCallback(async () => {
     setLoading((prev) => prev); // no-op to keep prior behavior on first call
