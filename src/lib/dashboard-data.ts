@@ -6,6 +6,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { getLocalDateISO, addDaysISO, getLocalWeekRange } from "@/lib/dates";
+import { resolveTodayPlanDay } from "@/lib/plan.functions";
 
 export type DashboardProfile = {
   name: string | null;
@@ -286,9 +287,7 @@ export async function loadDashboardData(userId: string, tz: string): Promise<Das
   // Today's planned session from the most recent weekly plan.
   const latestPlan = ((plansRes.data as any[]) ?? [])[0]?.plan_data ?? null;
   const days = (latestPlan?.days as any[]) ?? [];
-  const jsDay = new Date().getDay();
-  const todayIdx = (jsDay + 6) % 7;
-  const todayPlannedRaw = days[todayIdx] ?? null;
+  const todayPlannedRaw = resolveTodayPlanDay(days, today)?.day ?? null;
   const todayPlannedSession = todayPlannedRaw
     ? {
         rest: !!todayPlannedRaw.rest,

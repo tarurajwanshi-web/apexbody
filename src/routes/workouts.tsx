@@ -9,6 +9,8 @@ import { AICard } from "@/components/AIOrb";
 import { RefreshStamp } from "@/components/RefreshStamp";
 import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { toast } from "sonner";
+import { useUserTimezone, getLocalDateISO } from "@/lib/dates";
+import { resolveTodayPlanDay } from "@/lib/plan.functions";
 
 
 export const Route = createFileRoute("/workouts")({
@@ -47,7 +49,9 @@ function WorkoutsPage() {
   const [ptrDelta, setPtrDelta] = useState(0);
   const ptrRef = useRef<HTMLDivElement>(null);
   const ptrStart = useRef<number | null>(null);
-  const todayIdx = todayMondayIndex();
+  const tz = useUserTimezone();
+  const todayLocalISO = getLocalDateISO(tz);
+  const todayIdx = resolveTodayPlanDay(plan?.plan_data?.days, todayLocalISO)?.idx ?? todayMondayIndex();
 
   const loadAll = useCallback(async () => {
     setLoading((prev) => prev); // no-op to keep prior behavior on first call
@@ -92,7 +96,7 @@ function WorkoutsPage() {
         .from("workout_set_logs")
         .select("*")
         .eq("user_id", uid)
-        .eq("entry_date", todayISO());
+        .eq("entry_date", todayLocalISO);
       setSetLogs((logs as any) ?? []);
 
       const weekStart = new Date();
@@ -103,14 +107,14 @@ function WorkoutsPage() {
         .select("*")
         .eq("user_id", uid)
         .gte("entry_date", weekStartISO)
-        .lte("entry_date", todayISO());
+        .lte("entry_date", todayLocalISO);
       setWeekLogs((wlogs as any) ?? []);
 
       const { data: readinessRow } = await supabase
         .from("readiness_scores")
         .select("final_score")
         .eq("user_id", uid)
-        .eq("score_date", todayISO())
+        .eq("score_date", todayLocalISO)
         .maybeSingle();
       setTodayReadiness(readinessRow ? Number((readinessRow as any).final_score) : null);
     } finally {
@@ -641,7 +645,7 @@ function SetRow({
       if (!uid) throw new Error("Not signed in");
       const row = {
         user_id: uid,
-        entry_date: todayISO(),
+        entry_date: todayLocalISO,
         exercise_name: exercise.name,
         set_number: setNumber,
         reps_completed: reps === "" ? null : Number(reps),
@@ -713,7 +717,7 @@ async function maybeWriteTrainingSummary(
   const { data: u } = await supabase.auth.getUser();
   const uid = u.user?.id;
   if (!uid) return;
-  const date = todayISO();
+  const date = todayLocalISO;
 
   const { data: logs } = await supabase
     .from("workout_set_logs")
@@ -775,7 +779,7 @@ function PreWorkoutCheckSheet({ onClose, onSaved, volumeChoice }: { onClose: () 
       if (!uid) throw new Error("Not signed in");
       const { error } = await supabase.from("pre_session_checks").insert({
         user_id: uid,
-        entry_date: todayISO(),
+        entry_date: todayLocalISO,
         session_readiness: value,
         volume_adjustment: volumeChoice ?? 'full',
       });
