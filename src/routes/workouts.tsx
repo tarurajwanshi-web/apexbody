@@ -26,7 +26,7 @@ type SetLog = { id?: string; exercise_name: string; set_number: number; reps_com
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+
 function todayMondayIndex(): number {
   const js = new Date().getDay(); // 0 Sun .. 6 Sat
   return (js + 6) % 7;
@@ -339,6 +339,7 @@ function WorkoutsPage() {
                   setLogs={setLogs}
                   onLogged={loadAll}
                   onShowCue={(ex) => setCueEx(ex)}
+                  todayISO={todayLocalISO}
                 />
               );
             })}
@@ -353,6 +354,7 @@ function WorkoutsPage() {
           volumeChoice={volumeChoice}
           onClose={() => setPreCheckOpen(false)}
           onSaved={() => { setPreCheckOpen(false); setSessionStarted(true); }}
+          todayISO={todayLocalISO}
         />
       )}
 
@@ -494,11 +496,12 @@ function LockBanner({ plan }: { plan: WeeklyPlan }) {
 }
 
 function DayCard({
-  dayIdx, day, isToday, expanded, onToggle, setLogs, onLogged, onShowCue,
+  dayIdx, day, isToday, expanded, onToggle, setLogs, onLogged, onShowCue, todayISO,
 }: {
   dayIdx: number; day: DayPlan; isToday: boolean;
   expanded: boolean; onToggle?: () => void;
   setLogs: SetLog[]; onLogged: () => void; onShowCue: (ex: Exercise) => void;
+  todayISO: string;
 }) {
   const label = day.day_name || DAY_NAMES[dayIdx] || `Day ${dayIdx + 1}`;
   const totalSets = day.rest ? 0 : (day.exercises ?? []).reduce((s, ex) => s + ex.sets, 0);
@@ -572,7 +575,7 @@ function DayCard({
         <div className="mt-4 pt-4 border-t border-white/5">
           <p className="text-[10px] uppercase tracking-wider text-text-tertiary mb-3">Log your sets</p>
           {day.exercises.map((ex) => (
-            <ExerciseLogger key={ex.name} exercise={ex} setLogs={setLogs} onLogged={onLogged} dayPlan={day} />
+            <ExerciseLogger key={ex.name} exercise={ex} setLogs={setLogs} onLogged={onLogged} dayPlan={day} todayISO={todayISO} />
           ))}
         </div>
       )}
@@ -581,8 +584,8 @@ function DayCard({
 }
 
 function ExerciseLogger({
-  exercise, setLogs, onLogged, dayPlan,
-}: { exercise: Exercise; setLogs: SetLog[]; onLogged: () => void; dayPlan: DayPlan }) {
+  exercise, setLogs, onLogged, dayPlan, todayISO,
+}: { exercise: Exercise; setLogs: SetLog[]; onLogged: () => void; dayPlan: DayPlan; todayISO: string }) {
   const [open, setOpen] = useState(false);
   const mine = setLogs.filter((l) => l.exercise_name === exercise.name);
   const doneCount = mine.filter((l) => l.completed).length;
@@ -617,6 +620,7 @@ function ExerciseLogger({
               onLogged={onLogged}
               dayPlan={dayPlan}
               allLogs={setLogs}
+              todayISO={todayISO}
             />
           ))}
         </div>
@@ -626,10 +630,10 @@ function ExerciseLogger({
 }
 
 function SetRow({
-  exercise, setNumber, existing, onLogged, dayPlan, allLogs,
+  exercise, setNumber, existing, onLogged, dayPlan, allLogs, todayISO,
 }: {
   exercise: Exercise; setNumber: number; existing: SetLog | null; onLogged: () => void;
-  dayPlan: DayPlan; allLogs: SetLog[];
+  dayPlan: DayPlan; allLogs: SetLog[]; todayISO: string;
 }) {
   const [reps, setReps] = useState<string>(existing?.reps_completed?.toString() ?? "");
   const [weight, setWeight] = useState<string>(existing?.weight_kg?.toString() ?? "");
@@ -645,7 +649,7 @@ function SetRow({
       if (!uid) throw new Error("Not signed in");
       const row = {
         user_id: uid,
-        entry_date: todayLocalISO,
+        entry_date: todayISO,
         exercise_name: exercise.name,
         set_number: setNumber,
         reps_completed: reps === "" ? null : Number(reps),
@@ -659,7 +663,7 @@ function SetRow({
         .upsert(row, { onConflict: "user_id,entry_date,exercise_name,set_number" });
       if (error) throw error;
       onLogged();
-      if (completed) await maybeWriteTrainingSummary(dayPlan, allLogs, row);
+      if (completed) await maybeWriteTrainingSummary(dayPlan, allLogs, row, todayISO);
     } catch (e: any) {
       toast.error(e?.message ?? "Save failed");
     } finally {
@@ -713,11 +717,12 @@ async function maybeWriteTrainingSummary(
   dayPlan: DayPlan,
   _priorLogs: SetLog[],
   _justSaved: SetLog,
+  todayISO: string,
 ) {
   const { data: u } = await supabase.auth.getUser();
   const uid = u.user?.id;
   if (!uid) return;
-  const date = todayLocalISO;
+  const date = todayISO;
 
   const { data: logs } = await supabase
     .from("workout_set_logs")
@@ -768,7 +773,7 @@ const READINESS_OPTIONS: { value: number; emoji: string; label: string }[] = [
   { value: 5, emoji: "🤩", label: "Great" },
 ];
 
-function PreWorkoutCheckSheet({ onClose, onSaved, volumeChoice }: { onClose: () => void; onSaved: () => void; volumeChoice: "full" | "reduced" | "recovery" | null }) {
+function PreWorkoutCheckSheet({ onClose, onSaved, volumeChoice, todayISO }: { onClose: () => void; onSaved: () => void; volumeChoice: "full" | "reduced" | "recovery" | null; todayISO: string }) {
   const [saving, setSaving] = useState(false);
 
   const save = async (value: number) => {
@@ -779,7 +784,7 @@ function PreWorkoutCheckSheet({ onClose, onSaved, volumeChoice }: { onClose: () 
       if (!uid) throw new Error("Not signed in");
       const { error } = await supabase.from("pre_session_checks").insert({
         user_id: uid,
-        entry_date: todayLocalISO,
+        entry_date: todayISO,
         session_readiness: value,
         volume_adjustment: volumeChoice ?? 'full',
       });
