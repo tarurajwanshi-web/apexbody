@@ -318,7 +318,7 @@ function Dashboard() {
               />
             }
           />
-          <QuietRow label="Recovery" value={trendWord(data.compliance7d)} />
+          <QuietRow label="Adherence trend" value={trendWord(data.compliance7d)} />
         </div>
 
         {/* Coach feed */}

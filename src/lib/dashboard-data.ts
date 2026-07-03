@@ -6,6 +6,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { getLocalDateISO, addDaysISO, getLocalWeekRange } from "@/lib/dates";
+import { resolveTodayPlanDay } from "@/lib/plan.functions";
 
 export type DashboardProfile = {
   name: string | null;
