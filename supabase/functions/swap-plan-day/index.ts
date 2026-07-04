@@ -117,10 +117,24 @@ Deno.serve(async (req) => {
     // Same transform as the previous client-side logic.
     const newDays: Day[] = days.map((d, i) => {
       if (i === target_day_index) {
-        return { ...sourceDay, day: targetDay.day, day_name: targetDay.day_name, rest: false };
+        // Target slot KEEPS its own date/day/day_name — only workout content moves in.
+        return {
+          ...sourceDay,
+          day: targetDay.day,
+          date: targetDay.date,
+          day_name: targetDay.day_name,
+          rest: false,
+        };
       }
       if (i === source_day_index) {
-        return { ...sourceDay, rest: true, session_name: null, exercises: [] };
+        // Source slot KEEPS its own date/day/day_name — becomes rest.
+        return {
+          ...sourceDay,
+          rest: true,
+          session_name: null,
+          session_purpose: null,
+          exercises: [],
+        };
       }
       return d;
     });
