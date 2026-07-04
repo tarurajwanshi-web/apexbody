@@ -1,37 +1,67 @@
-Thread `todayLocalISO` as a `todayISO: string` prop from `WorkoutsPage` through the five top-level components that currently reference it out of scope.
+## Goal
 
-### Edits (all in `src/routes/workouts.tsx`)
+Fix `supabase/functions/swap-plan-day/index.ts` so a rest-day swap preserves each slot's own `date`, `day`, and `day_name`. Only the workout content moves between slots. This aligns with `resolveTodayPlanDay` (in `src/lib/plan.functions.ts`), which resolves "today" by matching `day.date === todayISO` — if swap overwrote the source slot's date, today's resolution would follow the workout to the wrong calendar day.
 
-1. **`DayCard`** (fn at line 496):
-   - Add `todayISO: string` to its props type; destructure it.
-   - Render call ~line 332: add `todayISO={todayLocalISO}`.
-   - Line 575: pass through — `<ExerciseLogger todayISO={todayISO} ... />`.
+## Change
 
-2. **`ExerciseLogger`** (line 583):
-   - Add `todayISO: string` prop; destructure.
-   - Line 612 `<SetRow ...>`: add `todayISO={todayISO}`.
+Single file: `supabase/functions/swap-plan-day/index.ts`.
 
-3. **`SetRow`** (line 628):
-   - Add `todayISO: string` prop; destructure.
-   - Line 648: `entry_date: todayLocalISO,` → `entry_date: todayISO,`
-   - Line 662: `await maybeWriteTrainingSummary(dayPlan, allLogs, row);` → `await maybeWriteTrainingSummary(dayPlan, allLogs, row, todayISO);`
+### 1. Extend the `Day` type
 
-4. **`maybeWriteTrainingSummary`** (line 712):
-   - Add 4th param `todayISO: string`.
-   - Line 720: `const date = todayLocalISO;` → `const date = todayISO;`
+Add `date?: string` and `session_purpose?: string | null` so both fields survive the spread and TS stays honest:
 
-5. **`PreWorkoutCheckSheet`** (line 771):
-   - Add `todayISO: string` prop; destructure.
-   - Line 782: `entry_date: todayLocalISO,` → `entry_date: todayISO,`
-   - Render call ~line 352: add `todayISO={todayLocalISO}`.
+```ts
+type Day = {
+  day?: number;
+  date?: string;
+  day_name?: string;
+  session_name?: string | null;
+  session_purpose?: string | null;
+  rest?: boolean;
+  exercises?: unknown[];
+  [k: string]: unknown;
+};
+```
 
-6. **Delete dead code**: remove line 29 `function todayISO() { ... }` — every call site is converted, and the prop name shadows it inside components regardless.
+### 2. Rewrite the `newDays` transform
 
-### Verification
+Replace the current `days.map(...)` block with:
 
-- `rg -n "todayISO\(\)" src/routes/workouts.tsx` → zero matches.
-- `rg -n "todayLocalISO" src/routes/workouts.tsx` → only inside `WorkoutsPage` (lines 53, 54, 99, 110, 117, and the two new prop pass-downs at 332/352).
+```ts
+const newDays: Day[] = days.map((d, i) => {
+  if (i === target_day_index) {
+    // Target slot KEEPS its own date/day/day_name — only workout content moves in.
+    return {
+      ...sourceDay,
+      day: targetDay.day,
+      date: targetDay.date,
+      day_name: targetDay.day_name,
+      rest: false,
+    };
+  }
+  if (i === source_day_index) {
+    // Source slot KEEPS its own date/day/day_name — becomes rest.
+    return {
+      ...sourceDay,
+      rest: true,
+      session_name: null,
+      session_purpose: null,
+      exercises: [],
+    };
+  }
+  return d;
+});
+```
 
-### Out of scope
+Note the source-slot branch still spreads `sourceDay` (matching the existing code's shape) but explicitly clears session fields and exercises; its `date`/`day`/`day_name` come from `sourceDay` which IS that slot, so they're already correct.
 
-`plan.functions.ts`, `dashboard.tsx`, `dashboard-data.ts`, `package.json`. No new network calls.
+## Out of scope
+
+- No client changes.
+- No changes to `plan.functions.ts`, `dashboard-data.ts`, `workouts.tsx`, `generate-plan`, or `_shared/training-rules.ts`.
+- No new fields on the request payload; no policy or schema changes.
+
+## Verification
+
+- `rg -n "date:" supabase/functions/swap-plan-day/index.ts` shows date preserved in both branches.
+- Manual: after a swap, `plan_data.days[i].date` for every `i` still matches its pre-swap value; only `exercises` / `session_name` / `session_purpose` / `rest` move.
