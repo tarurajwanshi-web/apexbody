@@ -18,9 +18,11 @@ const cors = {
 
 type Day = {
   day?: number;
+  date?: string;
   day_name?: string;
-  rest?: boolean;
   session_name?: string | null;
+  session_purpose?: string | null;
+  rest?: boolean;
   exercises?: unknown[];
   [k: string]: unknown;
 };
