@@ -427,7 +427,18 @@ function ProfileSetup() {
             onSkip={skipBody}
           />
         )}
-        {step === 8 && <ReviewStep draft={draft} bodyDataType={bodyDataType} />}
+        {step === 8 && (
+          <TargetRateStep
+            goal={draft.goal!}
+            currentWeight={draft.weight}
+            height={draft.height}
+            targetWeight={draft.targetWeight}
+            ratePct={draft.targetRatePct}
+            onTargetWeight={(v) => patch({ targetWeight: v })}
+            onRatePct={(v) => patch({ targetRatePct: v })}
+          />
+        )}
+        {step === 9 && <ReviewStep draft={draft} bodyDataType={bodyDataType} />}
       </main>
 
       <footer
