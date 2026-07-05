@@ -20,6 +20,7 @@ import { Route as MeetCoachRouteImport } from './routes/meet-coach'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as HealthDataRouteImport } from './routes/health-data'
 import { Route as DisclaimerRouteImport } from './routes/disclaimer'
+import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as CoachRouteImport } from './routes/coach'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
@@ -85,6 +86,11 @@ const DisclaimerRoute = DisclaimerRouteImport.update({
   path: '/disclaimer',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ConnectRoute = ConnectRouteImport.update({
+  id: '/connect',
+  path: '/connect',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CoachRoute = CoachRouteImport.update({
   id: '/coach',
   path: '/coach',
@@ -136,6 +142,7 @@ const DotlovableOauthConsentRoute = DotlovableOauthConsentRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/coach': typeof CoachRoute
+  '/connect': typeof ConnectRoute
   '/disclaimer': typeof DisclaimerRoute
   '/health-data': typeof HealthDataRoute
   '/mcp': typeof McpRoute
@@ -157,6 +164,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/coach': typeof CoachRoute
+  '/connect': typeof ConnectRoute
   '/disclaimer': typeof DisclaimerRoute
   '/health-data': typeof HealthDataRoute
   '/mcp': typeof McpRoute
@@ -180,6 +188,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/coach': typeof CoachRoute
+  '/connect': typeof ConnectRoute
   '/disclaimer': typeof DisclaimerRoute
   '/health-data': typeof HealthDataRoute
   '/mcp': typeof McpRoute
@@ -203,6 +212,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/coach'
+    | '/connect'
     | '/disclaimer'
     | '/health-data'
     | '/mcp'
@@ -224,6 +234,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/coach'
+    | '/connect'
     | '/disclaimer'
     | '/health-data'
     | '/mcp'
@@ -246,6 +257,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/coach'
+    | '/connect'
     | '/disclaimer'
     | '/health-data'
     | '/mcp'
@@ -269,6 +281,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   CoachRoute: typeof CoachRoute
+  ConnectRoute: typeof ConnectRoute
   DisclaimerRoute: typeof DisclaimerRoute
   HealthDataRoute: typeof HealthDataRoute
   McpRoute: typeof McpRoute
@@ -365,6 +378,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DisclaimerRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/connect': {
+      id: '/connect'
+      path: '/connect'
+      fullPath: '/connect'
+      preLoaderRoute: typeof ConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/coach': {
       id: '/coach'
       path: '/coach'
@@ -448,6 +468,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   CoachRoute: CoachRoute,
+  ConnectRoute: ConnectRoute,
   DisclaimerRoute: DisclaimerRoute,
   HealthDataRoute: HealthDataRoute,
   McpRoute: McpRoute,
