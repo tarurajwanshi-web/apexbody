@@ -981,7 +981,80 @@ function Row({ label, value, valueClass }: { label: string; value: string; value
       <span className={`text-sm font-medium text-right ${valueClass ?? ""}`}>{value}</span>
     </div>
   );
+
+function TargetRateStep({
+  goal, currentWeight, height, targetWeight, ratePct, onTargetWeight, onRatePct,
+}: {
+  goal: Goal; currentWeight: string; height: string; targetWeight: string; ratePct: string;
+  onTargetWeight: (v: string) => void; onRatePct: (v: string) => void;
+}) {
+  const direction = GOAL_DIRECTION[goal];
+  const ceiling = RATE_CEILING[goal];
+
+  useEffect(() => {
+    if (direction === "maintain" && !targetWeight && currentWeight) {
+      onTargetWeight(currentWeight);
+    }
+    if (!ratePct) {
+      onRatePct(String(RATE_ZONES[goal][0].max / 2));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goal]);
+
+  const rateNum = Number(ratePct) || 0;
+  const zone = getZone(goal, rateNum);
+  const cw = Number(currentWeight) || 0;
+  const tw = Number(targetWeight) || 0;
+  const heightM = Number(height) / 100;
+  const bmiAtTarget = heightM > 0 && tw > 0 ? tw / (heightM * heightM) : 0;
+
+  let directionError: string | null = null;
+  if (direction === "lose" && tw > 0 && tw >= cw) directionError = "Target weight should be below your current weight.";
+  if (direction === "gain" && tw > 0 && tw <= cw) directionError = "Target weight should be above your current weight.";
+  if (direction === "lose" && bmiAtTarget > 0 && bmiAtTarget < 18.5) {
+    directionError = "This target weight is below a healthy BMI for your height.";
+  }
+
+  const headline = direction === "lose"
+    ? "How much would you like to lose, and how fast?"
+    : direction === "gain"
+    ? "How much would you like to gain, and how fast?"
+    : "Let's lock in your maintenance target";
+
+  return (
+    <>
+      <StepHeader title={headline} />
+      <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 mb-4">
+        <span className="text-sm text-text-secondary">Target weight</span>
+        <span className="flex items-center gap-1">
+          <input
+            type="text" inputMode="decimal"
+            value={targetWeight}
+            onChange={(e) => onTargetWeight(e.target.value.replace(/[^\d.]/g, ""))}
+            className="w-24 bg-transparent text-right text-sm font-semibold focus:outline-none"
+            style={{ fontSize: 16 }}
+          />
+          <span className="text-xs text-text-tertiary">kg</span>
+        </span>
+      </label>
+      {directionError && <p className="text-xs text-danger px-1 -mt-2 mb-3">{directionError}</p>}
+      <p className="text-[11px] uppercase tracking-wider text-text-tertiary mb-2">
+        {direction === "maintain" ? "Correction tightness" : "Pace"}
+      </p>
+      <input
+        type="range" min={0} max={ceiling} step={0.05}
+        value={rateNum}
+        onChange={(e) => onRatePct(e.target.value)}
+        className="w-full accent-violet-400"
+      />
+      <div className="mt-3 rounded-2xl bg-bg-2 border border-white/5 p-4 text-center">
+        <p className="text-sm font-semibold text-white">{zone.label} — {rateNum.toFixed(2)}%/week</p>
+        <p className="text-xs text-text-tertiary mt-1">{zone.blurb}</p>
+      </div>
+    </>
+  );
 }
+
 
 const APEX_FACTS = [
   "BMR calculated via Mifflin-St Jeor — the most validated formula for non-obese adults.",
