@@ -735,8 +735,9 @@ function BodyStep({
     );
   }
 
-  const bfNum = Number(draft.dexaBf) || range.default;
-  const desc = getBfDescription(bfNum, sex);
+  const hasBf = draft.dexaBf !== "";
+  const bfNum = hasBf ? Number(draft.dexaBf) : range.default;
+  const desc = hasBf ? getBfDescription(bfNum, sex) : null;
 
   return (
     <>
@@ -758,27 +759,64 @@ function BodyStep({
         </div>
         <UnitField label="Height" cmValue={draft.height} onChangeCm={(v) => patch({ height: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
 
-        {/* Sex-linked body-fat slider */}
-        <div className="rounded-2xl bg-bg-2 border border-white/5 p-4">
-          <p className="text-[11px] uppercase tracking-wider text-text-tertiary text-center">Body fat</p>
-          <p className="text-center mt-2 text-white" style={{ fontSize: 32, fontWeight: 700 }}>{bfNum}%</p>
-          <p className={`text-center text-sm font-semibold mt-1 ${bfLabelColor(desc.label)}`}>{desc.label}</p>
-          <input
-            type="range"
-            min={range.min}
-            max={range.max}
-            step={1}
-            value={bfNum}
-            onChange={(e) => patch({ dexaBf: e.target.value })}
-            className="w-full mt-4 accent-violet-400"
-          />
-          <p className="text-xs italic text-text-tertiary text-center mt-3 mx-auto" style={{ maxWidth: 320 }}>
-            {desc.cue}
-          </p>
-          <p className="text-[11px] text-text-tertiary text-center mt-3">
-            Based on ACE classifications. We track the trend — the exact number matters less than consistency.
-          </p>
-        </div>
+        {/* Sex-linked body-fat slider — optional */}
+        {!bodyFatSkipped ? (
+          <>
+            <div className="rounded-2xl bg-bg-2 border border-white/5 p-4">
+              <p className="text-[11px] uppercase tracking-wider text-text-tertiary text-center">Body fat</p>
+              {hasBf && desc ? (
+                <>
+                  <p className="text-center mt-2 text-white" style={{ fontSize: 32, fontWeight: 700 }}>{bfNum}%</p>
+                  <p className={`text-center text-sm font-semibold mt-1 ${bfLabelColor(desc.label)}`}>{desc.label}</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-center mt-2 text-text-tertiary" style={{ fontSize: 20, fontWeight: 600 }}>Not set</p>
+                  <p className="text-center text-xs text-text-tertiary mt-1">Drag the slider to estimate — or skip below.</p>
+                </>
+              )}
+              <input
+                type="range"
+                min={range.min}
+                max={range.max}
+                step={1}
+                value={bfNum}
+                onChange={(e) => patch({ dexaBf: e.target.value })}
+                className="w-full mt-4 accent-violet-400"
+              />
+              {hasBf && desc && (
+                <p className="text-xs italic text-text-tertiary text-center mt-3 mx-auto" style={{ maxWidth: 320 }}>
+                  {desc.cue}
+                </p>
+              )}
+              <p className="text-[11px] text-text-tertiary text-center mt-3">
+                Based on ACE classifications. We track the trend — the exact number matters less than consistency.
+              </p>
+            </div>
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => patch({ bodyFatSkipped: true, dexaBf: "" })}
+                className="text-xs text-text-secondary underline underline-offset-2"
+              >
+                Skip — I don't know
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="rounded-2xl bg-bg-2 border border-white/5 p-4">
+            <p className="text-sm text-text-secondary">
+              Skipped — you can add this anytime from the Nutrition tab for a slightly more accurate calorie target.
+            </p>
+            <button
+              type="button"
+              onClick={() => patch({ bodyFatSkipped: false })}
+              className="mt-2 text-xs text-text-secondary underline underline-offset-2"
+            >
+              Add it now instead
+            </button>
+          </div>
+        )}
 
         {/* Optional — body scan */}
         <button
