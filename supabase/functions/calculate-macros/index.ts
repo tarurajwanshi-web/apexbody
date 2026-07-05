@@ -1,19 +1,6 @@
-// calculate-macros — evidence-based BMR/TDEE & macro targets.
-// Pipeline (see APEX Prompt L for citations):
-//   1. BMR via Mifflin-St Jeor (Frankenfield 2005 validated as most accurate
-//      predictive equation). Katch-McArdle used only when verified DEXA lean
-//      mass is on file, since it's more accurate given known LBM.
-//   2. TDEE = BMR × activity multiplier mapped from training_days_per_week
-//      using the standard PAL scale (sedentary 1.2 → extra active 1.9).
-//   3. Goal adjustment as ABSOLUTE kcal delta (not a flat %): moderate
-//      deficits/surpluses scale better across body sizes than multipliers.
-//   4. Protein target by g/kg per ISSN Position Stand on Protein & Exercise
-//      — higher end of the range during a hypocaloric phase to preserve LBM.
-//   5. Fat floor at 0.4 g/kg OR 25% of calories (whichever is higher) for
-//      hormonal/EFA health; carbs fill the remaining kcal.
-// Input: { user_id }. Upserts into public.daily_macro_targets.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { authorizeCaller, corsAllowHeaders } from "../_shared/authorize.ts";
+import { goalDirection, rateCeilingFor } from "../_shared/goal-direction.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -21,15 +8,6 @@ const cors = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-/**
- * Map training_days_per_week → standard PAL multiplier.
- *  0 (or unknown) → sedentary 1.2
- *  1–3            → lightly active 1.375
- *  4–5            → moderately active 1.55
- *  6–7            → very active 1.725
- * (Extra active 1.9 is reserved for "very hard exercise + physical job",
- *  not derivable from training days alone, so we cap at 1.725.)
- */
 function activityMult(days: number | null | undefined): number {
   const d = Number(days ?? 0);
   if (!isFinite(d) || d <= 0) return 1.2;
@@ -38,30 +16,6 @@ function activityMult(days: number | null | undefined): number {
   return 1.725;
 }
 
-/**
- * Absolute kcal adjustment vs TDEE per stated goal.
- * fat_loss        −400  (middle of ISSN-aligned 300–500 moderate deficit)
- * muscle_gain     +250  (lean surplus; minimizes fat gain)
- * strength        +150  (small surplus to support adaptation)
- * recomposition      0  (eucaloric; protein-first split does the work)
- * athletic_perf      0  (maintenance unless explicitly cutting/bulking)
- */
-function goalKcalDelta(goal: string | null | undefined): number {
-  switch (goal) {
-    case "fat_loss": return -400;
-    case "muscle_gain": return 250;
-    case "strength": return 150;
-    case "recomposition":
-    case "athletic_performance":
-    default: return 0;
-  }
-}
-
-/**
- * ISSN-aligned protein target (g/kg bodyweight).
- *  fat_loss (hypocaloric): 2.2  — upper-range to maximise LBM retention
- *  all other goals:        1.8  — within 1.6–2.0 g/kg general range
- */
 function proteinPerKg(goal: string | null | undefined): number {
   return goal === "fat_loss" ? 2.2 : 1.8;
 }
@@ -73,37 +27,64 @@ Deno.serve(async (req) => {
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supa = createClient(url, key);
 
+  const err = (status: number, body: Record<string, unknown>) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+
   try {
     const { user_id } = await req.json();
-    if (!user_id) {
-      return new Response(JSON.stringify({ error: "user_id required" }), {
-        status: 400, headers: { ...cors, "Content-Type": "application/json" },
-      });
-    }
-    // Audit #3: caller's JWT user.id must match body.user_id (or internal-secret).
+    if (!user_id) return err(400, { error: "user_id required" });
+
     const authz = await authorizeCaller(req, supa, user_id);
-    if (!authz.ok) {
-      return new Response(JSON.stringify({ error: authz.error }), {
-        status: authz.status, headers: { ...cors, "Content-Type": "application/json" },
-      });
-    }
+    if (!authz.ok) return err(authz.status, { error: authz.error });
+
     const { data: p, error } = await supa.from("profiles").select("*").eq("user_id", user_id).maybeSingle();
-    if (error || !p) {
-      return new Response(JSON.stringify({ error: "profile not found" }), {
-        status: 404, headers: { ...cors, "Content-Type": "application/json" },
-      });
+    if (error || !p) return err(404, { error: "profile not found" });
+
+    // ── Required-field gate (no silent defaults) ────────────────────────
+    const missing: string[] = [];
+    if (p.biological_sex !== "male" && p.biological_sex !== "female") missing.push("biological_sex");
+    if (p.age == null) missing.push("age");
+    if (p.measurement_weight_kg == null) missing.push("measurement_weight_kg");
+    if (p.measurement_height_cm == null) missing.push("measurement_height_cm");
+    if (!p.goal) missing.push("goal");
+    if (missing.length > 0) return err(422, { error: "Cannot calculate macros — required fields missing", missing_fields: missing });
+
+    const sex = p.biological_sex as "male" | "female";
+    const age = Number(p.age);
+    const weight_kg = Number(p.measurement_weight_kg);
+    const height_cm = Number(p.measurement_height_cm);
+    if (weight_kg <= 0 || height_cm <= 0) return err(422, { error: "weight/height must be positive" });
+
+    let direction: "lose" | "gain" | "maintain";
+    try {
+      direction = goalDirection(p.goal);
+    } catch (e) {
+      return err(422, { error: String(e instanceof Error ? e.message : e) });
     }
 
-    const sex = p.biological_sex === "female" ? "female" : "male";
-    const age = Number(p.age ?? 30);
-    const weight_kg = Number(p.measurement_weight_kg ?? 70);
-    const height_cm = Number(p.measurement_height_cm ?? 170);
+    // ── Direction-specific validation ───────────────────────────────────
+    if (direction !== "maintain") {
+      if (p.target_weight_kg == null || p.target_rate_pct == null) {
+        return err(422, {
+          error: "Cannot calculate macros — target weight and rate required for this goal",
+          missing_fields: [
+            ...(p.target_weight_kg == null ? ["target_weight_kg"] : []),
+            ...(p.target_rate_pct == null ? ["target_rate_pct"] : []),
+          ],
+        });
+      }
+      const targetKg = Number(p.target_weight_kg);
+      if (direction === "lose" && targetKg >= weight_kg) return err(422, { error: "target_weight_kg must be below current weight for this goal" });
+      if (direction === "gain" && targetKg <= weight_kg) return err(422, { error: "target_weight_kg must be above current weight for this goal" });
+      const bmiAtTarget = targetKg / ((height_cm / 100) ** 2);
+      if (direction === "lose" && bmiAtTarget < 18.5) return err(422, { error: "target_weight_kg implies an unsafe BMI (under 18.5)" });
+      if (direction === "gain" && bmiAtTarget >= 35) return err(422, { error: "target_weight_kg implies an unsafe BMI (35 or above)" });
+    }
 
-    // --- BMR -----------------------------------------------------------------
+    // ── BMR ──────────────────────────────────────────────────────────────
     let bmr: number;
     let formula_used: string;
     if (p.body_data_type === "dexa" && p.dexa_lean_mass_kg) {
-      // Katch-McArdle uses known LBM directly, more accurate than predictive.
       bmr = 370 + 21.6 * Number(p.dexa_lean_mass_kg);
       formula_used = "katch_mcardle";
     } else {
@@ -113,21 +94,22 @@ Deno.serve(async (req) => {
       formula_used = "mifflin_st_jeor";
     }
 
-    // --- TDEE & goal-adjusted calorie target ---------------------------------
+    // ── TDEE + rate-based deficit/surplus (MacroFactor-aligned) ─────────
     const tdee = bmr * activityMult(p.training_days_per_week);
-    const target_calories = Math.max(1200, tdee + goalKcalDelta(p.goal));
-    // 1200 kcal floor: standard clinical safety floor to avoid prescribing a
-    // dangerously low intake to small individuals on aggressive deficits.
+    let deltaKcal = 0;
+    if (direction !== "maintain") {
+      const ceiling = rateCeilingFor(p.goal)!;
+      const clampedRate = Math.min(Number(p.target_rate_pct), ceiling);
+      const magnitude = (clampedRate / 100) * weight_kg * 7700 / 7;
+      deltaKcal = direction === "lose" ? -magnitude : magnitude;
+    }
+    const target_calories = Math.max(1200, tdee + deltaKcal);
 
-    // --- Protein (ISSN g/kg per goal) ----------------------------------------
+    // ── Protein / fat / carbs ────────────────────────────────────────────
     const target_protein_g = weight_kg * proteinPerKg(p.goal);
-
-    // --- Fat (g/kg floor, or 25% of kcal, whichever higher) ------------------
-    const fatFloorFromKg = weight_kg * 0.4;             // hormonal/EFA minimum
-    const fatFromPct = (target_calories * 0.25) / 9;    // app convention 25%
+    const fatFloorFromKg = weight_kg * 0.4;
+    const fatFromPct = (target_calories * 0.25) / 9;
     const target_fat_g = Math.max(fatFloorFromKg, fatFromPct);
-
-    // --- Carbs fill the remainder --------------------------------------------
     const remaining = target_calories - target_protein_g * 4 - target_fat_g * 9;
     const target_carbs_g = Math.max(0, remaining / 4);
 
@@ -144,10 +126,6 @@ Deno.serve(async (req) => {
       effective_start_date: today,
     };
 
-    // Audit #7: atomic close-prior + insert-new via single-transaction RPC.
-    // Eliminates the race where two separate HTTP calls (UPDATE then UPSERT)
-    // could collide with the partial unique index and leave the user with
-    // zero active macro targets after onboarding.
     const { error: rpcErr } = await supa.rpc("apply_onboarding_macros", {
       p_user_id: user_id,
       p_effective_start_date: today,
@@ -161,12 +139,16 @@ Deno.serve(async (req) => {
     });
     if (rpcErr) throw rpcErr;
 
-    return new Response(JSON.stringify({ ok: true, ...row }), {
-      headers: { ...cors, "Content-Type": "application/json" },
-    });
+    // ── Seed weight_trend_state on first calc if it doesn't exist ───────
+    const { data: existingTrend } = await supa.from("weight_trend_state").select("user_id").eq("user_id", user_id).maybeSingle();
+    if (!existingTrend) {
+      await supa.from("weight_trend_state").insert({
+        user_id, trend_kg: weight_kg, last_computed_date: today,
+      });
+    }
+
+    return new Response(JSON.stringify({ ok: true, ...row }), { headers: { ...cors, "Content-Type": "application/json" } });
   } catch (e) {
-    return new Response(JSON.stringify({ error: String(e instanceof Error ? e.message : e) }), {
-      status: 500, headers: { ...cors, "Content-Type": "application/json" },
-    });
+    return err(500, { error: String(e instanceof Error ? e.message : e) });
   }
 });
