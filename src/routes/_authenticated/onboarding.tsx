@@ -50,7 +50,50 @@ const EATING_PATTERNS: { id: EatingPattern; label: string; desc: string }[] = [
   { id: "flexible", label: "Flexible", desc: "No fixed pattern" },
 ];
 
-const TOTAL = 8;
+const TOTAL = 9;
+
+const GOAL_DIRECTION: Record<Goal, "lose" | "gain" | "maintain"> = {
+  fat_loss: "lose", muscle_gain: "gain", strength: "gain",
+  recomposition: "maintain", athletic_performance: "maintain",
+};
+
+const RATE_CEILING: Record<Goal, number> = {
+  fat_loss: 1.5, muscle_gain: 0.5, strength: 0.35,
+  recomposition: 0.4, athletic_performance: 0.4,
+};
+
+const RATE_ZONES: Record<Goal, { max: number; label: string; blurb: string }[]> = {
+  fat_loss: [
+    { max: 0.5, label: "Sustainable", blurb: "Protects lean mass, easiest to stick to." },
+    { max: 1.0, label: "Moderate", blurb: "Faster, still evidence-supported for most people." },
+    { max: 1.5, label: "Aggressive", blurb: "Faster results, higher risk of losing muscle alongside fat." },
+  ],
+  muscle_gain: [
+    { max: 0.15, label: "Sustainable", blurb: "Minimizes fat gain while building muscle." },
+    { max: 0.25, label: "Moderate", blurb: "Standard lean-gain pace." },
+    { max: 0.5, label: "Aggressive", blurb: "Faster scale movement, more of it will be fat, not muscle." },
+  ],
+  strength: [
+    { max: 0.15, label: "Sustainable", blurb: "Small surplus, supports strength adaptation." },
+    { max: 0.25, label: "Moderate", blurb: "Standard pace for a strength-focused gain." },
+    { max: 0.35, label: "Aggressive", blurb: "Faster gain, more of it will be fat." },
+  ],
+  recomposition: [
+    { max: 0.15, label: "Gentle", blurb: "Wide tolerance — we rarely adjust unless you drift." },
+    { max: 0.3, label: "Moderate", blurb: "Standard correction if your weight moves off target." },
+    { max: 0.4, label: "Tight", blurb: "We correct quickly — best if you want to hold a precise number." },
+  ],
+  athletic_performance: [
+    { max: 0.15, label: "Gentle", blurb: "Wide tolerance — we rarely adjust unless you drift." },
+    { max: 0.3, label: "Moderate", blurb: "Standard correction if your weight moves off target." },
+    { max: 0.4, label: "Tight", blurb: "We correct quickly — best if you want to hold a precise number." },
+  ],
+};
+
+function getZone(goal: Goal, value: number) {
+  const zones = RATE_ZONES[goal];
+  return zones.find((z) => value <= z.max) ?? zones[zones.length - 1];
+}
 
 // Body fat slider config — ACE/ACSM-derived ranges, appearance-only descriptions.
 const BF_RANGE = {
