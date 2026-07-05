@@ -342,7 +342,7 @@ function ProfileSetup() {
             data: {
               source: bodyDataType === "dexa" ? "dexa" : "manual",
               weight_kg: Number(draft.weight),
-              body_fat_pct: draft.dexaBf ? Number(draft.dexaBf) : null,
+              body_fat_pct: !draft.bodyFatSkipped && draft.dexaBf !== "" ? Number(draft.dexaBf) : null,
               lean_mass_kg: bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
               waist_cm: draft.waist ? Number(draft.waist) : null,
               hip_cm: draft.hip ? Number(draft.hip) : null,
