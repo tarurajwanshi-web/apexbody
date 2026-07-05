@@ -50,7 +50,50 @@ const EATING_PATTERNS: { id: EatingPattern; label: string; desc: string }[] = [
   { id: "flexible", label: "Flexible", desc: "No fixed pattern" },
 ];
 
-const TOTAL = 8;
+const TOTAL = 9;
+
+const GOAL_DIRECTION: Record<Goal, "lose" | "gain" | "maintain"> = {
+  fat_loss: "lose", muscle_gain: "gain", strength: "gain",
+  recomposition: "maintain", athletic_performance: "maintain",
+};
+
+const RATE_CEILING: Record<Goal, number> = {
+  fat_loss: 1.5, muscle_gain: 0.5, strength: 0.35,
+  recomposition: 0.4, athletic_performance: 0.4,
+};
+
+const RATE_ZONES: Record<Goal, { max: number; label: string; blurb: string }[]> = {
+  fat_loss: [
+    { max: 0.5, label: "Sustainable", blurb: "Protects lean mass, easiest to stick to." },
+    { max: 1.0, label: "Moderate", blurb: "Faster, still evidence-supported for most people." },
+    { max: 1.5, label: "Aggressive", blurb: "Faster results, higher risk of losing muscle alongside fat." },
+  ],
+  muscle_gain: [
+    { max: 0.15, label: "Sustainable", blurb: "Minimizes fat gain while building muscle." },
+    { max: 0.25, label: "Moderate", blurb: "Standard lean-gain pace." },
+    { max: 0.5, label: "Aggressive", blurb: "Faster scale movement, more of it will be fat, not muscle." },
+  ],
+  strength: [
+    { max: 0.15, label: "Sustainable", blurb: "Small surplus, supports strength adaptation." },
+    { max: 0.25, label: "Moderate", blurb: "Standard pace for a strength-focused gain." },
+    { max: 0.35, label: "Aggressive", blurb: "Faster gain, more of it will be fat." },
+  ],
+  recomposition: [
+    { max: 0.15, label: "Gentle", blurb: "Wide tolerance — we rarely adjust unless you drift." },
+    { max: 0.3, label: "Moderate", blurb: "Standard correction if your weight moves off target." },
+    { max: 0.4, label: "Tight", blurb: "We correct quickly — best if you want to hold a precise number." },
+  ],
+  athletic_performance: [
+    { max: 0.15, label: "Gentle", blurb: "Wide tolerance — we rarely adjust unless you drift." },
+    { max: 0.3, label: "Moderate", blurb: "Standard correction if your weight moves off target." },
+    { max: 0.4, label: "Tight", blurb: "We correct quickly — best if you want to hold a precise number." },
+  ],
+};
+
+function getZone(goal: Goal, value: number) {
+  const zones = RATE_ZONES[goal];
+  return zones.find((z) => value <= z.max) ?? zones[zones.length - 1];
+}
 
 // Body fat slider config — ACE/ACSM-derived ranges, appearance-only descriptions.
 const BF_RANGE = {
@@ -114,6 +157,9 @@ type Draft = {
   thigh: string;
   weight: string;
   height: string;
+  bodyFatSkipped: boolean;
+  targetWeight: string;
+  targetRatePct: string;
 };
 
 const EMPTY: Draft = {
@@ -127,6 +173,8 @@ const EMPTY: Draft = {
   dexaBf: "", dexaLean: "",
   waist: "", hip: "", arm: "", thigh: "",
   weight: "", height: "",
+  bodyFatSkipped: false,
+  targetWeight: "", targetRatePct: "",
 };
 
 function ProfileSetup() {
@@ -153,7 +201,7 @@ function ProfileSetup() {
       if (!userRes.user) return;
       const { data } = await supabase
         .from("profiles")
-        .select("experience_level, eating_pattern, goal, equipment_access, training_day_codes")
+        .select("experience_level, eating_pattern, goal, equipment_access, training_day_codes, target_weight_kg, target_rate_pct")
         .eq("user_id", userRes.user.id)
         .single();
       if (cancelled || !data) return;
@@ -163,6 +211,8 @@ function ProfileSetup() {
         goal: (data.goal as Goal | null) ?? null,
         equipment: (data.equipment_access as Equipment | null) ?? null,
         trainingDays: (data.training_day_codes as string[] | null) ?? [],
+        targetWeight: (data as any).target_weight_kg != null ? String((data as any).target_weight_kg) : "",
+        targetRatePct: (data as any).target_rate_pct != null ? String((data as any).target_rate_pct) : "",
       });
     })();
     return () => { cancelled = true; };
@@ -191,7 +241,21 @@ function ProfileSetup() {
         if (!draft.weight && !draft.height && !draft.dexaBf) return true;
         return !!draft.weight && !!draft.height;
       }
-      case 8: return true;
+      case 8: {
+        const cw = Number(draft.weight) || 0;
+        const tw = Number(draft.targetWeight) || 0;
+        const direction = GOAL_DIRECTION[draft.goal!];
+        if (!draft.targetWeight || !draft.targetRatePct) return false;
+        if (direction === "lose" && tw >= cw) return false;
+        if (direction === "gain" && tw <= cw) return false;
+        if (direction === "lose") {
+          const heightM = Number(draft.height) / 100;
+          const bmi = heightM > 0 ? tw / (heightM * heightM) : 0;
+          if (bmi > 0 && bmi < 18.5) return false;
+        }
+        return true;
+      }
+      case 9: return true;
       default: return false;
     }
   })();
@@ -230,12 +294,14 @@ function ProfileSetup() {
           equipment_access: draft.equipment,
           eating_pattern: draft.eatingPattern,
           body_data_type: bodyDataType,
-          dexa_body_fat_pct: hasBody && draft.dexaLean && draft.dexaBf ? Number(draft.dexaBf) : null,
+          dexa_body_fat_pct: hasBody && !draft.bodyFatSkipped && draft.dexaBf !== "" ? Number(draft.dexaBf) : null,
           dexa_lean_mass_kg: hasBody && draft.dexaLean ? Number(draft.dexaLean) : null,
           measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
           measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
           measurement_weight_kg: hasBody ? Number(draft.weight) : null,
           measurement_height_cm: hasBody ? Number(draft.height) : null,
+          target_weight_kg: draft.targetWeight ? Number(draft.targetWeight) : null,
+          target_rate_pct: draft.targetRatePct ? Number(draft.targetRatePct) : null,
         };
       } else {
         const now = new Date();
@@ -253,12 +319,14 @@ function ProfileSetup() {
           equipment_access: draft.equipment,
           eating_pattern: draft.eatingPattern,
           body_data_type: bodyDataType,
-          dexa_body_fat_pct: hasBody && draft.dexaLean && draft.dexaBf ? Number(draft.dexaBf) : null,
+          dexa_body_fat_pct: hasBody && !draft.bodyFatSkipped && draft.dexaBf !== "" ? Number(draft.dexaBf) : null,
           dexa_lean_mass_kg: hasBody && draft.dexaLean ? Number(draft.dexaLean) : null,
           measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
           measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
           measurement_weight_kg: hasBody ? Number(draft.weight) : null,
           measurement_height_cm: hasBody ? Number(draft.height) : null,
+          target_weight_kg: draft.targetWeight ? Number(draft.targetWeight) : null,
+          target_rate_pct: draft.targetRatePct ? Number(draft.targetRatePct) : null,
           profile_completed_at: now.toISOString(),
           plan_unlock_date: unlock.toISOString().slice(0, 10),
           timezone: getBrowserTimezone(),
@@ -274,7 +342,7 @@ function ProfileSetup() {
             data: {
               source: bodyDataType === "dexa" ? "dexa" : "manual",
               weight_kg: Number(draft.weight),
-              body_fat_pct: draft.dexaBf ? Number(draft.dexaBf) : null,
+              body_fat_pct: !draft.bodyFatSkipped && draft.dexaBf !== "" ? Number(draft.dexaBf) : null,
               lean_mass_kg: bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
               waist_cm: draft.waist ? Number(draft.waist) : null,
               hip_cm: draft.hip ? Number(draft.hip) : null,
@@ -359,7 +427,18 @@ function ProfileSetup() {
             onSkip={skipBody}
           />
         )}
-        {step === 8 && <ReviewStep draft={draft} bodyDataType={bodyDataType} />}
+        {step === 8 && (
+          <TargetRateStep
+            goal={draft.goal!}
+            currentWeight={draft.weight}
+            height={draft.height}
+            targetWeight={draft.targetWeight}
+            ratePct={draft.targetRatePct}
+            onTargetWeight={(v) => patch({ targetWeight: v })}
+            onRatePct={(v) => patch({ targetRatePct: v })}
+          />
+        )}
+        {step === 9 && <ReviewStep draft={draft} bodyDataType={bodyDataType} />}
       </main>
 
       <footer
@@ -634,11 +713,7 @@ function BodyStep({
   const sex: Sex = draft.sex ?? "male";
   const range = BF_RANGE[sex];
 
-  // Initialise body-fat to the sex-linked default on first mount of this step.
-  useEffect(() => {
-    if (!draft.dexaBf) patch({ dexaBf: String(range.default) });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const bodyFatSkipped = draft.bodyFatSkipped;
 
   if (bodySkipped) {
     return (
@@ -660,8 +735,9 @@ function BodyStep({
     );
   }
 
-  const bfNum = Number(draft.dexaBf) || range.default;
-  const desc = getBfDescription(bfNum, sex);
+  const hasBf = draft.dexaBf !== "";
+  const bfNum = hasBf ? Number(draft.dexaBf) : range.default;
+  const desc = hasBf ? getBfDescription(bfNum, sex) : null;
 
   return (
     <>
@@ -683,27 +759,64 @@ function BodyStep({
         </div>
         <UnitField label="Height" cmValue={draft.height} onChangeCm={(v) => patch({ height: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
 
-        {/* Sex-linked body-fat slider */}
-        <div className="rounded-2xl bg-bg-2 border border-white/5 p-4">
-          <p className="text-[11px] uppercase tracking-wider text-text-tertiary text-center">Body fat</p>
-          <p className="text-center mt-2 text-white" style={{ fontSize: 32, fontWeight: 700 }}>{bfNum}%</p>
-          <p className={`text-center text-sm font-semibold mt-1 ${bfLabelColor(desc.label)}`}>{desc.label}</p>
-          <input
-            type="range"
-            min={range.min}
-            max={range.max}
-            step={1}
-            value={bfNum}
-            onChange={(e) => patch({ dexaBf: e.target.value })}
-            className="w-full mt-4 accent-violet-400"
-          />
-          <p className="text-xs italic text-text-tertiary text-center mt-3 mx-auto" style={{ maxWidth: 320 }}>
-            {desc.cue}
-          </p>
-          <p className="text-[11px] text-text-tertiary text-center mt-3">
-            Based on ACE classifications. We track the trend — the exact number matters less than consistency.
-          </p>
-        </div>
+        {/* Sex-linked body-fat slider — optional */}
+        {!bodyFatSkipped ? (
+          <>
+            <div className="rounded-2xl bg-bg-2 border border-white/5 p-4">
+              <p className="text-[11px] uppercase tracking-wider text-text-tertiary text-center">Body fat</p>
+              {hasBf && desc ? (
+                <>
+                  <p className="text-center mt-2 text-white" style={{ fontSize: 32, fontWeight: 700 }}>{bfNum}%</p>
+                  <p className={`text-center text-sm font-semibold mt-1 ${bfLabelColor(desc.label)}`}>{desc.label}</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-center mt-2 text-text-tertiary" style={{ fontSize: 20, fontWeight: 600 }}>Not set</p>
+                  <p className="text-center text-xs text-text-tertiary mt-1">Drag the slider to estimate — or skip below.</p>
+                </>
+              )}
+              <input
+                type="range"
+                min={range.min}
+                max={range.max}
+                step={1}
+                value={bfNum}
+                onChange={(e) => patch({ dexaBf: e.target.value })}
+                className="w-full mt-4 accent-violet-400"
+              />
+              {hasBf && desc && (
+                <p className="text-xs italic text-text-tertiary text-center mt-3 mx-auto" style={{ maxWidth: 320 }}>
+                  {desc.cue}
+                </p>
+              )}
+              <p className="text-[11px] text-text-tertiary text-center mt-3">
+                Based on ACE classifications. We track the trend — the exact number matters less than consistency.
+              </p>
+            </div>
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => patch({ bodyFatSkipped: true, dexaBf: "" })}
+                className="text-xs text-text-secondary underline underline-offset-2"
+              >
+                Skip — I don't know
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="rounded-2xl bg-bg-2 border border-white/5 p-4">
+            <p className="text-sm text-text-secondary">
+              Skipped — you can add this anytime from the Nutrition tab for a slightly more accurate calorie target.
+            </p>
+            <button
+              type="button"
+              onClick={() => patch({ bodyFatSkipped: false })}
+              className="mt-2 text-xs text-text-secondary underline underline-offset-2"
+            >
+              Add it now instead
+            </button>
+          </div>
+        )}
 
         {/* Optional — body scan */}
         <button
@@ -830,13 +943,18 @@ function ReviewStep({ draft, bodyDataType }: { draft: Draft; bodyDataType: "dexa
 
   let bodyValue = "Not provided — macro targets will be estimated";
   let bodyAmber = true;
+  const bfStr = draft.dexaBf !== "" && !draft.bodyFatSkipped ? `${draft.dexaBf}%bf` : "bf not set";
   if (bodyDataType === "dexa") {
-    bodyValue = `DEXA · ${draft.weight}kg · ${draft.dexaBf}%bf`;
+    bodyValue = `DEXA · ${draft.weight}kg · ${bfStr}`;
     bodyAmber = false;
   } else if (bodyDataType === "measurements") {
-    bodyValue = `Visual estimate · ${draft.weight}kg · ${draft.dexaBf}%bf`;
+    bodyValue = `Visual estimate · ${draft.weight}kg · ${bfStr}`;
     bodyAmber = false;
   }
+
+  const paceLabel = draft.goal && draft.targetRatePct
+    ? getZone(draft.goal, Number(draft.targetRatePct) || 0).label
+    : "—";
 
   return (
     <>
@@ -849,6 +967,8 @@ function ReviewStep({ draft, bodyDataType }: { draft: Draft; bodyDataType: "dexa
         <Row label="Equipment" value={eqLabel} />
         <Row label="Eating pattern" value={eatLabel} />
         <Row label="Body data" value={bodyValue} valueClass={bodyAmber ? "text-amber-400" : undefined} />
+        <Row label="Target weight" value={draft.targetWeight ? `${draft.targetWeight} kg` : "—"} />
+        <Row label="Pace" value={paceLabel} />
       </div>
     </>
   );
@@ -862,6 +982,80 @@ function Row({ label, value, valueClass }: { label: string; value: string; value
     </div>
   );
 }
+
+function TargetRateStep({
+  goal, currentWeight, height, targetWeight, ratePct, onTargetWeight, onRatePct,
+}: {
+  goal: Goal; currentWeight: string; height: string; targetWeight: string; ratePct: string;
+  onTargetWeight: (v: string) => void; onRatePct: (v: string) => void;
+}) {
+  const direction = GOAL_DIRECTION[goal];
+  const ceiling = RATE_CEILING[goal];
+
+  useEffect(() => {
+    if (direction === "maintain" && !targetWeight && currentWeight) {
+      onTargetWeight(currentWeight);
+    }
+    if (!ratePct) {
+      onRatePct(String(RATE_ZONES[goal][0].max / 2));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goal]);
+
+  const rateNum = Number(ratePct) || 0;
+  const zone = getZone(goal, rateNum);
+  const cw = Number(currentWeight) || 0;
+  const tw = Number(targetWeight) || 0;
+  const heightM = Number(height) / 100;
+  const bmiAtTarget = heightM > 0 && tw > 0 ? tw / (heightM * heightM) : 0;
+
+  let directionError: string | null = null;
+  if (direction === "lose" && tw > 0 && tw >= cw) directionError = "Target weight should be below your current weight.";
+  if (direction === "gain" && tw > 0 && tw <= cw) directionError = "Target weight should be above your current weight.";
+  if (direction === "lose" && bmiAtTarget > 0 && bmiAtTarget < 18.5) {
+    directionError = "This target weight is below a healthy BMI for your height.";
+  }
+
+  const headline = direction === "lose"
+    ? "How much would you like to lose, and how fast?"
+    : direction === "gain"
+    ? "How much would you like to gain, and how fast?"
+    : "Let's lock in your maintenance target";
+
+  return (
+    <>
+      <StepHeader title={headline} />
+      <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 mb-4">
+        <span className="text-sm text-text-secondary">Target weight</span>
+        <span className="flex items-center gap-1">
+          <input
+            type="text" inputMode="decimal"
+            value={targetWeight}
+            onChange={(e) => onTargetWeight(e.target.value.replace(/[^\d.]/g, ""))}
+            className="w-24 bg-transparent text-right text-sm font-semibold focus:outline-none"
+            style={{ fontSize: 16 }}
+          />
+          <span className="text-xs text-text-tertiary">kg</span>
+        </span>
+      </label>
+      {directionError && <p className="text-xs text-danger px-1 -mt-2 mb-3">{directionError}</p>}
+      <p className="text-[11px] uppercase tracking-wider text-text-tertiary mb-2">
+        {direction === "maintain" ? "Correction tightness" : "Pace"}
+      </p>
+      <input
+        type="range" min={0} max={ceiling} step={0.05}
+        value={rateNum}
+        onChange={(e) => onRatePct(e.target.value)}
+        className="w-full accent-violet-400"
+      />
+      <div className="mt-3 rounded-2xl bg-bg-2 border border-white/5 p-4 text-center">
+        <p className="text-sm font-semibold text-white">{zone.label} — {rateNum.toFixed(2)}%/week</p>
+        <p className="text-xs text-text-tertiary mt-1">{zone.blurb}</p>
+      </div>
+    </>
+  );
+}
+
 
 const APEX_FACTS = [
   "BMR calculated via Mifflin-St Jeor — the most validated formula for non-obese adults.",
