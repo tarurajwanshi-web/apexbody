@@ -44,10 +44,8 @@ export const Route = createFileRoute("/.lovable/oauth/consent")({
     if (!search.authorization_id) throw new Error("Missing authorization_id");
     const { data } = await supabase.auth.getSession();
     if (!data.session) {
-      // Send the user to the app's auth screen (index) and preserve this
-      // consent URL as `next` so they return here after signing in.
       const next = location.pathname + location.searchStr;
-      throw redirect({ to: "/", search: { next } });
+      throw redirect({ href: `/?next=${encodeURIComponent(next)}` });
     }
   },
   loader: async ({ location }) => {
