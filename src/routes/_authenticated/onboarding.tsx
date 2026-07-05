@@ -943,13 +943,18 @@ function ReviewStep({ draft, bodyDataType }: { draft: Draft; bodyDataType: "dexa
 
   let bodyValue = "Not provided — macro targets will be estimated";
   let bodyAmber = true;
+  const bfStr = draft.dexaBf !== "" && !draft.bodyFatSkipped ? `${draft.dexaBf}%bf` : "bf not set";
   if (bodyDataType === "dexa") {
-    bodyValue = `DEXA · ${draft.weight}kg · ${draft.dexaBf}%bf`;
+    bodyValue = `DEXA · ${draft.weight}kg · ${bfStr}`;
     bodyAmber = false;
   } else if (bodyDataType === "measurements") {
-    bodyValue = `Visual estimate · ${draft.weight}kg · ${draft.dexaBf}%bf`;
+    bodyValue = `Visual estimate · ${draft.weight}kg · ${bfStr}`;
     bodyAmber = false;
   }
+
+  const paceLabel = draft.goal && draft.targetRatePct
+    ? getZone(draft.goal, Number(draft.targetRatePct) || 0).label
+    : "—";
 
   return (
     <>
@@ -962,6 +967,8 @@ function ReviewStep({ draft, bodyDataType }: { draft: Draft; bodyDataType: "dexa
         <Row label="Equipment" value={eqLabel} />
         <Row label="Eating pattern" value={eatLabel} />
         <Row label="Body data" value={bodyValue} valueClass={bodyAmber ? "text-amber-400" : undefined} />
+        <Row label="Target weight" value={draft.targetWeight ? `${draft.targetWeight} kg` : "—"} />
+        <Row label="Pace" value={paceLabel} />
       </div>
     </>
   );
