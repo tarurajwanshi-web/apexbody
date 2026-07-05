@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "sdk_version": "0.20.0",
+  "path": "/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://toixlzfmxtmtypmupcuc.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "apex-mcp",
+      "version": "0.1.0",
+      "title": "APEX"
+    },
+    "tools": [
+      {
+        "name": "get_recent_workouts",
+        "title": "Get recent workouts",
+        "description": "Return the signed-in user's recent completed workout sets (exercise, weight, reps, RIR, muscle group, date). Use this to reason about training volume, intensity, and progression.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "days": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 90,
+              "default": 14,
+              "description": "How many days back to fetch. Default 14."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100,
+              "description": "Max sets to return. Default 100."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_readiness",
+        "title": "Get readiness scores",
+        "description": "Return the signed-in user's recent daily readiness scores. Use this to gauge current recovery state before recommending training load.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "days": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60,
+              "default": 7,
+              "description": "How many recent days. Default 7."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_body_measurements",
+        "title": "Get body measurements",
+        "description": "Return the signed-in user's recent body measurement events (weight in kg, entry date). Use this to reason about weight trend.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "days": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365,
+              "default": 30,
+              "description": "How many days back. Default 30."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "log_body_weight",
+        "title": "Log body weight",
+        "description": "Insert a body weight measurement for the signed-in user. Use for the current day unless the caller supplies a specific entry_date (YYYY-MM-DD).",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "weight_kg": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 500,
+              "description": "Body weight in kilograms."
+            },
+            "entry_date": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Optional YYYY-MM-DD. Defaults to today (UTC)."
+            }
+          },
+          "required": [
+            "weight_kg"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}
