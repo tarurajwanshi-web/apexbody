@@ -713,11 +713,7 @@ function BodyStep({
   const sex: Sex = draft.sex ?? "male";
   const range = BF_RANGE[sex];
 
-  // Initialise body-fat to the sex-linked default on first mount of this step.
-  useEffect(() => {
-    if (!draft.dexaBf) patch({ dexaBf: String(range.default) });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const bodyFatSkipped = draft.bodyFatSkipped;
 
   if (bodySkipped) {
     return (
