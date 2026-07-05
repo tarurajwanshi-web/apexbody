@@ -241,7 +241,21 @@ function ProfileSetup() {
         if (!draft.weight && !draft.height && !draft.dexaBf) return true;
         return !!draft.weight && !!draft.height;
       }
-      case 8: return true;
+      case 8: {
+        const cw = Number(draft.weight) || 0;
+        const tw = Number(draft.targetWeight) || 0;
+        const direction = GOAL_DIRECTION[draft.goal!];
+        if (!draft.targetWeight || !draft.targetRatePct) return false;
+        if (direction === "lose" && tw >= cw) return false;
+        if (direction === "gain" && tw <= cw) return false;
+        if (direction === "lose") {
+          const heightM = Number(draft.height) / 100;
+          const bmi = heightM > 0 ? tw / (heightM * heightM) : 0;
+          if (bmi > 0 && bmi < 18.5) return false;
+        }
+        return true;
+      }
+      case 9: return true;
       default: return false;
     }
   })();
