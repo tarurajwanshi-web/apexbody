@@ -993,11 +993,13 @@ function TargetRateStep({
   const ceiling = RATE_CEILING[goal];
 
   useEffect(() => {
+    const ceiling = RATE_CEILING[goal];
+    const current = Number(ratePct) || 0;
+    if (!ratePct || current > ceiling) {
+      onRatePct(String(RATE_ZONES[goal][0].max / 2));
+    }
     if (direction === "maintain" && !targetWeight && currentWeight) {
       onTargetWeight(currentWeight);
-    }
-    if (!ratePct) {
-      onRatePct(String(RATE_ZONES[goal][0].max / 2));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goal]);
@@ -1014,6 +1016,9 @@ function TargetRateStep({
   if (direction === "gain" && tw > 0 && tw <= cw) directionError = "Target weight should be above your current weight.";
   if (direction === "lose" && bmiAtTarget > 0 && bmiAtTarget < 18.5) {
     directionError = "This target weight is below a healthy BMI for your height.";
+  }
+  if (direction === "gain" && bmiAtTarget >= 35) {
+    directionError = "This target weight is above a safe range for your height — talk to a doctor before setting a goal this high.";
   }
 
   const headline = direction === "lose"
