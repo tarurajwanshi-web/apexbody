@@ -201,7 +201,7 @@ function ProfileSetup() {
       if (!userRes.user) return;
       const { data } = await supabase
         .from("profiles")
-        .select("experience_level, eating_pattern, goal, equipment_access, training_day_codes")
+        .select("experience_level, eating_pattern, goal, equipment_access, training_day_codes, target_weight_kg, target_rate_pct")
         .eq("user_id", userRes.user.id)
         .single();
       if (cancelled || !data) return;
@@ -211,6 +211,8 @@ function ProfileSetup() {
         goal: (data.goal as Goal | null) ?? null,
         equipment: (data.equipment_access as Equipment | null) ?? null,
         trainingDays: (data.training_day_codes as string[] | null) ?? [],
+        targetWeight: (data as any).target_weight_kg != null ? String((data as any).target_weight_kg) : "",
+        targetRatePct: (data as any).target_rate_pct != null ? String((data as any).target_rate_pct) : "",
       });
     })();
     return () => { cancelled = true; };
