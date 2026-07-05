@@ -981,6 +981,7 @@ function Row({ label, value, valueClass }: { label: string; value: string; value
       <span className={`text-sm font-medium text-right ${valueClass ?? ""}`}>{value}</span>
     </div>
   );
+}
 
 function TargetRateStep({
   goal, currentWeight, height, targetWeight, ratePct, onTargetWeight, onRatePct,
