@@ -10,7 +10,24 @@ export const Route = createFileRoute("/")({
   component: AuthScreen,
 });
 
-async function routeAfterAuth(navigate: ReturnType<typeof useNavigate>, userId: string) {
+// Only accept same-origin relative paths (start with "/", not "//" or a scheme).
+function safeNextParam(): string | null {
+  if (typeof window === "undefined") return null;
+  const raw = new URLSearchParams(window.location.search).get("next");
+  if (!raw) return null;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+  return raw;
+}
+
+async function routeAfterAuth(userId: string) {
+  const next = safeNextParam();
+  if (next) {
+    // Preserve any redirect target (e.g. OAuth consent) regardless of onboarding
+    // state — the target route handles auth guarding itself.
+    window.location.replace(next);
+    return;
+  }
+
   const { data } = await supabase
     .from("profiles")
     .select("profile_completed_at, disclaimer_accepted_at")
@@ -20,22 +37,18 @@ async function routeAfterAuth(navigate: ReturnType<typeof useNavigate>, userId: 
   // STATE 1: no profile row → create it, then disclaimer
   if (!data) {
     await supabase.from("profiles").insert({ user_id: userId });
-    navigate({ to: "/disclaimer", replace: true });
+    window.location.replace("/disclaimer");
     return;
   }
 
   // STATE 3: fully onboarded
   if (data.profile_completed_at) {
-    navigate({ to: "/dashboard", replace: true });
+    window.location.replace("/dashboard");
     return;
   }
 
   // STATE 2: profile exists, onboarding incomplete
-  if (data.disclaimer_accepted_at) {
-    navigate({ to: "/onboarding", replace: true });
-  } else {
-    navigate({ to: "/disclaimer", replace: true });
-  }
+  window.location.replace(data.disclaimer_accepted_at ? "/onboarding" : "/disclaimer");
 }
 
 
