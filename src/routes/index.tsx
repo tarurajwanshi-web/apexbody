@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
@@ -10,7 +10,24 @@ export const Route = createFileRoute("/")({
   component: AuthScreen,
 });
 
-async function routeAfterAuth(navigate: ReturnType<typeof useNavigate>, userId: string) {
+// Only accept same-origin relative paths (start with "/", not "//" or a scheme).
+function safeNextParam(): string | null {
+  if (typeof window === "undefined") return null;
+  const raw = new URLSearchParams(window.location.search).get("next");
+  if (!raw) return null;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+  return raw;
+}
+
+async function routeAfterAuth(userId: string) {
+  const next = safeNextParam();
+  if (next) {
+    // Preserve any redirect target (e.g. OAuth consent) regardless of onboarding
+    // state — the target route handles auth guarding itself.
+    window.location.replace(next);
+    return;
+  }
+
   const { data } = await supabase
     .from("profiles")
     .select("profile_completed_at, disclaimer_accepted_at")
@@ -20,27 +37,22 @@ async function routeAfterAuth(navigate: ReturnType<typeof useNavigate>, userId: 
   // STATE 1: no profile row → create it, then disclaimer
   if (!data) {
     await supabase.from("profiles").insert({ user_id: userId });
-    navigate({ to: "/disclaimer", replace: true });
+    window.location.replace("/disclaimer");
     return;
   }
 
   // STATE 3: fully onboarded
   if (data.profile_completed_at) {
-    navigate({ to: "/dashboard", replace: true });
+    window.location.replace("/dashboard");
     return;
   }
 
   // STATE 2: profile exists, onboarding incomplete
-  if (data.disclaimer_accepted_at) {
-    navigate({ to: "/onboarding", replace: true });
-  } else {
-    navigate({ to: "/disclaimer", replace: true });
-  }
+  window.location.replace(data.disclaimer_accepted_at ? "/onboarding" : "/disclaimer");
 }
 
 
 function AuthScreen() {
-  const navigate = useNavigate();
   const [loading, setLoading] = useState<"google" | "apple" | null>(null);
   const [checking, setChecking] = useState(true);
   const redirectingRef = useRef(false);
@@ -51,7 +63,7 @@ function AuthScreen() {
     const handleUser = (userId: string) => {
       if (redirectingRef.current) return;
       redirectingRef.current = true;
-      routeAfterAuth(navigate, userId);
+      routeAfterAuth(userId);
     };
 
     // Primary path: trust the persisted session once it's loaded.
@@ -71,12 +83,18 @@ function AuthScreen() {
       mounted = false;
       sub.subscription.unsubscribe();
     };
-  }, [navigate]);
+  }, []);
 
   const signIn = async (provider: "google" | "apple") => {
     setLoading(provider);
+    // Preserve ?next= across the OAuth round-trip so the consent flow returns
+    // to the exact consent URL that started it.
+    const next = safeNextParam();
+    const redirectUri = next
+      ? `${window.location.origin}/?next=${encodeURIComponent(next)}`
+      : window.location.origin;
     const result = await lovable.auth.signInWithOAuth(provider, {
-      redirect_uri: window.location.origin,
+      redirect_uri: redirectUri,
     });
     if (result.error) {
       toast.error(`Sign-in failed: ${result.error.message ?? "Unknown error"}`);
