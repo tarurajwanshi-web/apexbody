@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, RotateCcw, LogOut, FileText, FileLock, ShieldCheck, Heart } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw, LogOut, FileText, FileLock, ShieldCheck, Heart, Plug } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useProfile } from "@/lib/store";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
@@ -136,6 +136,10 @@ function Settings() {
             ? "We'll parse your wearable screenshots and feed them into your APEX score."
             : "Quick daily 1-5 recovery check-in + sleep hours."}
         </p>
+      </Group>
+
+      <Group title="Integrations">
+        <LinkRow to="/connect" label="Connect to ChatGPT & Claude" Icon={Plug} />
       </Group>
 
       <Group title="Legal & data">
