@@ -53,7 +53,6 @@ async function routeAfterAuth(userId: string) {
 
 
 function AuthScreen() {
-  const navigate = useNavigate();
   const [loading, setLoading] = useState<"google" | "apple" | null>(null);
   const [checking, setChecking] = useState(true);
   const redirectingRef = useRef(false);
@@ -64,7 +63,7 @@ function AuthScreen() {
     const handleUser = (userId: string) => {
       if (redirectingRef.current) return;
       redirectingRef.current = true;
-      routeAfterAuth(navigate, userId);
+      routeAfterAuth(userId);
     };
 
     // Primary path: trust the persisted session once it's loaded.
@@ -84,12 +83,18 @@ function AuthScreen() {
       mounted = false;
       sub.subscription.unsubscribe();
     };
-  }, [navigate]);
+  }, []);
 
   const signIn = async (provider: "google" | "apple") => {
     setLoading(provider);
+    // Preserve ?next= across the OAuth round-trip so the consent flow returns
+    // to the exact consent URL that started it.
+    const next = safeNextParam();
+    const redirectUri = next
+      ? `${window.location.origin}/?next=${encodeURIComponent(next)}`
+      : window.location.origin;
     const result = await lovable.auth.signInWithOAuth(provider, {
-      redirect_uri: window.location.origin,
+      redirect_uri: redirectUri,
     });
     if (result.error) {
       toast.error(`Sign-in failed: ${result.error.message ?? "Unknown error"}`);
