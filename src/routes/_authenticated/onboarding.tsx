@@ -157,6 +157,9 @@ type Draft = {
   thigh: string;
   weight: string;
   height: string;
+  bodyFatSkipped: boolean;
+  targetWeight: string;
+  targetRatePct: string;
 };
 
 const EMPTY: Draft = {
@@ -170,6 +173,8 @@ const EMPTY: Draft = {
   dexaBf: "", dexaLean: "",
   waist: "", hip: "", arm: "", thigh: "",
   weight: "", height: "",
+  bodyFatSkipped: false,
+  targetWeight: "", targetRatePct: "",
 };
 
 function ProfileSetup() {
