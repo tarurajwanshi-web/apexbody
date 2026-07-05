@@ -537,7 +537,10 @@ export type Database = {
           name: string | null
           plan_unlock_date: string | null
           profile_completed_at: string | null
+          reached_target_at: string | null
           soft_reset_at: string | null
+          target_rate_pct: number | null
+          target_weight_kg: number | null
           timezone: string | null
           training_day_codes: string[] | null
           training_days_per_week: number | null
@@ -568,7 +571,10 @@ export type Database = {
           name?: string | null
           plan_unlock_date?: string | null
           profile_completed_at?: string | null
+          reached_target_at?: string | null
           soft_reset_at?: string | null
+          target_rate_pct?: number | null
+          target_weight_kg?: number | null
           timezone?: string | null
           training_day_codes?: string[] | null
           training_days_per_week?: number | null
@@ -599,7 +605,10 @@ export type Database = {
           name?: string | null
           plan_unlock_date?: string | null
           profile_completed_at?: string | null
+          reached_target_at?: string | null
           soft_reset_at?: string | null
+          target_rate_pct?: number | null
+          target_weight_kg?: number | null
           timezone?: string | null
           training_day_codes?: string[] | null
           training_days_per_week?: number | null
@@ -1170,6 +1179,27 @@ export type Database = {
           unlock_date?: string
           user_id?: string
           week_start_date?: string
+        }
+        Relationships: []
+      }
+      weight_trend_state: {
+        Row: {
+          last_computed_date: string
+          trend_kg: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          last_computed_date: string
+          trend_kg: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          last_computed_date?: string
+          trend_kg?: number
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
