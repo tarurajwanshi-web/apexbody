@@ -253,6 +253,11 @@ function ProfileSetup() {
           const bmi = heightM > 0 ? tw / (heightM * heightM) : 0;
           if (bmi > 0 && bmi < 18.5) return false;
         }
+        if (direction === "gain") {
+          const heightM = Number(draft.height) / 100;
+          const bmi = heightM > 0 ? tw / (heightM * heightM) : 0;
+          if (bmi >= 35) return false;
+        }
         return true;
       }
       case 9: return true;
