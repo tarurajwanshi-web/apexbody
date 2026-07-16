@@ -171,11 +171,23 @@ function WorkoutsPage() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // Apply readiness-driven volume reduction to today's session only.
+  // Engine-driven volume gate. The readiness engine writes training_permission
+  // (green_train / yellow_modify / orange_reduce / red_recover); that is the
+  // source of truth. Auto-apply the reduction by default and let the user
+  // override to full via a one-tap button. Manual choice (volumeChoice)
+  // always wins over the engine default.
+  const autoVolumeFromPermission = (p: string | null): "full" | "reduced" | "recovery" => {
+    if (p === "red_recover") return "recovery";
+    if (p === "orange_reduce") return "reduced";
+    return "full"; // green_train, yellow_modify, or missing: no auto-cut
+  };
+  const effectiveVolume: "full" | "reduced" | "recovery" =
+    volumeChoice ?? autoVolumeFromPermission(trainingPermission);
+
   const effectivePlan = useMemo(() => {
     if (!plan) return plan;
-    if (!volumeChoice || volumeChoice === "full") return plan;
-    const factor = volumeChoice === "recovery" ? 0.5 : 0.7;
+    if (effectiveVolume === "full") return plan;
+    const factor = effectiveVolume === "recovery" ? 0.5 : 0.7;
     const days = (plan.plan_data?.days ?? []).map((d, i) => {
       if (i !== todayIdx || d.rest) return d;
       return {
@@ -187,7 +199,7 @@ function WorkoutsPage() {
       };
     });
     return { ...plan, plan_data: { ...plan.plan_data, days } };
-  }, [plan, volumeChoice, todayIdx]);
+  }, [plan, effectiveVolume, todayIdx]);
 
   // Build display order: today first, then tomorrow..end-of-week, then earlier days of this week.
   const orderedDays = useMemo(() => {
