@@ -42,7 +42,9 @@ function WorkoutsPage() {
   const [preCheckOpen, setPreCheckOpen] = useState(false);
   const [sessionStarted, setSessionStarted] = useState(false);
   const [todayReadiness, setTodayReadiness] = useState<number | null>(null);
+  const [trainingPermission, setTrainingPermission] = useState<string | null>(null);
   const [volumeChoice, setVolumeChoice] = useState<"full" | "reduced" | "recovery" | null>(null);
+  const [permissionAcknowledged, setPermissionAcknowledged] = useState(false);
   
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
