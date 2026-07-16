@@ -42,7 +42,9 @@ function WorkoutsPage() {
   const [preCheckOpen, setPreCheckOpen] = useState(false);
   const [sessionStarted, setSessionStarted] = useState(false);
   const [todayReadiness, setTodayReadiness] = useState<number | null>(null);
+  const [trainingPermission, setTrainingPermission] = useState<string | null>(null);
   const [volumeChoice, setVolumeChoice] = useState<"full" | "reduced" | "recovery" | null>(null);
+  const [permissionAcknowledged, setPermissionAcknowledged] = useState(false);
   
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
@@ -112,11 +114,12 @@ function WorkoutsPage() {
 
       const { data: readinessRow } = await supabase
         .from("readiness_scores")
-        .select("final_score")
+        .select("final_score, training_permission")
         .eq("user_id", uid)
         .eq("score_date", todayLocalISO)
         .maybeSingle();
       setTodayReadiness(readinessRow ? Number((readinessRow as any).final_score) : null);
+      setTrainingPermission(readinessRow ? ((readinessRow as any).training_permission ?? null) : null);
     } finally {
       setLoading(false);
       setLastUpdatedAt(Date.now());
@@ -168,11 +171,23 @@ function WorkoutsPage() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // Apply readiness-driven volume reduction to today's session only.
+  // Engine-driven volume gate. The readiness engine writes training_permission
+  // (green_train / yellow_modify / orange_reduce / red_recover); that is the
+  // source of truth. Auto-apply the reduction by default and let the user
+  // override to full via a one-tap button. Manual choice (volumeChoice)
+  // always wins over the engine default.
+  const autoVolumeFromPermission = (p: string | null): "full" | "reduced" | "recovery" => {
+    if (p === "red_recover") return "recovery";
+    if (p === "orange_reduce") return "reduced";
+    return "full"; // green_train, yellow_modify, or missing: no auto-cut
+  };
+  const effectiveVolume: "full" | "reduced" | "recovery" =
+    volumeChoice ?? autoVolumeFromPermission(trainingPermission);
+
   const effectivePlan = useMemo(() => {
     if (!plan) return plan;
-    if (!volumeChoice || volumeChoice === "full") return plan;
-    const factor = volumeChoice === "recovery" ? 0.5 : 0.7;
+    if (effectiveVolume === "full") return plan;
+    const factor = effectiveVolume === "recovery" ? 0.5 : 0.7;
     const days = (plan.plan_data?.days ?? []).map((d, i) => {
       if (i !== todayIdx || d.rest) return d;
       return {
@@ -184,7 +199,7 @@ function WorkoutsPage() {
       };
     });
     return { ...plan, plan_data: { ...plan.plan_data, days } };
-  }, [plan, volumeChoice, todayIdx]);
+  }, [plan, effectiveVolume, todayIdx]);
 
   // Build display order: today first, then tomorrow..end-of-week, then earlier days of this week.
   const orderedDays = useMemo(() => {
@@ -268,7 +283,7 @@ function WorkoutsPage() {
       {!loading && plan && (
         <>
           <LockBanner plan={plan} />
-          <VolumeNudge plan={plan} weekLogs={weekLogs} todayIdx={todayIdx} hadShieldCut={volumeChoice === "recovery" || volumeChoice === "reduced"} />
+          <VolumeNudge plan={plan} weekLogs={weekLogs} todayIdx={todayIdx} hadShieldCut={effectiveVolume === "recovery" || effectiveVolume === "reduced"} />
 
           {/* Start Today's Workout — opens pre-workout readiness sheet.
               Rest days still expose an opt-in "Train anyway" path so users
@@ -280,16 +295,50 @@ function WorkoutsPage() {
             const todayDay = plan.plan_data?.days?.[todayIdx];
             if (!todayDay) return null;
             if (sessionStarted) return null;
-            // Readiness gate — only if score is low and user hasn't picked yet.
-            if ((todayReadiness ?? 50) < 45 && volumeChoice === null && !todayDay.rest) {
+            // Engine-driven readiness banner. The readiness engine's
+            // training_permission is the source of truth; we auto-apply the
+            // reduction and offer a one-tap override to train full.
+            const perm = trainingPermission;
+            const permLabel =
+              perm === "red_recover" ? "Recovery only" :
+              perm === "orange_reduce" ? "Reduce volume" :
+              perm === "yellow_modify" ? "Modify session" : null;
+            const permDetail =
+              perm === "red_recover" ? "Your recovery signals are red. Sets auto-scaled to −50%."
+              : perm === "orange_reduce" ? "Readiness is low. Sets auto-scaled to −30%."
+              : perm === "yellow_modify" ? "Readiness is borderline. Consider lighter loads or fewer sets."
+              : null;
+            if (!todayDay.rest && permLabel && !permissionAcknowledged) {
               return (
                 <div className="mx-5 mt-4 rounded-2xl border-l-4 border-amber-500 bg-amber-500/10 p-4">
-                  <p className="text-[10px] uppercase tracking-wider text-amber-300">Low readiness</p>
-                  <p className="mt-1 text-[14px] text-text-primary">Readiness is {Math.round(todayReadiness ?? 50)}. Consider scaling back.</p>
+                  <p className="text-[10px] uppercase tracking-wider text-amber-300">{permLabel}</p>
+                  <p className="mt-1 text-[14px] text-text-primary">
+                    {permDetail}
+                    {todayReadiness != null && (
+                      <span className="text-text-secondary"> (score {Math.round(todayReadiness)})</span>
+                    )}
+                  </p>
                   <div className="mt-3 flex flex-col gap-2">
-                    <button onClick={() => setVolumeChoice('reduced')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Reduce volume (−30%)</button>
-                    <button onClick={() => setVolumeChoice('recovery')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Recovery session (−50%)</button>
-                    <button onClick={() => setVolumeChoice('full')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-secondary active:scale-[0.98] transition">Proceed as planned</button>
+                    <button
+                      onClick={() => setPermissionAcknowledged(true)}
+                      className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition"
+                    >
+                      {perm === "red_recover" ? "Start recovery session"
+                        : perm === "orange_reduce" ? "Start reduced session"
+                        : "Start modified session"}
+                    </button>
+                    {perm === "red_recover" && (
+                      <button onClick={() => { setVolumeChoice('reduced'); setPermissionAcknowledged(true); }} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Reduce instead (−30%)</button>
+                    )}
+                    {perm === "orange_reduce" && (
+                      <button onClick={() => { setVolumeChoice('recovery'); setPermissionAcknowledged(true); }} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Go lighter — recovery (−50%)</button>
+                    )}
+                    <button
+                      onClick={() => { setVolumeChoice('full'); setPermissionAcknowledged(true); }}
+                      className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-secondary active:scale-[0.98] transition"
+                    >
+                      Train full anyway
+                    </button>
                   </div>
                 </div>
               );
@@ -316,9 +365,9 @@ function WorkoutsPage() {
                 >
                   Start workout →
                 </button>
-                {volumeChoice && volumeChoice !== 'full' && (
+                {effectiveVolume !== 'full' && (
                   <p className="mt-2 text-center text-[11px] text-amber-300">
-                    Volume scaled for low readiness ({volumeChoice === 'recovery' ? '−50%' : '−30%'})
+                    Volume scaled for low readiness ({effectiveVolume === 'recovery' ? '−50%' : '−30%'})
                   </p>
                 )}
               </div>
@@ -351,7 +400,7 @@ function WorkoutsPage() {
 
       {preCheckOpen && (
         <PreWorkoutCheckSheet
-          volumeChoice={volumeChoice}
+          volumeChoice={effectiveVolume}
           onClose={() => setPreCheckOpen(false)}
           onSaved={() => { setPreCheckOpen(false); setSessionStarted(true); }}
           todayISO={todayLocalISO}

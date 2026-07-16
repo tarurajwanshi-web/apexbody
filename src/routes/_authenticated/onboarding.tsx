@@ -288,6 +288,20 @@ function ProfileSetup() {
       const trainingDaysCount = draft.trainingDays.length;
       const hasBody = bodyDataType !== null && !!draft.weight && !!draft.height;
 
+      // Persist target_rate_pct explicitly so the weekly macro review's
+      // provenance reflects what the engine will actually use. Goal-appropriate
+      // defaults when the user did not set a pace; null for maintain-direction
+      // goals (recomposition / athletic_performance) where rate is not applied.
+      const goalRateDefault = (g: string | null): number | null => {
+        if (g === "fat_loss") return 0.5;
+        if (g === "muscle_gain") return 0.25;
+        if (g === "strength") return 0.15;
+        return null; // recomposition, athletic_performance — no rate
+      };
+      const targetRatePctResolved =
+        draft.targetRatePct ? Number(draft.targetRatePct) : goalRateDefault(draft.goal);
+
+
       let payload: any;
       if (isReset) {
         payload = {
@@ -306,7 +320,7 @@ function ProfileSetup() {
           measurement_weight_kg: hasBody ? Number(draft.weight) : null,
           measurement_height_cm: hasBody ? Number(draft.height) : null,
           target_weight_kg: draft.targetWeight ? Number(draft.targetWeight) : null,
-          target_rate_pct: draft.targetRatePct ? Number(draft.targetRatePct) : null,
+          target_rate_pct: targetRatePctResolved,
         };
       } else {
         const now = new Date();
@@ -331,7 +345,7 @@ function ProfileSetup() {
           measurement_weight_kg: hasBody ? Number(draft.weight) : null,
           measurement_height_cm: hasBody ? Number(draft.height) : null,
           target_weight_kg: draft.targetWeight ? Number(draft.targetWeight) : null,
-          target_rate_pct: draft.targetRatePct ? Number(draft.targetRatePct) : null,
+          target_rate_pct: targetRatePctResolved,
           profile_completed_at: now.toISOString(),
           plan_unlock_date: unlock.toISOString().slice(0, 10),
           timezone: getBrowserTimezone(),
