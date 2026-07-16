@@ -295,16 +295,50 @@ function WorkoutsPage() {
             const todayDay = plan.plan_data?.days?.[todayIdx];
             if (!todayDay) return null;
             if (sessionStarted) return null;
-            // Readiness gate — only if score is low and user hasn't picked yet.
-            if ((todayReadiness ?? 50) < 45 && volumeChoice === null && !todayDay.rest) {
+            // Engine-driven readiness banner. The readiness engine's
+            // training_permission is the source of truth; we auto-apply the
+            // reduction and offer a one-tap override to train full.
+            const perm = trainingPermission;
+            const permLabel =
+              perm === "red_recover" ? "Recovery only" :
+              perm === "orange_reduce" ? "Reduce volume" :
+              perm === "yellow_modify" ? "Modify session" : null;
+            const permDetail =
+              perm === "red_recover" ? "Your recovery signals are red. Sets auto-scaled to −50%."
+              : perm === "orange_reduce" ? "Readiness is low. Sets auto-scaled to −30%."
+              : perm === "yellow_modify" ? "Readiness is borderline. Consider lighter loads or fewer sets."
+              : null;
+            if (!todayDay.rest && permLabel && !permissionAcknowledged) {
               return (
                 <div className="mx-5 mt-4 rounded-2xl border-l-4 border-amber-500 bg-amber-500/10 p-4">
-                  <p className="text-[10px] uppercase tracking-wider text-amber-300">Low readiness</p>
-                  <p className="mt-1 text-[14px] text-text-primary">Readiness is {Math.round(todayReadiness ?? 50)}. Consider scaling back.</p>
+                  <p className="text-[10px] uppercase tracking-wider text-amber-300">{permLabel}</p>
+                  <p className="mt-1 text-[14px] text-text-primary">
+                    {permDetail}
+                    {todayReadiness != null && (
+                      <span className="text-text-secondary"> (score {Math.round(todayReadiness)})</span>
+                    )}
+                  </p>
                   <div className="mt-3 flex flex-col gap-2">
-                    <button onClick={() => setVolumeChoice('reduced')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Reduce volume (−30%)</button>
-                    <button onClick={() => setVolumeChoice('recovery')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Recovery session (−50%)</button>
-                    <button onClick={() => setVolumeChoice('full')} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-secondary active:scale-[0.98] transition">Proceed as planned</button>
+                    <button
+                      onClick={() => setPermissionAcknowledged(true)}
+                      className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition"
+                    >
+                      {perm === "red_recover" ? "Start recovery session"
+                        : perm === "orange_reduce" ? "Start reduced session"
+                        : "Start modified session"}
+                    </button>
+                    {perm === "red_recover" && (
+                      <button onClick={() => { setVolumeChoice('reduced'); setPermissionAcknowledged(true); }} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Reduce instead (−30%)</button>
+                    )}
+                    {perm === "orange_reduce" && (
+                      <button onClick={() => { setVolumeChoice('recovery'); setPermissionAcknowledged(true); }} className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-primary active:scale-[0.98] transition">Go lighter — recovery (−50%)</button>
+                    )}
+                    <button
+                      onClick={() => { setVolumeChoice('full'); setPermissionAcknowledged(true); }}
+                      className="rounded-xl bg-bg-3 py-2 text-[13px] text-text-secondary active:scale-[0.98] transition"
+                    >
+                      Train full anyway
+                    </button>
                   </div>
                 </div>
               );
@@ -331,9 +365,9 @@ function WorkoutsPage() {
                 >
                   Start workout →
                 </button>
-                {volumeChoice && volumeChoice !== 'full' && (
+                {effectiveVolume !== 'full' && (
                   <p className="mt-2 text-center text-[11px] text-amber-300">
-                    Volume scaled for low readiness ({volumeChoice === 'recovery' ? '−50%' : '−30%'})
+                    Volume scaled for low readiness ({effectiveVolume === 'recovery' ? '−50%' : '−30%'})
                   </p>
                 )}
               </div>
