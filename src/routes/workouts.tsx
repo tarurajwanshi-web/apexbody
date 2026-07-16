@@ -112,11 +112,12 @@ function WorkoutsPage() {
 
       const { data: readinessRow } = await supabase
         .from("readiness_scores")
-        .select("final_score")
+        .select("final_score, training_permission")
         .eq("user_id", uid)
         .eq("score_date", todayLocalISO)
         .maybeSingle();
       setTodayReadiness(readinessRow ? Number((readinessRow as any).final_score) : null);
+      setTrainingPermission(readinessRow ? ((readinessRow as any).training_permission ?? null) : null);
     } finally {
       setLoading(false);
       setLastUpdatedAt(Date.now());
