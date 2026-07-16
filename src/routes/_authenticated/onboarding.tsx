@@ -288,6 +288,20 @@ function ProfileSetup() {
       const trainingDaysCount = draft.trainingDays.length;
       const hasBody = bodyDataType !== null && !!draft.weight && !!draft.height;
 
+      // Persist target_rate_pct explicitly so the weekly macro review's
+      // provenance reflects what the engine will actually use. Goal-appropriate
+      // defaults when the user did not set a pace; null for maintain-direction
+      // goals (recomposition / athletic_performance) where rate is not applied.
+      const goalRateDefault = (g: string | null): number | null => {
+        if (g === "fat_loss") return 0.5;
+        if (g === "muscle_gain") return 0.25;
+        if (g === "strength") return 0.15;
+        return null; // recomposition, athletic_performance — no rate
+      };
+      const targetRatePctResolved =
+        draft.targetRatePct ? Number(draft.targetRatePct) : goalRateDefault(draft.goal);
+
+
       let payload: any;
       if (isReset) {
         payload = {
