@@ -320,7 +320,7 @@ function ProfileSetup() {
           measurement_weight_kg: hasBody ? Number(draft.weight) : null,
           measurement_height_cm: hasBody ? Number(draft.height) : null,
           target_weight_kg: draft.targetWeight ? Number(draft.targetWeight) : null,
-          target_rate_pct: draft.targetRatePct ? Number(draft.targetRatePct) : null,
+          target_rate_pct: targetRatePctResolved,
         };
       } else {
         const now = new Date();
@@ -345,7 +345,7 @@ function ProfileSetup() {
           measurement_weight_kg: hasBody ? Number(draft.weight) : null,
           measurement_height_cm: hasBody ? Number(draft.height) : null,
           target_weight_kg: draft.targetWeight ? Number(draft.targetWeight) : null,
-          target_rate_pct: draft.targetRatePct ? Number(draft.targetRatePct) : null,
+          target_rate_pct: targetRatePctResolved,
           profile_completed_at: now.toISOString(),
           plan_unlock_date: unlock.toISOString().slice(0, 10),
           timezone: getBrowserTimezone(),
