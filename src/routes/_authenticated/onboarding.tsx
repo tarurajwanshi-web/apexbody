@@ -64,24 +64,46 @@ const EATING_PATTERNS: { id: EatingPattern; label: string; desc: string }[] = [
   { id: "flexible", label: "Flexible", desc: "No fixed pattern" },
 ];
 
-type Pace = "steady" | "standard" | "aggressive";
-const PACES: { id: Pace; label: string; blurb: string; pct: number }[] = [
-  { id: "steady", label: "Steady", blurb: "0.15%/week — sustainable", pct: 0.15 },
-  { id: "standard", label: "Standard", blurb: "0.25%/week — recommended", pct: 0.25 },
-  { id: "aggressive", label: "Aggressive", blurb: "0.5%/week — strict", pct: 0.5 },
+// Pace id is a broad string union across all goal-specific tables below.
+type PaceId = string;
+
+// Rate-based pace items: |%/week| magnitude. Sign applied at submit from GOAL_DIRECTION.
+type RatePace = { id: string; label: string; pct: number; blurb: string };
+// Recomp uses kcal/day magnitude below TDEE — converted to a small target_rate_pct at submit.
+type KcalPace = { id: string; label: string; kcalDelta: number; blurb: string };
+
+const PACES_FAT_LOSS: RatePace[] = [
+  { id: "steady",     label: "Steady",     pct: 0.35, blurb: "0.35%/week — sustainable, protects lean mass" },
+  { id: "standard",   label: "Standard",   pct: 0.5,  blurb: "0.5%/week — recommended for most" },
+  { id: "aggressive", label: "Aggressive", pct: 0.75, blurb: "0.75%/week — lean users, short cuts only" },
 ];
+const PACES_MUSCLE_GAIN: RatePace[] = [
+  { id: "steady",     label: "Steady",     pct: 0.25, blurb: "0.25%/week — lean gains, trained lifters" },
+  { id: "standard",   label: "Standard",   pct: 0.4,  blurb: "0.4%/week — recommended" },
+  { id: "aggressive", label: "Aggressive", pct: 0.6,  blurb: "0.6%/week — beginners, returning lifters" },
+];
+const PACES_STRENGTH: RatePace[] = [
+  { id: "recover_eat", label: "Recover-eat", pct: 0.15, blurb: "0.15%/week surplus — mild, minimal fat gain" },
+  { id: "standard",    label: "Standard",    pct: 0.25, blurb: "0.25%/week surplus — recommended for PR chasing" },
+  { id: "push_harder", label: "Push harder", pct: 0.4,  blurb: "0.4%/week surplus — bulking cycle, expect some fat" },
+];
+const PACES_RECOMP: KcalPace[] = [
+  { id: "mild",     label: "Mild",     kcalDelta: 100, blurb: "100 kcal below TDEE — closest to maintenance" },
+  { id: "moderate", label: "Moderate", kcalDelta: 250, blurb: "250 kcal below TDEE — recommended for most" },
+  { id: "focused",  label: "Focused",  kcalDelta: 400, blurb: "400 kcal below TDEE — leaner, willing to trade some strength" },
+];
+
+function ratePacesFor(g: Goal): RatePace[] | null {
+  if (g === "fat_loss") return PACES_FAT_LOSS;
+  if (g === "muscle_gain") return PACES_MUSCLE_GAIN;
+  if (g === "strength") return PACES_STRENGTH;
+  return null;
+}
 
 const GOAL_DIRECTION: Record<Goal, "lose" | "gain" | "maintain"> = {
   fat_loss: "lose", muscle_gain: "gain", strength: "gain",
   recomposition: "maintain", athletic_performance: "maintain",
 };
-
-function goalRateDefault(g: Goal | null): number | null {
-  if (g === "fat_loss") return 0.25;
-  if (g === "muscle_gain") return 0.25;
-  if (g === "strength") return 0.15;
-  return null;
-}
 
 type Draft = {
   name: string;
