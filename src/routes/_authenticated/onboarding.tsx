@@ -64,24 +64,65 @@ const EATING_PATTERNS: { id: EatingPattern; label: string; desc: string }[] = [
   { id: "flexible", label: "Flexible", desc: "No fixed pattern" },
 ];
 
-type Pace = "steady" | "standard" | "aggressive";
-const PACES: { id: Pace; label: string; blurb: string; pct: number }[] = [
-  { id: "steady", label: "Steady", blurb: "0.15%/week — sustainable", pct: 0.15 },
-  { id: "standard", label: "Standard", blurb: "0.25%/week — recommended", pct: 0.25 },
-  { id: "aggressive", label: "Aggressive", blurb: "0.5%/week — strict", pct: 0.5 },
+// Pace id is a broad string union across all goal-specific tables below.
+type PaceId = string;
+
+// Rate-based pace items: |%/week| magnitude. Sign applied at submit from GOAL_DIRECTION.
+type RatePace = { id: string; label: string; pct: number; blurb: string };
+// Recomp uses kcal/day magnitude below TDEE — converted to a small target_rate_pct at submit.
+type KcalPace = { id: string; label: string; kcalDelta: number; blurb: string };
+
+const PACES_FAT_LOSS: RatePace[] = [
+  { id: "steady",     label: "Steady",     pct: 0.35, blurb: "0.35%/week — sustainable, protects lean mass" },
+  { id: "standard",   label: "Standard",   pct: 0.5,  blurb: "0.5%/week — recommended for most" },
+  { id: "aggressive", label: "Aggressive", pct: 0.75, blurb: "0.75%/week — lean users, short cuts only" },
 ];
+const PACES_MUSCLE_GAIN: RatePace[] = [
+  { id: "steady",     label: "Steady",     pct: 0.25, blurb: "0.25%/week — lean gains, trained lifters" },
+  { id: "standard",   label: "Standard",   pct: 0.4,  blurb: "0.4%/week — recommended" },
+  { id: "aggressive", label: "Aggressive", pct: 0.6,  blurb: "0.6%/week — beginners, returning lifters" },
+];
+const PACES_STRENGTH: RatePace[] = [
+  { id: "recover_eat", label: "Recover-eat", pct: 0.15, blurb: "0.15%/week surplus — mild, minimal fat gain" },
+  { id: "standard",    label: "Standard",    pct: 0.25, blurb: "0.25%/week surplus — recommended for PR chasing" },
+  { id: "push_harder", label: "Push harder", pct: 0.4,  blurb: "0.4%/week surplus — bulking cycle, expect some fat" },
+];
+const PACES_RECOMP: KcalPace[] = [
+  { id: "mild",     label: "Mild",     kcalDelta: 100, blurb: "100 kcal below TDEE — closest to maintenance" },
+  { id: "moderate", label: "Moderate", kcalDelta: 250, blurb: "250 kcal below TDEE — recommended for most" },
+  { id: "focused",  label: "Focused",  kcalDelta: 400, blurb: "400 kcal below TDEE — leaner, willing to trade some strength" },
+];
+
+function ratePacesFor(g: Goal): RatePace[] | null {
+  if (g === "fat_loss") return PACES_FAT_LOSS;
+  if (g === "muscle_gain") return PACES_MUSCLE_GAIN;
+  if (g === "strength") return PACES_STRENGTH;
+  return null;
+}
 
 const GOAL_DIRECTION: Record<Goal, "lose" | "gain" | "maintain"> = {
   fat_loss: "lose", muscle_gain: "gain", strength: "gain",
   recomposition: "maintain", athletic_performance: "maintain",
 };
 
-function goalRateDefault(g: Goal | null): number | null {
-  if (g === "fat_loss") return 0.25;
-  if (g === "muscle_gain") return 0.25;
-  if (g === "strength") return 0.15;
-  return null;
+function computeTargetRatePct(draft: Draft): number | null {
+  const g = draft.goal;
+  if (!g) return null;
+  if (g === "athletic_performance") return null;
+  if (g === "recomposition") {
+    const item = PACES_RECOMP.find((p) => p.id === draft.pace) ?? PACES_RECOMP[1];
+    const cw = Number(draft.weightKg);
+    if (!(cw > 0)) return -0.001;
+    const weeklyKg = (item.kcalDelta * 7) / 7700;
+    return -(weeklyKg / cw);
+  }
+  const table = ratePacesFor(g);
+  if (!table) return null;
+  const item = table.find((p) => p.id === draft.pace) ?? table[1];
+  const sign = GOAL_DIRECTION[g] === "lose" ? -1 : 1;
+  return sign * (item.pct / 100);
 }
+
 
 type Draft = {
   name: string;
@@ -99,7 +140,7 @@ type Draft = {
   heightFt: string;      // display-only when lengthUnit=in
   heightIn: string;      // display-only when lengthUnit=in
   targetWeightKg: string;
-  pace: Pace | null;
+  pace: PaceId | null;
 };
 
 const EMPTY: Draft = {
@@ -202,8 +243,7 @@ function ProfileSetup() {
       const userId = userRes.user.id;
 
       const trainingDaysCount = draft.trainingDays.length;
-      const chosenPace = draft.pace ? PACES.find((p) => p.id === draft.pace)!.pct : null;
-      const targetRatePct = chosenPace ?? goalRateDefault(draft.goal);
+      const targetRatePct = computeTargetRatePct(draft);
       const equipmentDb = draft.equipment ? EQUIPMENT_UI_TO_DB[draft.equipment] : null;
 
       const commonBody = {
@@ -746,6 +786,15 @@ function TargetStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>)
   const goal = draft.goal!;
   const direction = GOAL_DIRECTION[goal];
 
+  // Prefill target weight = current weight for recomp / athletic on first entry.
+  useEffect(() => {
+    if ((goal === "recomposition" || goal === "athletic_performance") &&
+        draft.targetWeightKg === "" && draft.weightKg !== "") {
+      patch({ targetWeightKg: draft.weightKg });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goal]);
+
   const setTargetWeightDisplay = (raw: string) => {
     const clean = raw.replace(/[^\d.]/g, "");
     if (clean === "") { patch({ targetWeightKg: "" }); return; }
@@ -769,35 +818,101 @@ function TargetStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>)
   if (direction === "lose" && bmi > 0 && bmi < 18.5) targetError = "Target weight is below a healthy BMI for your height.";
   if (direction === "gain" && bmi >= 35) targetError = "Target weight is above a safe range for your height.";
 
-  const sub =
+  const title =
     goal === "fat_loss" ? "How much would you like to lose, and how fast?" :
     goal === "muscle_gain" || goal === "strength" ? "How much would you like to gain, and how fast?" :
-    goal === "recomposition" ? "Where do you want to land?" :
-    "What's your target weight for competition?";
+    goal === "recomposition" ? "How aggressive should the recomp be?" :
+    "What's your competition weight?";
+  const sub =
+    goal === "recomposition" ? "Recomp works best in a small deficit while training hard." :
+    goal === "athletic_performance" ? "We match your calories to training load — no target pace needed." :
+    undefined;
+
+  const ratePaces = ratePacesFor(goal);
+  const selectedRate = ratePaces?.find((p) => p.id === draft.pace) ?? ratePaces?.[1] ?? null;
+  const selectedRecomp = PACES_RECOMP.find((p) => p.id === draft.pace) ?? PACES_RECOMP[1];
+
+  // Guardrail computations (rate-based goals only).
+  let weeksToGoal: number | null = null;
+  let floorWarn: string | null = null;
+  let longCutHint = false;
+  if (ratePaces && selectedRate && cw > 0 && tw > 0) {
+    const delta = Math.abs(tw - cw);
+    const weeklyKg = cw * (selectedRate.pct / 100);
+    if (weeklyKg > 0) weeksToGoal = Math.ceil(delta / weeklyKg);
+
+    // Mifflin-St Jeor (kg/cm/age), activity 1.55
+    const age = Number(draft.age) || 30;
+    const isMale = draft.sex === "male";
+    const bmr = isMale
+      ? 10 * cw + 6.25 * Number(draft.heightCm) - 5 * age + 5
+      : 10 * cw + 6.25 * Number(draft.heightCm) - 5 * age - 161;
+    const tdee = bmr * 1.55;
+    const weeklyKcal = weeklyKg * 7700;
+    const dailyDelta = weeklyKcal / 7;
+    const estCalories = direction === "lose" ? tdee - dailyDelta : tdee + dailyDelta;
+    const floor = isMale ? 1500 : 1200;
+    if (direction === "lose" && estCalories < floor) {
+      floorWarn = `This would put you below ${floor} kcal. We'll cap at the floor and the timeline extends.`;
+    }
+    if (goal === "fat_loss" && weeksToGoal !== null && weeksToGoal > 20) longCutHint = true;
+  }
+
+  const unit = draft.weightUnit;
+  const targetDisplayForCopy = draft.targetWeightKg
+    ? (unit === "kg" ? Number(Number(draft.targetWeightKg).toFixed(1)) : Number((Number(draft.targetWeightKg) / 0.4536).toFixed(1)))
+    : null;
 
   return (
     <>
-      <StepHeader title="Your target" sub={sub} />
-      <FieldLabel>Target weight</FieldLabel>
-      <InputBox>
-        <input
-          type="text" inputMode="decimal"
-          value={targetWeightDisplay}
-          onChange={(e) => setTargetWeightDisplay(e.target.value)}
-          placeholder="—"
-          className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
-        />
-        <span className="text-body-sm text-text-tertiary ml-2">{draft.weightUnit}</span>
-      </InputBox>
-      {targetError && (
-        <p className="mt-2 text-body-sm" style={{ color: "var(--danger)" }}>{targetError}</p>
+      <StepHeader title={title} sub={sub} />
+
+      {goal !== "athletic_performance" && (
+        <>
+          <FieldLabel>{goal === "recomposition" ? "Target weight (usually your current weight)" : "Target weight"}</FieldLabel>
+          <InputBox>
+            <input
+              type="text" inputMode="decimal"
+              value={targetWeightDisplay}
+              onChange={(e) => setTargetWeightDisplay(e.target.value)}
+              placeholder="—"
+              className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
+            />
+            <span className="text-body-sm text-text-tertiary ml-2">{unit}</span>
+          </InputBox>
+          {targetError && (
+            <p className="mt-2 text-body-sm" style={{ color: "var(--danger)" }}>{targetError}</p>
+          )}
+        </>
       )}
 
-      {direction !== "maintain" && (
+      {goal === "athletic_performance" && (
+        <>
+          <FieldLabel>Competition weight</FieldLabel>
+          <InputBox>
+            <input
+              type="text" inputMode="decimal"
+              value={targetWeightDisplay}
+              onChange={(e) => setTargetWeightDisplay(e.target.value)}
+              placeholder="—"
+              className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
+            />
+            <span className="text-body-sm text-text-tertiary ml-2">{unit}</span>
+          </InputBox>
+          <div className="mt-4" style={CARD_BASE}>
+            <p className="text-body font-medium text-text-primary">Maintain your competition weight</p>
+            <p className="text-body-sm text-text-tertiary mt-1 leading-snug">
+              We'll match your calories to your training load. Your targets will move up on heavy days and down on rest days.
+            </p>
+          </div>
+        </>
+      )}
+
+      {ratePaces && (
         <div className="mt-6">
           <FieldLabel>How fast?</FieldLabel>
           <div className="mt-2 space-y-2">
-            {PACES.map((p) => {
+            {ratePaces.map((p) => {
               const active = draft.pace === p.id;
               return (
                 <button
@@ -814,18 +929,73 @@ function TargetStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>)
               );
             })}
           </div>
+
+          {selectedRate && weeksToGoal !== null && targetDisplayForCopy !== null && (
+            <p className="mt-3 text-body-sm text-text-secondary">
+              ~{weeksToGoal} weeks to reach {targetDisplayForCopy}{unit}
+            </p>
+          )}
+          {floorWarn && (
+            <p className="mt-2 text-body-sm" style={{ color: "var(--warn)" }}>{floorWarn}</p>
+          )}
+          {longCutHint && (
+            <p className="mt-2 text-body-sm italic text-text-secondary">
+              Long cuts are hard to sustain. Consider a Steady pace with a diet break every 8–12 weeks.
+            </p>
+          )}
+        </div>
+      )}
+
+      {goal === "recomposition" && (
+        <div className="mt-6">
+          <FieldLabel>How aggressive?</FieldLabel>
+          <div className="mt-2 space-y-2">
+            {PACES_RECOMP.map((p) => {
+              const active = draft.pace === p.id;
+              return (
+                <button
+                  key={p.id} type="button" onClick={() => patch({ pace: p.id })}
+                  className="w-full text-left flex items-center justify-between"
+                  style={active ? PACE_ACTIVE : CARD_BASE}
+                >
+                  <div>
+                    <p className="text-body font-medium text-text-primary">{p.label}</p>
+                    <p className="text-body-sm text-text-tertiary mt-0.5">{p.blurb}</p>
+                  </div>
+                  {active && <Check size={18} style={{ color: "var(--brand-500)" }} />}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-body-sm text-text-secondary">
+            Track for 8+ weeks to see change — scale weight won't move much.
+          </p>
+          {selectedRecomp && null}
         </div>
       )}
     </>
   );
 }
 
+
 function ReviewStep({ draft }: { draft: Draft }) {
   const goalLabel = GOALS.find((g) => g.id === draft.goal)?.label ?? "—";
   const expLabel = EXPERIENCE.find((e) => e.id === draft.experienceLevel)?.label ?? "—";
   const eqLabel = EQUIPMENT_OPTIONS.find((e) => e.id === draft.equipment)?.label ?? "—";
   const eatLabel = EATING_PATTERNS.find((e) => e.id === draft.eatingPattern)?.label ?? "—";
-  const paceLabel = draft.pace ? PACES.find((p) => p.id === draft.pace)!.label : "Standard (default)";
+  const paceLabel = (() => {
+    const g = draft.goal;
+    if (!g) return "—";
+    if (g === "athletic_performance") return "Match training load";
+    if (g === "recomposition") {
+      const item = PACES_RECOMP.find((p) => p.id === draft.pace) ?? PACES_RECOMP[1];
+      return `${item.label} · ~${item.kcalDelta} kcal/day below TDEE`;
+    }
+    const table = ratePacesFor(g);
+    if (!table) return "—";
+    const item = table.find((p) => p.id === draft.pace) ?? table[1];
+    return `${item.label} · ${item.pct}%/week`;
+  })();
 
   const dayLabels: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
   const order = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
