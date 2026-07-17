@@ -105,6 +105,25 @@ const GOAL_DIRECTION: Record<Goal, "lose" | "gain" | "maintain"> = {
   recomposition: "maintain", athletic_performance: "maintain",
 };
 
+function computeTargetRatePct(draft: Draft): number | null {
+  const g = draft.goal;
+  if (!g) return null;
+  if (g === "athletic_performance") return null;
+  if (g === "recomposition") {
+    const item = PACES_RECOMP.find((p) => p.id === draft.pace) ?? PACES_RECOMP[1];
+    const cw = Number(draft.weightKg);
+    if (!(cw > 0)) return -0.001;
+    const weeklyKg = (item.kcalDelta * 7) / 7700;
+    return -(weeklyKg / cw);
+  }
+  const table = ratePacesFor(g);
+  if (!table) return null;
+  const item = table.find((p) => p.id === draft.pace) ?? table[1];
+  const sign = GOAL_DIRECTION[g] === "lose" ? -1 : 1;
+  return sign * (item.pct / 100);
+}
+
+
 type Draft = {
   name: string;
   age: string;
