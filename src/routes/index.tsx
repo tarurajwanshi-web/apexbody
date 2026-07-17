@@ -55,7 +55,28 @@ async function routeAfterAuth(userId: string) {
 function AuthScreen() {
   const [loading, setLoading] = useState<"google" | "apple" | null>(null);
   const [checking, setChecking] = useState(true);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [sending, setSending] = useState(false);
   const redirectingRef = useRef(false);
+
+  const sendMagicLink = async () => {
+    const trimmed = email.trim();
+    if (!trimmed) return;
+    setSending(true);
+    const { error } = await supabase.auth.signInWithOtp({
+      email: trimmed,
+      options: { emailRedirectTo: window.location.origin },
+    });
+    setSending(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success("Check your email for the sign-in link");
+    setEmail("");
+    setEmailOpen(false);
+  };
 
   useEffect(() => {
     let mounted = true;
