@@ -23,7 +23,7 @@ type Sex = "male" | "female";
 type ExperienceLevel = "beginner" | "intermediate" | "advanced";
 type EatingPattern = "standard" | "intermittent" | "plant_based" | "flexible";
 
-const TOTAL = 6;
+const TOTAL = 8;
 
 const EQUIPMENT_UI_TO_DB: Record<EquipmentUi, EquipmentDb> = {
   commercial_gym: "commercial_gym",
@@ -171,8 +171,10 @@ function ProfileSetup() {
       case 4: return draft.trainingDays.length >= 1;
       case 5: return !!draft.equipment;
       case 6: {
-        if (!weightValid || !heightValid) return false;
-        if (!draft.eatingPattern) return false;
+        return weightValid && heightValid;
+      }
+      case 7: return !!draft.eatingPattern;
+      case 8: {
         const cw = Number(draft.weightKg);
         const tw = Number(draft.targetWeightKg);
         if (!(tw > 0)) return false;
@@ -303,7 +305,7 @@ function ProfileSetup() {
           className="h-full transition-all"
           style={{
             width: `${(displayStep / TOTAL) * 100}%`,
-            background: "linear-gradient(90deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+            background: "var(--amber-gradient)",
             transitionDuration: "var(--dur-med)",
           }}
         />
@@ -338,11 +340,9 @@ function ProfileSetup() {
         {step === 5 && (
           <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />
         )}
-        {step === 6 && (
-          <FuelPlanStep
-            draft={draft} patch={patch}
-          />
-        )}
+        {step === 6 && <BodyBasicsStep draft={draft} patch={patch} />}
+        {step === 7 && <EatingPatternStep name={draft.name.trim()} value={draft.eatingPattern} onChange={(v) => patch({ eatingPattern: v })} />}
+        {step === 8 && <TargetStep draft={draft} patch={patch} />}
         {isReview && <ReviewStep draft={draft} />}
       </main>
 
@@ -361,7 +361,7 @@ function ProfileSetup() {
               className="block w-full text-body font-medium disabled:opacity-40"
               style={{
                 height: 52, borderRadius: "var(--radius-md)",
-                background: "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+                background: "var(--amber-gradient)",
                 color: "#0A0B12",
                 boxShadow: "var(--shadow-inset-top)",
               }}
@@ -375,7 +375,7 @@ function ProfileSetup() {
               className="block w-full text-body font-medium disabled:opacity-40"
               style={{
                 height: 52, borderRadius: "var(--radius-md)",
-                background: "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+                background: "var(--amber-gradient)",
                 color: "#0A0B12",
                 boxShadow: "var(--shadow-inset-top)",
               }}
@@ -409,6 +409,14 @@ const CARD_BASE: React.CSSProperties = {
 const CARD_ACTIVE: React.CSSProperties = {
   ...CARD_BASE,
   borderColor: "var(--amber-500)",
+  background: "linear-gradient(135deg, rgba(245,165,36,0.04), rgba(255,201,122,0.02))",
+  boxShadow: "0 0 0 1px var(--amber-glow)",
+};
+
+const PACE_ACTIVE: React.CSSProperties = {
+  ...CARD_BASE,
+  borderColor: "var(--amber-500)",
+  background: "linear-gradient(135deg, rgba(245,165,36,0.10), rgba(255,201,122,0.04))",
   boxShadow: "0 0 0 1px var(--amber-glow)",
 };
 
@@ -457,7 +465,7 @@ function AboutYouStep({
                 style={{
                   height: 44,
                   borderRadius: "var(--radius-pill)",
-                  background: active ? "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)" : "var(--bg-1)",
+                  background: active ? "var(--amber-gradient)" : "var(--bg-1)",
                   color: active ? "#0A0B12" : "var(--text-secondary)",
                   border: active ? "1px solid transparent" : "1px solid var(--border-subtle)",
                 }}
@@ -554,7 +562,7 @@ function DaysStep({ value, onChange }: { value: string[]; onChange: (days: strin
               style={{
                 width: 48, height: 48,
                 borderRadius: "var(--radius-pill)",
-                background: active ? "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)" : "var(--bg-1)",
+                background: active ? "var(--amber-gradient)" : "var(--bg-1)",
                 color: active ? "#0A0B12" : "var(--text-secondary)",
                 border: active ? "1px solid transparent" : "1px solid var(--border-subtle)",
                 margin: "0 auto",
@@ -880,7 +888,7 @@ function SegmentedPill({ options, value, onChange }: { options: { id: string; la
             style={{
               padding: "6px 14px",
               borderRadius: "var(--radius-pill)",
-              background: active ? "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)" : "transparent",
+              background: active ? "var(--amber-gradient)" : "transparent",
               color: active ? "#0A0B12" : "var(--text-tertiary)",
               transitionDuration: "var(--dur-fast)",
             }}
@@ -926,7 +934,7 @@ function BuildingPlanScreen() {
       <div className="flex items-center justify-center rounded-full"
         style={{
           width: 96, height: 96,
-          background: "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+          background: "var(--amber-gradient)",
           boxShadow: "var(--shadow-glow-amber)",
           animation: "breathe 2.4s ease-in-out infinite",
         }}>
@@ -943,7 +951,7 @@ function BuildingPlanScreen() {
           className="h-full rounded-full"
           style={{
             width: `${progress}%`,
-            background: "linear-gradient(90deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+            background: "var(--amber-gradient)",
             transition: "width 200ms linear",
           }}
         />
