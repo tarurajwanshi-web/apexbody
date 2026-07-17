@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
@@ -10,7 +10,7 @@ export const Route = createFileRoute("/")({
   component: AuthScreen,
 });
 
-// Only accept same-origin relative paths (start with "/", not "//" or a scheme).
+// Only accept same-origin relative paths.
 function safeNextParam(): string | null {
   if (typeof window === "undefined") return null;
   const raw = new URLSearchParams(window.location.search).get("next");
@@ -22,41 +22,34 @@ function safeNextParam(): string | null {
 async function routeAfterAuth(userId: string) {
   const next = safeNextParam();
   if (next) {
-    // Preserve any redirect target (e.g. OAuth consent) regardless of onboarding
-    // state — the target route handles auth guarding itself.
     window.location.replace(next);
     return;
   }
-
   const { data } = await supabase
     .from("profiles")
     .select("profile_completed_at, disclaimer_accepted_at")
     .eq("user_id", userId)
     .maybeSingle();
-
-  // STATE 1: no profile row → create it, then disclaimer
   if (!data) {
     await supabase.from("profiles").insert({ user_id: userId });
     window.location.replace("/disclaimer");
     return;
   }
-
-  // STATE 3: fully onboarded
   if (data.profile_completed_at) {
     window.location.replace("/dashboard");
     return;
   }
-
-  // STATE 2: profile exists, onboarding incomplete
   window.location.replace(data.disclaimer_accepted_at ? "/onboarding" : "/disclaimer");
 }
 
+type EmailState = "collapsed" | "input" | "sent";
 
 function AuthScreen() {
   const [loading, setLoading] = useState<"google" | "apple" | null>(null);
   const [checking, setChecking] = useState(true);
-  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailState, setEmailState] = useState<EmailState>("collapsed");
   const [email, setEmail] = useState("");
+  const [sentTo, setSentTo] = useState("");
   const [sending, setSending] = useState(false);
   const redirectingRef = useRef(false);
 
@@ -73,50 +66,36 @@ function AuthScreen() {
       toast.error(error.message);
       return;
     }
-    toast.success("Check your email for the sign-in link");
+    setSentTo(trimmed);
     setEmail("");
-    setEmailOpen(false);
+    setEmailState("sent");
   };
 
   useEffect(() => {
     let mounted = true;
-
     const handleUser = (userId: string) => {
       if (redirectingRef.current) return;
       redirectingRef.current = true;
       routeAfterAuth(userId);
     };
-
-    // Primary path: trust the persisted session once it's loaded.
     supabase.auth.getUser().then(({ data }) => {
       if (!mounted) return;
       if (data.user) handleUser(data.user.id);
       else setChecking(false);
     });
-
-    // Backup path: catches SIGNED_IN if it lands before getUser() resolves.
-    // The ref guard ensures routeAfterAuth runs exactly once per mount.
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session?.user) handleUser(session.user.id);
     });
-
-    return () => {
-      mounted = false;
-      sub.subscription.unsubscribe();
-    };
+    return () => { mounted = false; sub.subscription.unsubscribe(); };
   }, []);
 
   const signIn = async (provider: "google" | "apple") => {
     setLoading(provider);
-    // Preserve ?next= across the OAuth round-trip so the consent flow returns
-    // to the exact consent URL that started it.
     const next = safeNextParam();
     const redirectUri = next
       ? `${window.location.origin}/?next=${encodeURIComponent(next)}`
       : window.location.origin;
-    const result = await lovable.auth.signInWithOAuth(provider, {
-      redirect_uri: redirectUri,
-    });
+    const result = await lovable.auth.signInWithOAuth(provider, { redirect_uri: redirectUri });
     if (result.error) {
       toast.error(`Sign-in failed: ${result.error.message ?? "Unknown error"}`);
       setLoading(null);
@@ -126,31 +105,35 @@ function AuthScreen() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-between bg-bg-0 px-6 py-12">
-      <div className="flex-1 flex flex-col items-center justify-center w-full">
-        <div className="flex flex-col items-center mb-8">
-          <h1
-            className="text-[34px] font-bold text-white leading-none"
-            style={{ letterSpacing: "4px" }}
-          >
-            APEX
-          </h1>
-          <p className="mt-2 text-[11px] font-medium tracking-[0.2em] uppercase text-text-tertiary">
-            Shield + Intelligence
-          </p>
+    <div className="min-h-screen flex flex-col items-center px-6 animate-fade-up" style={{ paddingTop: "max(env(safe-area-inset-top, 0px), 48px)", paddingBottom: "max(env(safe-area-inset-bottom, 0px), 24px)" }}>
+      <div className="flex-1 flex flex-col items-center justify-center w-full max-w-[380px]">
+        {/* Wordmark */}
+        <div className="flex flex-col items-center">
+          <h1 className="text-display text-text-primary" style={{ marginLeft: "0.5em" /* optical center from tracking */ }}>APEX</h1>
+          <p className="mt-2 text-label text-text-tertiary">Adaptive performance coach</p>
         </div>
-        <DemoRing />
-        <p className="mt-10 text-center text-[15px] text-text-secondary max-w-[300px] leading-relaxed">
-          Confidence isn't given.<br />It's calculated.
+
+        {/* Ring */}
+        <div className="mt-10">
+          <DemoRing />
+        </div>
+
+        {/* Tagline */}
+        <p className="mt-10 text-center text-body text-text-secondary" style={{ lineHeight: 1.7 }}>
+          Your body speaks.<br />We listen.
         </p>
       </div>
 
-
-      <div className="w-full max-w-sm">
+      {/* Buttons */}
+      <div className="w-full max-w-[380px] mt-8">
         <button
           onClick={() => signIn("google")}
           disabled={loading !== null || checking}
-          className="w-full flex items-center justify-center gap-3 rounded-2xl bg-white text-black py-3.5 text-sm font-semibold disabled:opacity-60 mb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-bg-0"
+          className="w-full flex items-center justify-center gap-3 text-body font-medium disabled:opacity-60 transition-colors"
+          style={{
+            height: 52, borderRadius: "var(--radius-md)", background: "#FFFFFF", color: "#0A0B12",
+            boxShadow: "var(--shadow-inset-top)",
+          }}
         >
           <GoogleIcon />
           {loading === "google" ? "Connecting…" : "Continue with Google"}
@@ -159,14 +142,31 @@ function AuthScreen() {
         <button
           onClick={() => signIn("apple")}
           disabled={loading !== null || checking}
-          className="w-full flex items-center justify-center gap-3 rounded-2xl bg-bg-2 border border-white/10 py-3.5 text-sm font-semibold disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-bg-0"
+          className="mt-3 w-full flex items-center justify-center gap-3 text-body font-medium disabled:opacity-60 transition-colors"
+          style={{
+            height: 52, borderRadius: "var(--radius-md)",
+            background: "var(--bg-2)", color: "var(--text-primary)",
+            border: "1px solid var(--border-subtle)",
+            boxShadow: "var(--shadow-inset-top)",
+          }}
         >
           <AppleIcon />
           {loading === "apple" ? "Connecting…" : "Continue with Apple"}
         </button>
 
-        {emailOpen ? (
-          <div className="mt-4 space-y-2">
+        {emailState === "collapsed" && (
+          <button
+            onClick={() => setEmailState("input")}
+            disabled={loading !== null || checking}
+            className="mt-4 w-full text-center text-body-sm text-text-tertiary hover:text-text-secondary transition-colors disabled:opacity-60"
+            style={{ transitionDuration: "var(--dur-fast)" }}
+          >
+            Continue with email
+          </button>
+        )}
+
+        {emailState === "input" && (
+          <div className="mt-4 space-y-2" style={{ animation: "fade-up var(--dur-med) var(--ease-decel) both" }}>
             <input
               type="email"
               value={email}
@@ -175,237 +175,116 @@ function AuthScreen() {
               aria-label="Email address"
               autoComplete="email"
               inputMode="email"
-              disabled={loading !== null || checking || sending}
-              className="w-full bg-bg-2 border border-white/10 rounded-2xl py-3.5 px-4 text-sm text-white placeholder:text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-bg-0"
+              disabled={sending}
+              className="w-full text-body focus:outline-none placeholder:text-text-tertiary"
+              style={{
+                height: 48, borderRadius: "var(--radius-md)",
+                background: "var(--bg-2)", border: "1px solid var(--border-subtle)",
+                color: "var(--text-primary)", padding: "0 16px",
+              }}
             />
             <button
               onClick={sendMagicLink}
-              disabled={loading !== null || checking || sending || !email.trim()}
-              className="w-full rounded-2xl bg-bg-2 border border-white/10 py-3.5 text-sm font-semibold disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-bg-0"
+              disabled={sending || !email.trim()}
+              className="w-full text-body font-medium disabled:opacity-40 transition-colors"
+              style={{
+                height: 48, borderRadius: "var(--radius-md)",
+                background: "var(--amber-500)", color: "#0A0B12",
+              }}
             >
-              {sending ? "Sending…" : "Send magic link"}
+              {sending ? "Sending…" : "Send sign-in link"}
             </button>
           </div>
-        ) : (
-          <button
-            onClick={() => setEmailOpen(true)}
-            disabled={loading !== null || checking}
-            aria-expanded={false}
-            className="mt-4 w-full text-center text-[13px] text-text-tertiary disabled:opacity-60"
-          >
-            Continue with email
-          </button>
         )}
 
-        <p className="mt-6 text-center text-[11px] text-text-tertiary">
-          By continuing you agree to our terms and privacy policy.
+        {emailState === "sent" && (
+          <div className="mt-4">
+            <p className="text-body text-text-secondary">
+              Check your inbox. We sent a sign-in link to {sentTo}. It's valid for 1 hour.
+            </p>
+            <button
+              onClick={() => { setEmailState("input"); setSentTo(""); }}
+              className="mt-3 text-body-sm text-text-tertiary hover:text-text-secondary underline underline-offset-2"
+            >
+              Send another link
+            </button>
+          </div>
+        )}
+
+        <p className="mt-8 text-center text-body-sm text-text-quaternary">
+          By continuing you agree to our{" "}
+          <Link to="/terms" className="underline underline-offset-2 text-text-tertiary">Terms</Link>
+          {" "}and{" "}
+          <Link to="/privacy" className="underline underline-offset-2 text-text-tertiary">Privacy Policy</Link>.
         </p>
       </div>
     </div>
   );
 }
 
-type DemoState = {
-  score: number;
-  confidence: "HIGH" | "MEDIUM";
-  insight: string;
-};
-
-const DEMO_STATES: DemoState[] = [
-  { score: 74, confidence: "HIGH", insight: "Backbone synced. Full range unlocked today." },
-  { score: 52, confidence: "MEDIUM", insight: "Half the picture. Sleep data closes the gap." },
-  { score: 38, confidence: "HIGH", insight: "Yesterday's strain didn't clear. This number means it." },
-];
-
-
-const CYCLE = {
-  ambient: 1500,
-  countUp: 1500,
-  confidence: 500,
-  typewriter: 2500,
-  hold: 1500,
-  fadeOut: 1000,
-};
-const CYCLE_TOTAL =
-  CYCLE.ambient + CYCLE.countUp + CYCLE.confidence + CYCLE.typewriter + CYCLE.hold + CYCLE.fadeOut;
-
-function easeOutCubic(t: number) {
-  return 1 - Math.pow(1 - t, 3);
-}
-
+/**
+ * DemoRing — 200px amber ring, arc animates 0 → 74 once on mount.
+ */
 function DemoRing() {
-  const size = 220;
-  const stroke = 10;
+  const size = 200;
+  const stroke = 4;
   const r = size / 2 - stroke / 2;
   const c = 2 * Math.PI * r;
+  const target = 74;
 
-  const [reducedMotion, setReducedMotion] = useState(false);
-  const [exampleIdx, setExampleIdx] = useState(0);
-  const [progress, setProgress] = useState(0); // 0..1 for score/arc fill
-  const [confidenceOpacity, setConfidenceOpacity] = useState(0);
-  const [typedLen, setTypedLen] = useState(0);
-  const [contentOpacity, setContentOpacity] = useState(1); // global fade for phase 6
-  const rafRef = useRef<number | null>(null);
-  const startRef = useRef<number | null>(null);
-  const idxRef = useRef(0);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReducedMotion(mq.matches);
-    const onChange = () => setReducedMotion(mq.matches);
-    mq.addEventListener?.("change", onChange);
-    return () => mq.removeEventListener?.("change", onChange);
+    let raf: number | null = null;
+    const start = performance.now();
+    const dur = 1200;
+    const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / dur);
+      setProgress(easeOut(t) * target);
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => { if (raf) cancelAnimationFrame(raf); };
   }, []);
 
-  useEffect(() => {
-    if (reducedMotion) return;
-    const tick = (now: number) => {
-      if (startRef.current == null) startRef.current = now;
-      const elapsed = (now - startRef.current) % CYCLE_TOTAL;
-      const cycleNum = Math.floor((now - startRef.current) / CYCLE_TOTAL);
-      const targetIdx = cycleNum % DEMO_STATES.length;
-      if (targetIdx !== idxRef.current) {
-        idxRef.current = targetIdx;
-        setExampleIdx(targetIdx);
-      }
-      const state = DEMO_STATES[targetIdx];
-
-      const t1 = CYCLE.ambient;
-      const t2 = t1 + CYCLE.countUp;
-      const t3 = t2 + CYCLE.confidence;
-      const t4 = t3 + CYCLE.typewriter;
-      const t5 = t4 + CYCLE.hold;
-      const t6 = t5 + CYCLE.fadeOut;
-
-      if (elapsed < t1) {
-        setProgress(0);
-        setConfidenceOpacity(0);
-        setTypedLen(0);
-        setContentOpacity(1);
-      } else if (elapsed < t2) {
-        setProgress(easeOutCubic((elapsed - t1) / CYCLE.countUp));
-        setConfidenceOpacity(0);
-        setTypedLen(0);
-        setContentOpacity(1);
-      } else if (elapsed < t3) {
-        setProgress(1);
-        setConfidenceOpacity((elapsed - t2) / CYCLE.confidence);
-        setTypedLen(0);
-        setContentOpacity(1);
-      } else if (elapsed < t4) {
-        setProgress(1);
-        setConfidenceOpacity(1);
-        const frac = (elapsed - t3) / CYCLE.typewriter;
-        setTypedLen(Math.floor(frac * state.insight.length));
-        setContentOpacity(1);
-      } else if (elapsed < t5) {
-        setProgress(1);
-        setConfidenceOpacity(1);
-        setTypedLen(state.insight.length);
-        setContentOpacity(1);
-      } else if (elapsed < t6) {
-        const fade = 1 - (elapsed - t5) / CYCLE.fadeOut;
-        setContentOpacity(fade);
-        setProgress(fade);
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      startRef.current = null;
-    };
-  }, [reducedMotion]);
-
-  // Reduced-motion static state = example 1
-  const displayState = reducedMotion ? DEMO_STATES[0] : DEMO_STATES[exampleIdx];
-  const displayScore = reducedMotion ? displayState.score : Math.round(progress * displayState.score);
-  const arcFrac = reducedMotion ? displayState.score / 100 : (progress * displayState.score) / 100;
+  const arcFrac = progress / 100;
   const dash = c * arcFrac;
-  const showScore = reducedMotion || progress > 0;
-  const showConfidence = reducedMotion ? true : confidenceOpacity > 0;
-  const insightText = reducedMotion ? displayState.insight : displayState.insight.slice(0, typedLen);
+
+  // endpoint dot position on the arc (arc starts at top, -90°, sweeps clockwise)
+  const angleDeg = -90 + arcFrac * 360;
+  const angleRad = (angleDeg * Math.PI) / 180;
+  const cx = size / 2 + r * Math.cos(angleRad);
+  const cy = size / 2 + r * Math.sin(angleRad);
 
   return (
-    <div className="flex flex-col items-center">
-      <div
-        className="relative ambient-ring"
-        style={{ width: size, height: size }}
-        aria-hidden
-      >
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="ambient-ring-rotate">
-          <defs>
-            <linearGradient id="ambientRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#7C3AED" />
-              <stop offset="55%" stopColor="#3B82F6" />
-              <stop offset="100%" stopColor="#10B981" />
-            </linearGradient>
-          </defs>
-          <circle
-            cx={size / 2} cy={size / 2} r={r}
-            fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={stroke}
-          />
-          <circle
-            cx={size / 2} cy={size / 2} r={r}
-            fill="none" stroke="url(#ambientRingGrad)" strokeWidth={stroke}
-            strokeLinecap="round"
-            strokeDasharray={`${dash} ${c}`}
-            transform={`rotate(-90 ${size / 2} ${size / 2})`}
-            style={{ transition: "stroke-dasharray 80ms linear" }}
-          />
-        </svg>
-
-        {/* Score + confidence inside the ring */}
-        <div
-          className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"
-          style={{ opacity: contentOpacity }}
-        >
-          <div
-            className="font-display font-semibold tabular-nums text-text-primary"
-            style={{
-              fontSize: 64,
-              lineHeight: 1,
-              opacity: showScore ? 1 : 0,
-              transition: "opacity 200ms ease",
-            }}
-          >
-            {displayScore}
-          </div>
-          <div
-            className="mt-2 flex items-center gap-1.5"
-            style={{
-              opacity: reducedMotion ? 1 : confidenceOpacity,
-              transition: "opacity 200ms ease",
-            }}
-          >
-            <span
-              className="inline-block rounded-full"
-              style={{
-                width: 7,
-                height: 7,
-                backgroundColor: displayState.confidence === "HIGH" ? "#10B981" : "#F59E0B",
-                boxShadow: `0 0 8px ${displayState.confidence === "HIGH" ? "rgba(16,185,129,0.6)" : "rgba(245,158,11,0.6)"}`,
-              }}
-            />
-            <span
-              className="text-[10px] font-semibold tracking-[0.12em]"
-              style={{ color: displayState.confidence === "HIGH" ? "#10B981" : "#F59E0B" }}
-            >
-              {displayState.confidence}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Insight beneath the ring */}
-      <div
-        className="mt-5 h-5 text-center text-[13px] text-text-secondary max-w-[300px] leading-snug"
-        style={{ opacity: contentOpacity }}
-      >
-        {insightText}
-        {!reducedMotion && typedLen > 0 && typedLen < displayState.insight.length && (
-          <span className="inline-block w-[1px] h-[12px] align-middle ml-[1px] bg-text-secondary animate-pulse" />
-        )}
+    <div className="relative" style={{ width: size, height: size }} aria-hidden>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ filter: "drop-shadow(var(--shadow-glow-amber))" }}>
+        <defs>
+          <linearGradient id="apexRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="var(--amber-500)" />
+            <stop offset="100%" stopColor="var(--amber-300)" />
+          </linearGradient>
+        </defs>
+        <circle
+          cx={size / 2} cy={size / 2} r={r}
+          fill="none" stroke="var(--border-hairline)" strokeWidth={stroke}
+        />
+        <circle
+          cx={size / 2} cy={size / 2} r={r}
+          fill="none" stroke="url(#apexRingGrad)" strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${c}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+        <circle
+          cx={cx} cy={cy} r={3}
+          fill="var(--amber-300)"
+          style={{ animation: "apex-pulse 2.4s ease-in-out infinite" }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <span className="text-numeric-lg text-text-primary">{Math.round(progress)}</span>
       </div>
     </div>
   );
