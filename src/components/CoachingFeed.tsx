@@ -15,7 +15,7 @@ const COLORS = {
   textPrimary: "#F5F5F7",
   textSecondary: "#A8ADBD",
   teal: "#4F6BF6",
-  gold: "#5FE3C4",
+  gold: "#2DD4BF",
   dotted: "1px dotted rgba(139, 127, 247, 0.32)",
 };
 
@@ -70,7 +70,7 @@ function Card({ card }: { card: CoachingCard }) {
     borderRadius: 12,
     padding,
     background: isPermission
-      ? "linear-gradient(135deg, #4F6BF6, #5FE3C4)"
+      ? "linear-gradient(135deg, #4F6BF6, #2DD4BF)"
       : COLORS.cardBg,
     color: isPermission ? "#0A0E1A" : COLORS.textPrimary,
     border: isPermission ? "none" : "1px solid rgba(255,255,255,0.06)",

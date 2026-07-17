@@ -61,7 +61,7 @@ function MeetCoach() {
                 padding: "12px 14px",
               }}
             >
-              <Sparkles size={16} className="shrink-0 mt-0.5" style={{ color: "#A78BFA" }} />
+              <Sparkles size={16} className="shrink-0 mt-0.5" style={{ color: "#4F6BF6" }} />
               <p style={{ fontSize: 15, color: "#F0F4FF", lineHeight: 1.55 }}>{m}</p>
             </div>
           ))}
@@ -89,7 +89,7 @@ function MeetCoach() {
                 className="flex items-center justify-center rounded-full shrink-0"
                 style={{ width: 22, height: 22, backgroundColor: "rgba(124,58,237,0.15)", border: "1px solid rgba(124,58,237,0.25)" }}
               >
-                <Check size={12} style={{ color: "#A78BFA" }} strokeWidth={3} />
+                <Check size={12} style={{ color: "#4F6BF6" }} strokeWidth={3} />
               </div>
               <span className="text-[13px]" style={{ color: "#F0F4FF" }}>{u}</span>
             </div>

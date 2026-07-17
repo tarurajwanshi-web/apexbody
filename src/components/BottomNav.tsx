@@ -74,7 +74,7 @@ export function BottomNav({ onLogged }: Props = {}) {
                 to={t.to}
                 aria-label={t.label}
                 className="flex-1 flex flex-col items-center justify-center gap-1 py-2 min-h-[56px] transition"
-                style={{ color: active ? "var(--color-text-accent, #A78BFA)" : "rgba(255,255,255,0.42)" }}
+                style={{ color: active ? "var(--color-text-accent, #4F6BF6)" : "rgba(255,255,255,0.42)" }}
               >
                 <Icon size={22} strokeWidth={active ? 2.4 : 1.8} />
                 <span className="text-[10px] font-medium tracking-wide leading-none">
@@ -90,7 +90,7 @@ export function BottomNav({ onLogged }: Props = {}) {
             aria-haspopup="dialog"
             aria-expanded={sheetOpen}
             className="flex-1 flex flex-col items-center justify-center gap-1 py-2 min-h-[56px] transition"
-            style={{ color: logActive ? "var(--color-text-accent, #A78BFA)" : "rgba(255,255,255,0.42)" }}
+            style={{ color: logActive ? "var(--color-text-accent, #4F6BF6)" : "rgba(255,255,255,0.42)" }}
           >
             <Plus size={22} strokeWidth={logActive ? 2.4 : 1.8} />
             <span className="text-[10px] font-medium tracking-wide leading-none">Log</span>

@@ -41,7 +41,7 @@ export function RingChart({ rings, size = 96, stroke = 7, centerLabel }: {
   );
 }
 
-export function Sparkline({ values, color = "#A78BFA", width = 100, height = 30 }: { values: number[]; color?: string; width?: number; height?: number }) {
+export function Sparkline({ values, color = "#4F6BF6", width = 100, height = 30 }: { values: number[]; color?: string; width?: number; height?: number }) {
   const max = Math.max(...values);
   const min = Math.min(...values);
   const range = max - min || 1;
