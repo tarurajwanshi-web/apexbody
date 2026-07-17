@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
+import { ringGlow, ringSolid, ringStops } from "@/lib/ringColor";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
@@ -189,7 +190,7 @@ function AuthScreen() {
               className="w-full text-body font-medium disabled:opacity-40 transition-colors"
               style={{
                 height: 48, borderRadius: "var(--radius-md)",
-                background: "var(--amber-500)", color: "#0A0B12",
+                background: "var(--brand-500)", color: "#0A0B12",
               }}
             >
               {sending ? "Sending…" : "Send sign-in link"}
@@ -223,7 +224,8 @@ function AuthScreen() {
 }
 
 /**
- * DemoRing — 200px amber ring, arc animates 0 → 74 once on mount.
+ * DemoRing — 200px ring; arc animates 0 → 74 once on mount, then breathes.
+ * Color driven by ringGradient/ringGlow — 74 lands in the green band.
  */
 function DemoRing() {
   const size = 200;
@@ -237,7 +239,8 @@ function DemoRing() {
   useEffect(() => {
     let raf: number | null = null;
     const start = performance.now();
-    const dur = 1200;
+    const dur = 1600;
+    // ease-out cubic-bezier(0.16, 1, 0.3, 1) approximation
     const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
     const tick = (now: number) => {
       const t = Math.min(1, (now - start) / dur);
@@ -257,13 +260,17 @@ function DemoRing() {
   const cx = size / 2 + r * Math.cos(angleRad);
   const cy = size / 2 + r * Math.sin(angleRad);
 
+  const [stopA, stopB] = ringStops(target);
+  const solid = ringSolid(target);
+  const glow = ringGlow(target);
+
   return (
     <div className="relative" style={{ width: size, height: size }} aria-hidden>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ filter: "drop-shadow(var(--shadow-glow-amber))" }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ filter: glow }}>
         <defs>
           <linearGradient id="apexRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="var(--amber-500)" />
-            <stop offset="100%" stopColor="var(--amber-300)" />
+            <stop offset="0%" stopColor={stopA} />
+            <stop offset="100%" stopColor={stopB} />
           </linearGradient>
         </defs>
         <circle
@@ -276,10 +283,11 @@ function DemoRing() {
           strokeLinecap="round"
           strokeDasharray={`${dash} ${c}`}
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          style={{ animation: progress >= target ? "ring-breathe 4s ease-in-out infinite" : undefined }}
         />
         <circle
           cx={cx} cy={cy} r={3}
-          fill="var(--amber-300)"
+          fill={solid}
           style={{ animation: "apex-pulse 2.4s ease-in-out infinite" }}
         />
       </svg>

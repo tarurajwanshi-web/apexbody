@@ -134,7 +134,7 @@ function BodyCompositionPage() {
             value={bfNum}
             onChange={(e) => setBf(e.target.value)}
             className="w-full mt-4"
-            style={{ accentColor: "var(--amber-500)" }}
+            style={{ accentColor: "var(--brand-500)" }}
           />
           {bf !== "" && (
             <button type="button" onClick={() => setBf("")} className="mt-3 w-full text-body-sm text-text-tertiary underline underline-offset-2">
@@ -197,7 +197,7 @@ function BodyCompositionPage() {
           disabled={saving}
           className="mt-6 w-full rounded-[14px] py-3.5 text-body font-medium disabled:opacity-40"
           style={{
-            background: "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+            background: "linear-gradient(135deg, var(--brand-500) 0%, var(--brand-300) 100%)",
             color: "#0A0B12",
             boxShadow: "var(--shadow-inset-top)",
           }}
