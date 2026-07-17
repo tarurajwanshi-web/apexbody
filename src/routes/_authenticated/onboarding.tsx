@@ -121,7 +121,7 @@ type Draft = {
   heightFt: string;      // display-only when lengthUnit=in
   heightIn: string;      // display-only when lengthUnit=in
   targetWeightKg: string;
-  pace: Pace | null;
+  pace: PaceId | null;
 };
 
 const EMPTY: Draft = {
