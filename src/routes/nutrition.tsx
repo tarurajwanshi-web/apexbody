@@ -433,11 +433,11 @@ function Nutrition() {
       </div>
 
       {diagOpen && (
-        <div className="mx-5 mt-2 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3 text-[10px] leading-tight text-text-secondary">
+        <div className="mx-5 mt-2 rounded-2xl border border-warn-500/40 bg-warn-500/5 p-3 text-[10px] leading-tight text-text-secondary">
           <div className="flex items-center justify-between mb-1 gap-2">
-            <span className="font-medium text-amber-300">DIAG · Fuel</span>
+            <span className="font-medium text-warn-300">DIAG · Fuel</span>
             <div className="flex items-center gap-3">
-              <button onClick={refreshDiag} className="text-amber-300 underline">refresh</button>
+              <button onClick={refreshDiag} className="text-warn-300 underline">refresh</button>
               <button
                 onClick={async () => {
                   const txt = JSON.stringify(diag, null, 2);
@@ -455,7 +455,7 @@ function Nutrition() {
                     document.body.removeChild(ta);
                   }
                 }}
-                className="text-amber-300 underline"
+                className="text-warn-300 underline"
               >copy</button>
             </div>
           </div>
@@ -493,7 +493,7 @@ function Nutrition() {
                 value={Math.min(100, Math.round((cCal / (tCal as number)) * 100))}
                 size={44}
                 thickness={4}
-                color={cCal > (tCal as number) * 1.1 ? "#FF5A5F" : "#8B7FF7"}
+                color={cCal > (tCal as number) * 1.1 ? "#FF5A5F" : "#4F6BF6"}
                 suffix="%"
               />
             ) : null

@@ -310,8 +310,8 @@ function WorkoutsPage() {
               : null;
             if (!todayDay.rest && permLabel && !permissionAcknowledged) {
               return (
-                <div className="mx-5 mt-4 rounded-2xl border-l-4 border-amber-500 bg-amber-500/10 p-4">
-                  <p className="text-[10px] uppercase tracking-wider text-amber-300">{permLabel}</p>
+                <div className="mx-5 mt-4 rounded-2xl border-l-4 border-warn-500 bg-warn-500/10 p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-warn-300">{permLabel}</p>
                   <p className="mt-1 text-[14px] text-text-primary">
                     {permDetail}
                     {todayReadiness != null && (
@@ -366,7 +366,7 @@ function WorkoutsPage() {
                   Start workout →
                 </button>
                 {effectiveVolume !== 'full' && (
-                  <p className="mt-2 text-center text-[11px] text-amber-300">
+                  <p className="mt-2 text-center text-[11px] text-warn-300">
                     Volume scaled for low readiness ({effectiveVolume === 'recovery' ? '−50%' : '−30%'})
                   </p>
                 )}

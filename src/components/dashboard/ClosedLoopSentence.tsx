@@ -14,7 +14,7 @@ type Props = {
 
 /**
  * Four engine dots followed by a single sentence.
- * Filled violet = engine drove the decision. Hollow = engine is neutral.
+ * Filled brand = engine drove the decision. Hollow = engine is neutral.
  * Ambient evidence of the closed-loop reasoning across all four engines.
  */
 export function ClosedLoopSentence({ sentence, engines = {} }: Props) {

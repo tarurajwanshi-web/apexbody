@@ -8,7 +8,7 @@ type Props = {
 };
 
 /**
- * Single hero metric — large tabular number inside a thin violet arc.
+ * Single hero metric — large tabular number inside a thin brand arc.
  * No breathing, no halo. The bevel comes from a soft inner highlight.
  */
 export function HeroRing({ value, label = "Readiness", size = 220, thickness = 4 }: Props) {
