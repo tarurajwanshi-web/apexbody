@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronDown, Check, Trophy, Flame, Dumbbell, Zap, Activity, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronLeft, Check, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { logBodyMeasurement } from "@/lib/shield.functions";
@@ -15,151 +15,91 @@ export const Route = createFileRoute("/_authenticated/onboarding")({
 });
 
 type Goal = "recomposition" | "muscle_gain" | "fat_loss" | "strength" | "athletic_performance";
-type Equipment = "home_gym_db_only" | "commercial_gym" | "limited_equipment" | "bodyweight_only";
+type EquipmentUi = "commercial_gym" | "dumbbells_only" | "bodyweight_only";
+type EquipmentDb = "home_gym_db_only" | "commercial_gym" | "limited_equipment" | "bodyweight_only";
 type LengthUnit = "cm" | "in";
 type WeightUnit = "kg" | "lb";
 type Sex = "male" | "female";
 type ExperienceLevel = "beginner" | "intermediate" | "advanced";
 type EatingPattern = "standard" | "intermittent" | "plant_based" | "flexible";
 
-const GOALS: { id: Goal; label: string; desc: string; Icon: typeof Trophy }[] = [
-  { id: "recomposition", label: "Recomposition", desc: "Build muscle, lose fat", Icon: Activity },
-  { id: "muscle_gain", label: "Muscle Gain", desc: "Maximize hypertrophy", Icon: Dumbbell },
-  { id: "fat_loss", label: "Fat Loss", desc: "Cut while preserving muscle", Icon: Flame },
-  { id: "strength", label: "Strength", desc: "Raise your big lifts", Icon: Trophy },
-  { id: "athletic_performance", label: "Athletic Performance", desc: "Power, speed, conditioning", Icon: Zap },
+const TOTAL = 6;
+
+const EQUIPMENT_UI_TO_DB: Record<EquipmentUi, EquipmentDb> = {
+  commercial_gym: "commercial_gym",
+  dumbbells_only: "home_gym_db_only",
+  bodyweight_only: "bodyweight_only",
+};
+const EQUIPMENT_DB_TO_UI: Partial<Record<EquipmentDb, EquipmentUi>> = {
+  commercial_gym: "commercial_gym",
+  home_gym_db_only: "dumbbells_only",
+  bodyweight_only: "bodyweight_only",
+  // limited_equipment falls through to null in reset mode.
+};
+
+const GOALS: { id: Goal; label: string; desc: string }[] = [
+  { id: "recomposition", label: "Recomposition", desc: "Build muscle, lose fat" },
+  { id: "muscle_gain", label: "Muscle gain", desc: "Maximize hypertrophy" },
+  { id: "fat_loss", label: "Fat loss", desc: "Cut while preserving muscle" },
+  { id: "strength", label: "Strength", desc: "Raise your big lifts" },
+  { id: "athletic_performance", label: "Athletic performance", desc: "Power, speed, conditioning" },
 ];
 
-const EQUIPMENT: { id: Equipment; label: string; desc: string }[] = [
-  { id: "home_gym_db_only", label: "Home gym", desc: "Dumbbells only" },
-  { id: "commercial_gym", label: "Commercial gym", desc: "Full equipment" },
-  { id: "limited_equipment", label: "Limited equipment", desc: "Society / condo gym" },
-  { id: "bodyweight_only", label: "Bodyweight only", desc: "No equipment" },
+const EXPERIENCE: { id: ExperienceLevel; label: string; desc: string }[] = [
+  { id: "beginner", label: "Beginner", desc: "Less than a year. We'll keep it simple." },
+  { id: "intermediate", label: "Intermediate", desc: "1–3 years. You know the movements." },
+  { id: "advanced", label: "Advanced", desc: "3+ years. We'll get technical." },
 ];
 
-const EXPERIENCE: { id: ExperienceLevel; label: string; desc: string; hint: string }[] = [
-  { id: "beginner", label: "Beginner", desc: "Less than 1 year of consistent training", hint: "We keep it simple. No jargon." },
-  { id: "intermediate", label: "Intermediate", desc: "1–3 years. You know the movements.", hint: "We add structure and progression." },
-  { id: "advanced", label: "Advanced", desc: "3+ years. You track sets and effort closely.", hint: "Full RIR-based intensity control." },
+const EQUIPMENT_OPTIONS: { id: EquipmentUi; label: string; desc: string }[] = [
+  { id: "commercial_gym", label: "Commercial gym", desc: "Machines, dumbbells, barbells, cables" },
+  { id: "dumbbells_only", label: "Dumbbells only", desc: "Home setup with adjustable weights" },
+  { id: "bodyweight_only", label: "Bodyweight only", desc: "No equipment needed" },
 ];
 
 const EATING_PATTERNS: { id: EatingPattern; label: string; desc: string }[] = [
   { id: "standard", label: "Standard", desc: "3+ meals across the day" },
-  { id: "intermittent", label: "Intermittent fasting", desc: "16:8 or similar eating window" },
+  { id: "intermittent", label: "Intermittent fasting", desc: "16:8 or similar window" },
   { id: "plant_based", label: "Plant-based", desc: "Vegan or vegetarian" },
   { id: "flexible", label: "Flexible", desc: "No fixed pattern" },
 ];
 
-const TOTAL = 9;
+type Pace = "steady" | "standard" | "aggressive";
+const PACES: { id: Pace; label: string; blurb: string; pct: number }[] = [
+  { id: "steady", label: "Steady", blurb: "0.15%/week — sustainable", pct: 0.15 },
+  { id: "standard", label: "Standard", blurb: "0.25%/week — recommended", pct: 0.25 },
+  { id: "aggressive", label: "Aggressive", blurb: "0.5%/week — strict", pct: 0.5 },
+];
 
 const GOAL_DIRECTION: Record<Goal, "lose" | "gain" | "maintain"> = {
   fat_loss: "lose", muscle_gain: "gain", strength: "gain",
   recomposition: "maintain", athletic_performance: "maintain",
 };
 
-const RATE_CEILING: Record<Goal, number> = {
-  fat_loss: 1.5, muscle_gain: 0.5, strength: 0.35,
-  recomposition: 0.4, athletic_performance: 0.4,
-};
-
-const RATE_ZONES: Record<Goal, { max: number; label: string; blurb: string }[]> = {
-  fat_loss: [
-    { max: 0.5, label: "Sustainable", blurb: "Protects lean mass, easiest to stick to." },
-    { max: 1.0, label: "Moderate", blurb: "Faster, still evidence-supported for most people." },
-    { max: 1.5, label: "Aggressive", blurb: "Faster results, higher risk of losing muscle alongside fat." },
-  ],
-  muscle_gain: [
-    { max: 0.15, label: "Sustainable", blurb: "Minimizes fat gain while building muscle." },
-    { max: 0.25, label: "Moderate", blurb: "Standard lean-gain pace." },
-    { max: 0.5, label: "Aggressive", blurb: "Faster scale movement, more of it will be fat, not muscle." },
-  ],
-  strength: [
-    { max: 0.15, label: "Sustainable", blurb: "Small surplus, supports strength adaptation." },
-    { max: 0.25, label: "Moderate", blurb: "Standard pace for a strength-focused gain." },
-    { max: 0.35, label: "Aggressive", blurb: "Faster gain, more of it will be fat." },
-  ],
-  recomposition: [
-    { max: 0.15, label: "Gentle", blurb: "Wide tolerance — we rarely adjust unless you drift." },
-    { max: 0.3, label: "Moderate", blurb: "Standard correction if your weight moves off target." },
-    { max: 0.4, label: "Tight", blurb: "We correct quickly — best if you want to hold a precise number." },
-  ],
-  athletic_performance: [
-    { max: 0.15, label: "Gentle", blurb: "Wide tolerance — we rarely adjust unless you drift." },
-    { max: 0.3, label: "Moderate", blurb: "Standard correction if your weight moves off target." },
-    { max: 0.4, label: "Tight", blurb: "We correct quickly — best if you want to hold a precise number." },
-  ],
-};
-
-function getZone(goal: Goal, value: number) {
-  const zones = RATE_ZONES[goal];
-  return zones.find((z) => value <= z.max) ?? zones[zones.length - 1];
-}
-
-// Body fat slider config — ACE/ACSM-derived ranges, appearance-only descriptions.
-const BF_RANGE = {
-  female: { min: 10, max: 50, default: 28 },
-  male:   { min: 5,  max: 40, default: 20 },
-} as const;
-
-const BF_DESCRIPTIONS = {
-  female: [
-    { max: 13, label: "Very lean",  cue: "Minimal body fat. Visible muscle separation, very little softness anywhere. Typical of competitive athletes." },
-    { max: 20, label: "Athletic",   cue: "Lean with visible muscle tone. Some definition in the arms and legs. Stomach is flat with some muscle visible." },
-    { max: 24, label: "Fit",        cue: "Defined shape with some softness. Arms and legs look toned. Stomach is mostly flat. Some curve at the hips and waist." },
-    { max: 31, label: "Average",    cue: "Soft and rounded in the midsection. Arms and legs have some shape but no visible muscle. Hips and thighs carry more volume." },
-    { max: 38, label: "Soft",       cue: "Noticeable softness across the midsection, arms, and thighs. Little visible muscle definition." },
-    { max: 50, label: "Very high",  cue: "Significant fat across the whole body. Stomach protrudes. Arms and legs are thick with no muscle definition." },
-  ],
-  male: [
-    { max: 8,  label: "Very lean",  cue: "Extremely low body fat. Visible abs, striations in shoulders and chest. Typical of competitive athletes." },
-    { max: 13, label: "Athletic",   cue: "Visible six-pack at rest or close to it. Clear muscle separation in shoulders and arms. Very little fat anywhere." },
-    { max: 17, label: "Fit",        cue: "Flat stomach, some ab definition visible. Arms and shoulders look muscular. A small amount of fat around the waist." },
-    { max: 24, label: "Average",    cue: "Soft midsection, no visible abs. Some fat around the waist and lower stomach. Arms have some shape but are not defined." },
-    { max: 30, label: "Soft",       cue: "Noticeable belly. Face and neck carry more fat. Arms and chest are soft. Little visible muscle definition." },
-    { max: 40, label: "Very high",  cue: "Large stomach, significant fat across the chest, arms, and back. Minimal muscle definition visible anywhere." },
-  ],
-} as const;
-
-function getBfDescription(pct: number, sex: Sex) {
-  const buckets = BF_DESCRIPTIONS[sex];
-  return buckets.find((b) => pct <= b.max) ?? buckets[buckets.length - 1];
-}
-
-function bfLabelColor(label: string) {
-  if (label === "Very lean" || label === "Athletic") return "text-blue-400";
-  if (label === "Fit") return "text-green-400";
-  if (label === "Soft" || label === "Very high") return "text-amber-400";
-  return "text-text-secondary";
+function goalRateDefault(g: Goal | null): number | null {
+  if (g === "fat_loss") return 0.25;
+  if (g === "muscle_gain") return 0.25;
+  if (g === "strength") return 0.15;
+  return null;
 }
 
 type Draft = {
-  // Step 1
   name: string;
   age: string;
   sex: Sex | null;
-  // Step 2
   experienceLevel: ExperienceLevel | null;
-  // Step 3
   goal: Goal | null;
-  // Step 4
   trainingDays: string[];
-  // Step 5
-  equipment: Equipment | null;
-  // Step 6
+  equipment: EquipmentUi | null;
   eatingPattern: EatingPattern | null;
-  // Step 7 — bodyDataType is computed at submit.
-  bodyDataType: "dexa" | "measurements" | null;
-  dexaBf: string;
-  dexaLean: string;
-  waist: string;
-  hip: string;
-  arm: string;
-  thigh: string;
-  weight: string;
-  height: string;
-  bodyFatSkipped: boolean;
-  targetWeight: string;
-  targetRatePct: string;
+  weightUnit: WeightUnit;
+  lengthUnit: LengthUnit;
+  weightKg: string;      // canonical kg
+  heightCm: string;      // canonical cm
+  heightFt: string;      // display-only when lengthUnit=in
+  heightIn: string;      // display-only when lengthUnit=in
+  targetWeightKg: string;
+  pace: Pace | null;
 };
 
 const EMPTY: Draft = {
@@ -169,12 +109,10 @@ const EMPTY: Draft = {
   trainingDays: [],
   equipment: null,
   eatingPattern: null,
-  bodyDataType: null,
-  dexaBf: "", dexaLean: "",
-  waist: "", hip: "", arm: "", thigh: "",
-  weight: "", height: "",
-  bodyFatSkipped: false,
-  targetWeight: "", targetRatePct: "",
+  weightUnit: "kg", lengthUnit: "cm",
+  weightKg: "", heightCm: "", heightFt: "", heightIn: "",
+  targetWeightKg: "",
+  pace: null,
 };
 
 function ProfileSetup() {
@@ -186,13 +124,9 @@ function ProfileSetup() {
   const [step, setStep] = useState(minStep);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [submitting, setSubmitting] = useState(false);
-  const [bodySkipped, setBodySkipped] = useState(false);
 
   const patch = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }));
 
-  // Reset-mode pre-population: hydrate Steps 2 + 6 (skipped in reset flow) and
-  // any other plan-shaping fields from the existing profile so submit doesn't
-  // null them out.
   useEffect(() => {
     if (!isReset) return;
     let cancelled = false;
@@ -201,29 +135,30 @@ function ProfileSetup() {
       if (!userRes.user) return;
       const { data } = await supabase
         .from("profiles")
-        .select("experience_level, eating_pattern, goal, equipment_access, training_day_codes, target_weight_kg, target_rate_pct")
+        .select("experience_level, eating_pattern, goal, equipment_access, training_day_codes, target_weight_kg, measurement_weight_kg, measurement_height_cm")
         .eq("user_id", userRes.user.id)
         .single();
       if (cancelled || !data) return;
+      const uiEquip = data.equipment_access
+        ? EQUIPMENT_DB_TO_UI[data.equipment_access as EquipmentDb] ?? null
+        : null;
       patch({
         experienceLevel: (data.experience_level as ExperienceLevel | null) ?? null,
         eatingPattern: (data.eating_pattern as EatingPattern | null) ?? null,
         goal: (data.goal as Goal | null) ?? null,
-        equipment: (data.equipment_access as Equipment | null) ?? null,
+        equipment: uiEquip,
         trainingDays: (data.training_day_codes as string[] | null) ?? [],
-        targetWeight: (data as any).target_weight_kg != null ? String((data as any).target_weight_kg) : "",
-        targetRatePct: (data as any).target_rate_pct != null ? String((data as any).target_rate_pct) : "",
+        targetWeightKg: data.target_weight_kg != null ? String(data.target_weight_kg) : "",
+        weightKg: data.measurement_weight_kg != null ? String(data.measurement_weight_kg) : "",
+        heightCm: data.measurement_height_cm != null ? String(data.measurement_height_cm) : "",
       });
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isReset]);
 
-  const bodyDataType: "dexa" | "measurements" | null = useMemo(() => {
-    if (bodySkipped) return null;
-    if (!draft.weight || !draft.height) return null;
-    return draft.dexaLean ? "dexa" : "measurements";
-  }, [bodySkipped, draft.weight, draft.height, draft.dexaLean]);
+  const heightValid = Number(draft.heightCm) > 0;
+  const weightValid = Number(draft.weightKg) > 0;
 
   const canContinue = (() => {
     switch (step) {
@@ -235,48 +170,27 @@ function ProfileSetup() {
       case 3: return !!draft.goal;
       case 4: return draft.trainingDays.length >= 1;
       case 5: return !!draft.equipment;
-      case 6: return !!draft.eatingPattern;
-      case 7: {
-        if (bodySkipped) return true;
-        if (!draft.weight && !draft.height && !draft.dexaBf) return true;
-        return !!draft.weight && !!draft.height;
-      }
-      case 8: {
-        const cw = Number(draft.weight) || 0;
-        const tw = Number(draft.targetWeight) || 0;
+      case 6: {
+        if (!weightValid || !heightValid) return false;
+        if (!draft.eatingPattern) return false;
+        const cw = Number(draft.weightKg);
+        const tw = Number(draft.targetWeightKg);
+        if (!(tw > 0)) return false;
         const direction = GOAL_DIRECTION[draft.goal!];
-        if (!draft.targetWeight || !draft.targetRatePct) return false;
         if (direction === "lose" && tw >= cw) return false;
         if (direction === "gain" && tw <= cw) return false;
-        if (direction === "lose") {
-          const heightM = Number(draft.height) / 100;
-          const bmi = heightM > 0 ? tw / (heightM * heightM) : 0;
-          if (bmi > 0 && bmi < 18.5) return false;
-        }
-        if (direction === "gain") {
-          const heightM = Number(draft.height) / 100;
-          const bmi = heightM > 0 ? tw / (heightM * heightM) : 0;
-          if (bmi >= 35) return false;
-        }
+        const heightM = Number(draft.heightCm) / 100;
+        const bmi = heightM > 0 ? tw / (heightM * heightM) : 0;
+        if (direction === "lose" && bmi > 0 && bmi < 18.5) return false;
+        if (direction === "gain" && bmi >= 35) return false;
         return true;
       }
-      case 9: return true;
-      default: return false;
+      default: return true;
     }
   })();
 
-  const next = () => setStep((s) => Math.min(s + 1, TOTAL));
+  const next = () => setStep((s) => Math.min(s + 1, TOTAL + 1)); // TOTAL + 1 = review
   const back = () => setStep((s) => Math.max(s - 1, minStep));
-
-  const skipBody = () => {
-    setBodySkipped(true);
-    patch({
-      dexaBf: "", dexaLean: "",
-      waist: "", hip: "", arm: "", thigh: "",
-      weight: "", height: "",
-    });
-    next();
-  };
 
   const submit = async () => {
     setSubmitting(true);
@@ -286,42 +200,27 @@ function ProfileSetup() {
       const userId = userRes.user.id;
 
       const trainingDaysCount = draft.trainingDays.length;
-      const hasBody = bodyDataType !== null && !!draft.weight && !!draft.height;
+      const chosenPace = draft.pace ? PACES.find((p) => p.id === draft.pace)!.pct : null;
+      const targetRatePct = chosenPace ?? goalRateDefault(draft.goal);
+      const equipmentDb = draft.equipment ? EQUIPMENT_UI_TO_DB[draft.equipment] : null;
 
-      // Persist target_rate_pct explicitly so the weekly macro review's
-      // provenance reflects what the engine will actually use. Goal-appropriate
-      // defaults when the user did not set a pace; null for maintain-direction
-      // goals (recomposition / athletic_performance) where rate is not applied.
-      const goalRateDefault = (g: string | null): number | null => {
-        if (g === "fat_loss") return 0.5;
-        if (g === "muscle_gain") return 0.25;
-        if (g === "strength") return 0.15;
-        return null; // recomposition, athletic_performance — no rate
+      const commonBody = {
+        experience_level: draft.experienceLevel,
+        goal: draft.goal,
+        training_days_per_week: trainingDaysCount,
+        training_day_codes: draft.trainingDays,
+        equipment_access: equipmentDb,
+        eating_pattern: draft.eatingPattern,
+        body_data_type: "measurements" as const,
+        measurement_weight_kg: Number(draft.weightKg),
+        measurement_height_cm: Number(draft.heightCm),
+        target_weight_kg: Number(draft.targetWeightKg),
+        target_rate_pct: targetRatePct,
       };
-      const targetRatePctResolved =
-        draft.targetRatePct ? Number(draft.targetRatePct) : goalRateDefault(draft.goal);
 
-
-      let payload: any;
+      let payload: Record<string, unknown>;
       if (isReset) {
-        payload = {
-          user_id: userId,
-          experience_level: draft.experienceLevel,
-          goal: draft.goal,
-          training_days_per_week: trainingDaysCount,
-          training_day_codes: draft.trainingDays,
-          equipment_access: draft.equipment,
-          eating_pattern: draft.eatingPattern,
-          body_data_type: bodyDataType,
-          dexa_body_fat_pct: hasBody && !draft.bodyFatSkipped && draft.dexaBf !== "" ? Number(draft.dexaBf) : null,
-          dexa_lean_mass_kg: hasBody && draft.dexaLean ? Number(draft.dexaLean) : null,
-          measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
-          measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
-          measurement_weight_kg: hasBody ? Number(draft.weight) : null,
-          measurement_height_cm: hasBody ? Number(draft.height) : null,
-          target_weight_kg: draft.targetWeight ? Number(draft.targetWeight) : null,
-          target_rate_pct: targetRatePctResolved,
-        };
+        payload = { user_id: userId, ...commonBody };
       } else {
         const now = new Date();
         const unlock = new Date(now.getTime() + 7 * 86400000);
@@ -330,49 +229,33 @@ function ProfileSetup() {
           name: draft.name.trim(),
           age: Number(draft.age),
           biological_sex: draft.sex,
-          experience_level: draft.experienceLevel,
           input_path_preference: "manual",
-          goal: draft.goal,
-          training_days_per_week: trainingDaysCount,
-          training_day_codes: draft.trainingDays,
-          equipment_access: draft.equipment,
-          eating_pattern: draft.eatingPattern,
-          body_data_type: bodyDataType,
-          dexa_body_fat_pct: hasBody && !draft.bodyFatSkipped && draft.dexaBf !== "" ? Number(draft.dexaBf) : null,
-          dexa_lean_mass_kg: hasBody && draft.dexaLean ? Number(draft.dexaLean) : null,
-          measurement_waist_cm: draft.waist ? Number(draft.waist) : null,
-          measurement_hip_cm: draft.hip ? Number(draft.hip) : null,
-          measurement_weight_kg: hasBody ? Number(draft.weight) : null,
-          measurement_height_cm: hasBody ? Number(draft.height) : null,
-          target_weight_kg: draft.targetWeight ? Number(draft.targetWeight) : null,
-          target_rate_pct: targetRatePctResolved,
+          ...commonBody,
           profile_completed_at: now.toISOString(),
           plan_unlock_date: unlock.toISOString().slice(0, 10),
           timezone: getBrowserTimezone(),
         };
       }
 
-      const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "user_id" });
+      const { error } = await supabase.from("profiles").upsert(payload as any, { onConflict: "user_id" });
       if (error) throw error;
 
-      if (hasBody) {
-        try {
-          await logMeasure({
-            data: {
-              source: bodyDataType === "dexa" ? "dexa" : "manual",
-              weight_kg: Number(draft.weight),
-              body_fat_pct: !draft.bodyFatSkipped && draft.dexaBf !== "" ? Number(draft.dexaBf) : null,
-              lean_mass_kg: bodyDataType === "dexa" && draft.dexaLean ? Number(draft.dexaLean) : null,
-              waist_cm: draft.waist ? Number(draft.waist) : null,
-              hip_cm: draft.hip ? Number(draft.hip) : null,
-              arm_cm: draft.arm ? Number(draft.arm) : null,
-              thigh_cm: draft.thigh ? Number(draft.thigh) : null,
-              client_timezone: getBrowserTimezone(),
-            },
-          });
-        } catch (e) {
-          console.warn("logBodyMeasurement failed", e);
-        }
+      try {
+        await logMeasure({
+          data: {
+            source: "manual",
+            weight_kg: Number(draft.weightKg),
+            body_fat_pct: null,
+            lean_mass_kg: null,
+            waist_cm: null,
+            hip_cm: null,
+            arm_cm: null,
+            thigh_cm: null,
+            client_timezone: getBrowserTimezone(),
+          },
+        });
+      } catch (e) {
+        console.warn("logBodyMeasurement failed", e);
       }
 
       if (!isReset) {
@@ -385,25 +268,12 @@ function ProfileSetup() {
         } catch {}
       }
 
-      if (hasBody) {
-        const [macroRes, planRes] = await Promise.allSettled([
-          supabase.functions.invoke("calculate-macros", { body: { user_id: userId } }),
-          supabase.functions.invoke("generate-plan", { body: { user_id: userId } }),
-        ]);
-        if (macroRes.status === "rejected") console.warn("calculate-macros failed", macroRes.reason);
-        if (planRes.status === "rejected") console.warn("generate-plan failed", planRes.reason);
-      } else {
-        // Skip-body path still needs a starting macro target. calculate-macros
-        // falls back to default anthropometrics (170cm / 70kg / 30y / male)
-        // when measurements are absent — the user updates these in Settings
-        // later and the weekly review recalibrates from actual intake.
-        const [macroRes, planRes] = await Promise.allSettled([
-          supabase.functions.invoke("calculate-macros", { body: { user_id: userId } }),
-          supabase.functions.invoke("generate-plan", { body: { user_id: userId } }),
-        ]);
-        if (macroRes.status === "rejected") console.warn("calculate-macros failed", macroRes.reason);
-        if (planRes.status === "rejected") console.warn("generate-plan failed", planRes.reason);
-      }
+      const [macroRes, planRes] = await Promise.allSettled([
+        supabase.functions.invoke("calculate-macros", { body: { user_id: userId } }),
+        supabase.functions.invoke("generate-plan", { body: { user_id: userId } }),
+      ]);
+      if (macroRes.status === "rejected") console.warn("calculate-macros failed", macroRes.reason);
+      if (planRes.status === "rejected") console.warn("generate-plan failed", planRes.reason);
 
       navigate({ to: "/dashboard" });
     } catch (e: any) {
@@ -414,66 +284,87 @@ function ProfileSetup() {
 
   if (submitting) return <BuildingPlanScreen />;
 
-  const stepLabel = `Step ${step} of ${TOTAL}`;
+  const isReview = step > TOTAL;
+  const displayStep = isReview ? TOTAL : step;
+  const stepLabel = isReview ? "Review" : `Step ${displayStep} of ${TOTAL}`;
 
   return (
-    <div className="min-h-screen bg-bg-1 pb-32" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
+    <div className="min-h-screen pb-32" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
       <header className="flex items-center justify-between px-5 pt-6">
-        <button onClick={step === minStep ? () => navigate({ to: isReset ? "/dashboard" : "/" }) : back} className="text-text-secondary">
+        <button onClick={step === minStep ? () => navigate({ to: isReset ? "/dashboard" : "/" }) : back} className="text-text-secondary" aria-label="Back">
           <ChevronLeft size={24} />
         </button>
-        <span className="text-[11px] uppercase tracking-wider text-text-tertiary">{stepLabel}</span>
+        <span className="text-label text-text-tertiary">{stepLabel}</span>
         <span className="w-6" />
       </header>
 
-      <div className="mx-5 mt-4 h-1 rounded-full bg-white/5 overflow-hidden">
-        <div className="h-full gradient-brand transition-all" style={{ width: `${(step / TOTAL) * 100}%` }} />
+      <div className="mx-5 mt-4 h-1 rounded-full overflow-hidden" style={{ background: "var(--border-hairline)" }}>
+        <div
+          className="h-full transition-all"
+          style={{
+            width: `${(displayStep / TOTAL) * 100}%`,
+            background: "linear-gradient(90deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+            transitionDuration: "var(--dur-med)",
+          }}
+        />
       </div>
 
       <main className="px-5 mt-8 max-w-[480px] mx-auto">
-        {step === 1 && <AboutYouStep name={draft.name} age={draft.age} sex={draft.sex} onName={(n) => patch({ name: n })} onAge={(age) => patch({ age })} onSex={(sex) => patch({ sex })} />}
-        {step === 2 && <ExperienceStep value={draft.experienceLevel} onChange={(v) => patch({ experienceLevel: v })} />}
-        {step === 3 && <GoalStep value={draft.goal} onChange={(goal) => patch({ goal })} />}
-        {step === 4 && <DaysStep value={draft.trainingDays} onChange={(trainingDays) => patch({ trainingDays })} />}
-        {step === 5 && <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />}
-        {step === 6 && <EatingPatternStep value={draft.eatingPattern} onChange={(v) => patch({ eatingPattern: v })} />}
-        {step === 7 && (
-          <BodyStep
-            draft={draft}
-            patch={patch}
-            bodySkipped={bodySkipped}
-            unskip={() => setBodySkipped(false)}
-            onSkip={skipBody}
+        {step === 1 && (
+          <AboutYouStep
+            name={draft.name} age={draft.age} sex={draft.sex}
+            onName={(v) => patch({ name: v })}
+            onAge={(v) => patch({ age: v })}
+            onSex={(v) => patch({ sex: v })}
           />
         )}
-        {step === 8 && (
-          <TargetRateStep
-            goal={draft.goal!}
-            currentWeight={draft.weight}
-            height={draft.height}
-            targetWeight={draft.targetWeight}
-            ratePct={draft.targetRatePct}
-            onTargetWeight={(v) => patch({ targetWeight: v })}
-            onRatePct={(v) => patch({ targetRatePct: v })}
+        {step === 2 && (
+          <ExperienceStep
+            name={draft.name.trim()}
+            value={draft.experienceLevel}
+            onChange={(v) => patch({ experienceLevel: v })}
           />
         )}
-        {step === 9 && <ReviewStep draft={draft} bodyDataType={bodyDataType} />}
+        {step === 3 && (
+          <GoalStep
+            name={draft.name.trim()}
+            value={draft.goal}
+            onChange={(g) => patch({ goal: g })}
+          />
+        )}
+        {step === 4 && (
+          <DaysStep value={draft.trainingDays} onChange={(trainingDays) => patch({ trainingDays })} />
+        )}
+        {step === 5 && (
+          <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />
+        )}
+        {step === 6 && (
+          <FuelPlanStep
+            draft={draft} patch={patch}
+          />
+        )}
+        {isReview && <ReviewStep draft={draft} />}
       </main>
 
       <footer
         className="fixed inset-x-0 bottom-0 z-20 pt-10"
         style={{
-          background: "linear-gradient(to top, var(--bg-1) 0%, var(--bg-1) 60%, transparent 100%)",
+          background: "linear-gradient(to top, var(--bg-0) 0%, var(--bg-0) 60%, transparent 100%)",
           paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 20px)",
         }}
       >
         <div className="mx-auto max-w-[480px] px-5">
-          {step < TOTAL ? (
+          {!isReview ? (
             <button
               disabled={!canContinue}
               onClick={next}
-              className="block w-full rounded-2xl gradient-brand text-white py-3.5 text-sm font-semibold disabled:opacity-40"
-              style={{ borderRadius: 18 }}
+              className="block w-full text-body font-medium disabled:opacity-40"
+              style={{
+                height: 52, borderRadius: "var(--radius-md)",
+                background: "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+                color: "#0A0B12",
+                boxShadow: "var(--shadow-inset-top)",
+              }}
             >
               Continue
             </button>
@@ -481,14 +372,15 @@ function ProfileSetup() {
             <button
               disabled={submitting}
               onClick={submit}
-              className="block w-full rounded-2xl gradient-brand text-white py-3.5 text-sm font-semibold disabled:opacity-40"
-              style={{ borderRadius: 18 }}
+              className="block w-full text-body font-medium disabled:opacity-40"
+              style={{
+                height: 52, borderRadius: "var(--radius-md)",
+                background: "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+                color: "#0A0B12",
+                boxShadow: "var(--shadow-inset-top)",
+              }}
             >
-              {submitting
-                ? "Generating your plan…"
-                : bodyDataType === null
-                ? "Continue without body data"
-                : "Generate my plan"}
+              Build my plan
             </button>
           )}
         </div>
@@ -500,16 +392,24 @@ function ProfileSetup() {
 function StepHeader({ title, sub }: { title: string; sub?: string }) {
   return (
     <div className="mb-6">
-      <h1 className="text-2xl font-bold">{title}</h1>
-      {sub && <p className="mt-1 text-sm text-text-secondary">{sub}</p>}
+      <h1 className="text-hero text-text-primary">{title}</h1>
+      {sub && <p className="mt-2 text-body-sm text-text-tertiary">{sub}</p>}
     </div>
   );
 }
 
-const SELECTED_STYLE: React.CSSProperties = {
-  background: "linear-gradient(135deg, rgba(124,58,237,0.28), rgba(59,130,246,0.22))",
-  borderColor: "rgba(167,139,250,0.7)",
-  boxShadow: "0 0 0 1px rgba(167,139,250,0.35), 0 8px 24px -12px rgba(124,58,237,0.5)",
+const CARD_BASE: React.CSSProperties = {
+  background: "var(--bg-1)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: "var(--radius-lg)",
+  padding: "var(--space-4)",
+  transition: "border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard)",
+};
+
+const CARD_ACTIVE: React.CSSProperties = {
+  ...CARD_BASE,
+  borderColor: "var(--amber-500)",
+  boxShadow: "0 0 0 1px var(--amber-glow)",
 };
 
 function AboutYouStep({
@@ -519,78 +419,80 @@ function AboutYouStep({
     <>
       <StepHeader title="About you" sub="Quick basics so we can calculate your targets." />
 
-      <div className="space-y-3">
-        <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3">
-          <span className="text-sm text-text-secondary">Name</span>
+      <div className="space-y-4">
+        <FieldLabel>Name</FieldLabel>
+        <InputBox>
           <input
             type="text"
             value={name}
             onChange={(e) => onName(e.target.value)}
-            placeholder="What should we call you?"
-            className="w-44 bg-transparent text-right text-sm font-semibold focus:outline-none placeholder:text-text-tertiary"
+            placeholder="Your first name"
+            className="w-full bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
             autoComplete="given-name"
-            style={{ fontSize: 16 }}
           />
-        </label>
+        </InputBox>
 
-        <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3">
-          <span className="text-sm text-text-secondary">Age</span>
-          <span className="flex items-center gap-1">
-            <input
-              type="number" inputMode="numeric" min={10} max={100} step={1}
-              value={age}
-              onChange={(e) => onAge(e.target.value.replace(/[^\d]/g, ""))}
-              placeholder="—"
-              className="w-20 bg-transparent text-right text-sm font-semibold focus:outline-none"
-              style={{ fontSize: 16 }}
-            />
-            <span className="text-xs text-text-tertiary">yrs</span>
-          </span>
-        </label>
+        <FieldLabel>Age</FieldLabel>
+        <InputBox>
+          <input
+            type="number" inputMode="numeric" min={10} max={100} step={1}
+            value={age}
+            onChange={(e) => onAge(e.target.value.replace(/[^\d]/g, ""))}
+            placeholder="—"
+            className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
+          />
+          <span className="text-body-sm text-text-tertiary ml-2">yrs</span>
+        </InputBox>
 
-        <div>
-          <p className="mb-2 text-[11px] uppercase tracking-wider text-text-tertiary">Biological sex</p>
-          <div className="grid grid-cols-2 gap-2">
-            {(["male", "female"] as Sex[]).map((s) => {
-              const active = sex === s;
-              return (
-                <button
-                  key={s} type="button" onClick={() => onSex(s)}
-                  className={`rounded-2xl py-3 text-sm font-semibold border transition ${active ? "" : "border-white/5 bg-bg-2 text-text-secondary"}`}
-                  style={active ? SELECTED_STYLE : undefined}
-                >
-                  {s === "male" ? "Male" : "Female"}
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-3 text-[11px] text-text-tertiary">Used to calculate your metabolic rate.</p>
+        <FieldLabel>Biological sex</FieldLabel>
+        <div className="grid grid-cols-2 gap-2">
+          {(["male", "female"] as Sex[]).map((s) => {
+            const active = sex === s;
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => onSex(s)}
+                className="text-body font-medium"
+                style={{
+                  height: 44,
+                  borderRadius: "var(--radius-pill)",
+                  background: active ? "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)" : "var(--bg-1)",
+                  color: active ? "#0A0B12" : "var(--text-secondary)",
+                  border: active ? "1px solid transparent" : "1px solid var(--border-subtle)",
+                }}
+              >
+                {s === "male" ? "Male" : "Female"}
+              </button>
+            );
+          })}
         </div>
+        <p className="text-body-sm text-text-tertiary">For accurate calorie targets.</p>
       </div>
     </>
   );
 }
 
-function ExperienceStep({ value, onChange }: { value: ExperienceLevel | null; onChange: (v: ExperienceLevel) => void }) {
+function ExperienceStep({ name, value, onChange }: { name: string; value: ExperienceLevel | null; onChange: (v: ExperienceLevel) => void }) {
+  const title = name ? `How long have you been training, ${name}?` : "How long have you been training?";
   return (
     <>
-      <StepHeader title="How long have you been training?" sub="Shapes your plan complexity and how we talk about effort." />
+      <StepHeader title={title} sub="Shapes how we talk to you." />
       <div className="space-y-2">
-        {EXPERIENCE.map(({ id, label, desc, hint }) => {
+        {EXPERIENCE.map(({ id, label, desc }) => {
           const active = value === id;
           return (
             <button
               key={id} type="button" onClick={() => onChange(id)}
-              className={`w-full text-left rounded-2xl p-4 border transition ${active ? "" : "border-white/5 bg-bg-2"}`}
-              style={active ? SELECTED_STYLE : undefined}
+              className="w-full text-left"
+              style={active ? CARD_ACTIVE : CARD_BASE}
             >
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-white">{label}</p>
-                  <p className="text-xs text-text-tertiary mt-0.5">{desc}</p>
-                  <p className="text-xs text-text-secondary mt-2">→ {hint}</p>
+                  <p className="text-body font-medium text-text-primary">{label}</p>
+                  <p className="text-body-sm text-text-tertiary mt-1">{desc}</p>
                 </div>
-                {active && <Check size={18} className="text-white shrink-0 mt-1" />}
+                {active && <Check size={18} style={{ color: "var(--amber-500)" }} className="shrink-0 mt-1" />}
               </div>
             </button>
           );
@@ -600,25 +502,27 @@ function ExperienceStep({ value, onChange }: { value: ExperienceLevel | null; on
   );
 }
 
-function GoalStep({ value, onChange }: { value: Goal | null; onChange: (g: Goal) => void }) {
+function GoalStep({ name, value, onChange }: { name: string; value: Goal | null; onChange: (g: Goal) => void }) {
+  const title = name ? `What's your goal, ${name}?` : "What's your goal?";
   return (
     <>
-      <StepHeader title="What's your goal?" sub="We'll tune training and nutrition around this." />
+      <StepHeader title={title} sub="We'll tune training and nutrition around this." />
       <div className="space-y-2">
-        {GOALS.map(({ id, label, desc, Icon }) => {
+        {GOALS.map(({ id, label, desc }) => {
           const active = value === id;
           return (
-            <button key={id} type="button" onClick={() => onChange(id)}
-              className={`w-full flex items-center gap-3 rounded-2xl p-4 text-left border transition ${active ? "" : "border-white/5 bg-bg-2"}`}
-              style={active ? SELECTED_STYLE : undefined}>
-              <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${active ? "gradient-brand text-white" : "bg-bg-1 text-text-secondary"}`}>
-                <Icon size={18} />
+            <button
+              key={id} type="button" onClick={() => onChange(id)}
+              className="w-full text-left"
+              style={active ? CARD_ACTIVE : CARD_BASE}
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex-1">
+                  <p className="text-body font-medium text-text-primary">{label}</p>
+                  <p className="text-body-sm text-text-tertiary mt-1">{desc}</p>
+                </div>
+                {active && <Check size={18} style={{ color: "var(--amber-500)" }} className="shrink-0 mt-1" />}
               </div>
-              <div className="flex-1">
-                <p className="font-semibold text-sm">{label}</p>
-                <p className="text-xs text-text-tertiary">{desc}</p>
-              </div>
-              {active && <Check size={18} className="text-white" />}
             </button>
           );
         })}
@@ -646,7 +550,15 @@ function DaysStep({ value, onChange }: { value: string[]; onChange: (days: strin
           return (
             <button
               key={id} type="button" onClick={() => toggle(id)} aria-pressed={active}
-              className={`h-12 rounded-full text-sm font-semibold transition active:scale-95 ${active ? "gradient-brand text-white" : "bg-bg-2 text-text-secondary border border-white/5"}`}
+              className="text-body font-medium transition-transform active:scale-95"
+              style={{
+                width: 48, height: 48,
+                borderRadius: "var(--radius-pill)",
+                background: active ? "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)" : "var(--bg-1)",
+                color: active ? "#0A0B12" : "var(--text-secondary)",
+                border: active ? "1px solid transparent" : "1px solid var(--border-subtle)",
+                margin: "0 auto",
+              }}
             >
               {label}
             </button>
@@ -654,245 +566,325 @@ function DaysStep({ value, onChange }: { value: string[]; onChange: (days: strin
         })}
       </div>
       <div className="text-center mt-8">
-        <span className="text-4xl font-bold tabular-nums text-white">{count}</span>
-        <span className="ml-2 text-base text-text-tertiary">{count === 1 ? "day" : "days"} / week</span>
+        <span className="text-title text-text-primary" style={{ fontVariantNumeric: "tabular-nums", color: "var(--amber-500)" }}>{count}</span>
+        <span className="ml-2 text-body text-text-secondary">{count === 1 ? "day" : "days"} / week</span>
       </div>
-      <p className="mt-4 text-center text-xs text-text-tertiary">Pick at least one day to continue.</p>
+      <p className="mt-4 text-center text-body-sm text-text-tertiary">Pick at least one day to continue.</p>
     </>
   );
 }
 
-function EquipmentStep({ value, onChange }: { value: Equipment | null; onChange: (e: Equipment) => void }) {
+function EquipmentStep({ value, onChange }: { value: EquipmentUi | null; onChange: (e: EquipmentUi) => void }) {
   return (
     <>
-      <StepHeader title="What equipment do you have access to?" />
+      <StepHeader title="What's your setup?" sub="So we can pick exercises you can actually do." />
       <div className="space-y-2">
-        {EQUIPMENT.map(({ id, label, desc }) => {
-          const active = value === id;
-          return (
-            <button key={id} type="button" onClick={() => onChange(id)}
-              className={`w-full flex items-center justify-between rounded-2xl p-4 text-left border transition ${active ? "" : "border-white/5 bg-bg-2"}`}
-              style={active ? SELECTED_STYLE : undefined}>
-              <div>
-                <p className="font-semibold text-sm text-white">{label}</p>
-                <p className="text-xs text-text-tertiary">{desc}</p>
-              </div>
-              {active && <div className="h-7 w-7 rounded-full gradient-brand flex items-center justify-center"><Check size={16} className="text-white" /></div>}
-            </button>
-          );
-        })}
-      </div>
-    </>
-  );
-}
-
-function EatingPatternStep({ value, onChange }: { value: EatingPattern | null; onChange: (v: EatingPattern) => void }) {
-  return (
-    <>
-      <StepHeader title="How do you eat?" sub="Shapes your macro timing and how we read your meal logs." />
-      <div className="grid grid-cols-2 gap-2">
-        {EATING_PATTERNS.map(({ id, label, desc }) => {
+        {EQUIPMENT_OPTIONS.map(({ id, label, desc }) => {
           const active = value === id;
           return (
             <button
               key={id} type="button" onClick={() => onChange(id)}
-              className={`text-left rounded-2xl p-4 border transition ${active ? "" : "border-white/5 bg-bg-2"}`}
-              style={active ? SELECTED_STYLE : undefined}
+              className="w-full text-left"
+              style={active ? CARD_ACTIVE : CARD_BASE}
             >
-              <p className="text-sm font-semibold text-white">{label}</p>
-              <p className="text-xs text-text-tertiary mt-0.5 leading-snug">{desc}</p>
+              <div className="flex items-start gap-3">
+                <div className="flex-1">
+                  <p className="text-body font-medium text-text-primary">{label}</p>
+                  <p className="text-body-sm text-text-tertiary mt-1">{desc}</p>
+                </div>
+                {active && <Check size={18} style={{ color: "var(--amber-500)" }} className="shrink-0 mt-1" />}
+              </div>
             </button>
           );
         })}
       </div>
-      <p className="mt-3 text-[11px] text-text-tertiary">You can update this any time in Settings.</p>
     </>
   );
 }
 
-function cmToIn(cm: number) { return cm / 2.54; }
-function inToCm(inches: number) { return inches * 2.54; }
-function kgToLb(kg: number) { return kg * 2.20462; }
-function lbToKg(lb: number) { return lb / 2.20462; }
+function FuelPlanStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>) => void }) {
+  const goal = draft.goal!;
+  const direction = GOAL_DIRECTION[goal];
 
-function BodyStep({
-  draft, patch, bodySkipped, unskip, onSkip,
-}: {
-  draft: Draft;
-  patch: (p: Partial<Draft>) => void;
-  bodySkipped: boolean;
-  unskip: () => void;
-  onSkip: () => void;
-}) {
-  const [wUnit, setWUnit] = useState<WeightUnit>("kg");
-  const [lUnit, setLUnit] = useState<LengthUnit>("cm");
-  const [scanOpen, setScanOpen] = useState(false);
-  const [measureOpen, setMeasureOpen] = useState(false);
+  // Weight IO — canonical kg, display in weightUnit.
+  const setWeightDisplay = (raw: string) => {
+    const clean = raw.replace(/[^\d.]/g, "");
+    if (clean === "") { patch({ weightKg: "" }); return; }
+    const n = Number(clean);
+    if (!Number.isFinite(n)) return;
+    const kg = draft.weightUnit === "kg" ? n : n * 0.4536;
+    patch({ weightKg: String(Number(kg.toFixed(2))) });
+  };
+  const weightDisplay = draft.weightKg === "" ? "" : (draft.weightUnit === "kg"
+    ? String(Number(Number(draft.weightKg).toFixed(1)))
+    : String(Number((Number(draft.weightKg) / 0.4536).toFixed(1))));
 
-  const sex: Sex = draft.sex ?? "male";
-  const range = BF_RANGE[sex];
+  const setTargetWeightDisplay = (raw: string) => {
+    const clean = raw.replace(/[^\d.]/g, "");
+    if (clean === "") { patch({ targetWeightKg: "" }); return; }
+    const n = Number(clean);
+    if (!Number.isFinite(n)) return;
+    const kg = draft.weightUnit === "kg" ? n : n * 0.4536;
+    patch({ targetWeightKg: String(Number(kg.toFixed(2))) });
+  };
+  const targetWeightDisplay = draft.targetWeightKg === "" ? "" : (draft.weightUnit === "kg"
+    ? String(Number(Number(draft.targetWeightKg).toFixed(1)))
+    : String(Number((Number(draft.targetWeightKg) / 0.4536).toFixed(1))));
 
-  const bodyFatSkipped = draft.bodyFatSkipped;
+  // Height IO
+  const setHeightCmDisplay = (raw: string) => {
+    const clean = raw.replace(/[^\d.]/g, "");
+    if (clean === "") { patch({ heightCm: "", heightFt: "", heightIn: "" }); return; }
+    const n = Number(clean);
+    if (!Number.isFinite(n)) return;
+    patch({ heightCm: String(n) });
+  };
+  const setHeightFt = (raw: string) => {
+    const clean = raw.replace(/[^\d]/g, "");
+    const ft = clean === "" ? 0 : Number(clean);
+    const inches = draft.heightIn === "" ? 0 : Number(draft.heightIn);
+    const cm = ft * 30.48 + inches * 2.54;
+    patch({ heightFt: clean, heightCm: cm > 0 ? String(Number(cm.toFixed(1))) : "" });
+  };
+  const setHeightIn = (raw: string) => {
+    const clean = raw.replace(/[^\d.]/g, "");
+    const ft = draft.heightFt === "" ? 0 : Number(draft.heightFt);
+    const inches = clean === "" ? 0 : Number(clean);
+    const cm = ft * 30.48 + inches * 2.54;
+    patch({ heightIn: clean, heightCm: cm > 0 ? String(Number(cm.toFixed(1))) : "" });
+  };
+  const heightCmDisplay = draft.heightCm === "" ? "" : String(Number(Number(draft.heightCm).toFixed(1)));
 
-  if (bodySkipped) {
-    return (
-      <>
-        <StepHeader title="Your starting point" sub="Used to calculate your calorie and macro targets." />
-        <div className="rounded-2xl bg-bg-2 border border-white/5 p-4">
-          <p className="text-sm text-text-secondary">
-            You've skipped body data. Macro targets will be rough estimates until you add this from your profile.
-          </p>
-          <button
-            type="button"
-            onClick={unskip}
-            className="mt-3 text-xs text-text-secondary underline underline-offset-2"
-          >
-            Add it now instead
-          </button>
-        </div>
-      </>
-    );
-  }
+  const cw = Number(draft.weightKg) || 0;
+  const tw = Number(draft.targetWeightKg) || 0;
+  const heightM = Number(draft.heightCm) / 100;
+  const bmi = heightM > 0 && tw > 0 ? tw / (heightM * heightM) : 0;
 
-  const hasBf = draft.dexaBf !== "";
-  const bfNum = hasBf ? Number(draft.dexaBf) : range.default;
-  const desc = hasBf ? getBfDescription(bfNum, sex) : null;
+  let targetError: string | null = null;
+  if (direction === "lose" && tw > 0 && tw >= cw) targetError = "Target should be below your current weight.";
+  if (direction === "gain" && tw > 0 && tw <= cw) targetError = "Target should be above your current weight.";
+  if (direction === "lose" && bmi > 0 && bmi < 18.5) targetError = "Target weight is below a healthy BMI for your height.";
+  if (direction === "gain" && bmi >= 35) targetError = "Target weight is above a safe range for your height.";
 
   return (
     <>
-      <StepHeader title="Your starting point" sub="Used to calculate your calorie and macro targets." />
-      <p className="text-xs text-text-tertiary mb-4">
-        No scan needed — a rough estimate is enough to start. We adjust from your real data every week.
-      </p>
+      <StepHeader title="Your fuel plan" sub="We'll refine this from your weekly check-ins." />
 
+      {/* Body basics */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Weight unit</span>
-          <UnitToggle options={[{ id: "kg", label: "kg" }, { id: "lb", label: "lb" }]} value={wUnit} onChange={(v) => setWUnit(v as WeightUnit)} />
+        <div className="flex items-center justify-between">
+          <FieldLabel inline>Weight</FieldLabel>
+          <SegmentedPill
+            options={[{ id: "kg", label: "kg" }, { id: "lb", label: "lb" }]}
+            value={draft.weightUnit}
+            onChange={(v) => patch({ weightUnit: v as WeightUnit })}
+          />
         </div>
-        <UnitField label="Weight" cmValue={draft.weight} onChangeCm={(v) => patch({ weight: v })} unit={wUnit} convertToDisplay={kgToLb} convertFromDisplay={lbToKg} />
+        <InputBox>
+          <input
+            type="text" inputMode="decimal"
+            value={weightDisplay}
+            onChange={(e) => setWeightDisplay(e.target.value)}
+            placeholder="—"
+            className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
+          />
+          <span className="text-body-sm text-text-tertiary ml-2">{draft.weightUnit}</span>
+        </InputBox>
 
-        <div className="flex items-center justify-between gap-2 pt-1">
-          <span className="text-[11px] uppercase tracking-wider text-text-tertiary">Length unit</span>
-          <UnitToggle options={[{ id: "cm", label: "cm" }, { id: "in", label: "in" }]} value={lUnit} onChange={(v) => setLUnit(v as LengthUnit)} />
+        <div className="flex items-center justify-between pt-2">
+          <FieldLabel inline>Height</FieldLabel>
+          <SegmentedPill
+            options={[{ id: "cm", label: "cm" }, { id: "in", label: "ft/in" }]}
+            value={draft.lengthUnit}
+            onChange={(v) => patch({ lengthUnit: v as LengthUnit })}
+          />
         </div>
-        <UnitField label="Height" cmValue={draft.height} onChangeCm={(v) => patch({ height: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-
-        {/* Sex-linked body-fat slider — optional */}
-        {!bodyFatSkipped ? (
-          <>
-            <div className="rounded-2xl bg-bg-2 border border-white/5 p-4">
-              <p className="text-[11px] uppercase tracking-wider text-text-tertiary text-center">Body fat</p>
-              {hasBf && desc ? (
-                <>
-                  <p className="text-center mt-2 text-white" style={{ fontSize: 32, fontWeight: 700 }}>{bfNum}%</p>
-                  <p className={`text-center text-sm font-semibold mt-1 ${bfLabelColor(desc.label)}`}>{desc.label}</p>
-                </>
-              ) : (
-                <>
-                  <p className="text-center mt-2 text-text-tertiary" style={{ fontSize: 20, fontWeight: 600 }}>Not set</p>
-                  <p className="text-center text-xs text-text-tertiary mt-1">Drag the slider to estimate — or skip below.</p>
-                </>
-              )}
-              <input
-                type="range"
-                min={range.min}
-                max={range.max}
-                step={1}
-                value={bfNum}
-                onChange={(e) => patch({ dexaBf: e.target.value })}
-                className="w-full mt-4 accent-violet-400"
-              />
-              {hasBf && desc && (
-                <p className="text-xs italic text-text-tertiary text-center mt-3 mx-auto" style={{ maxWidth: 320 }}>
-                  {desc.cue}
-                </p>
-              )}
-              <p className="text-[11px] text-text-tertiary text-center mt-3">
-                Based on ACE classifications. We track the trend — the exact number matters less than consistency.
-              </p>
-            </div>
-            <div className="text-center">
-              <button
-                type="button"
-                onClick={() => patch({ bodyFatSkipped: true, dexaBf: "" })}
-                className="text-xs text-text-secondary underline underline-offset-2"
-              >
-                Skip — I don't know
-              </button>
-            </div>
-          </>
+        {draft.lengthUnit === "cm" ? (
+          <InputBox>
+            <input
+              type="text" inputMode="decimal"
+              value={heightCmDisplay}
+              onChange={(e) => setHeightCmDisplay(e.target.value)}
+              placeholder="—"
+              className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
+            />
+            <span className="text-body-sm text-text-tertiary ml-2">cm</span>
+          </InputBox>
         ) : (
-          <div className="rounded-2xl bg-bg-2 border border-white/5 p-4">
-            <p className="text-sm text-text-secondary">
-              Skipped — you can add this anytime from the Nutrition tab for a slightly more accurate calorie target.
-            </p>
-            <button
-              type="button"
-              onClick={() => patch({ bodyFatSkipped: false })}
-              className="mt-2 text-xs text-text-secondary underline underline-offset-2"
-            >
-              Add it now instead
-            </button>
+          <div className="grid grid-cols-2 gap-2">
+            <InputBox>
+              <input
+                type="text" inputMode="numeric"
+                value={draft.heightFt}
+                onChange={(e) => setHeightFt(e.target.value)}
+                placeholder="—"
+                className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
+              />
+              <span className="text-body-sm text-text-tertiary ml-2">ft</span>
+            </InputBox>
+            <InputBox>
+              <input
+                type="text" inputMode="decimal"
+                value={draft.heightIn}
+                onChange={(e) => setHeightIn(e.target.value)}
+                placeholder="—"
+                className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
+              />
+              <span className="text-body-sm text-text-tertiary ml-2">in</span>
+            </InputBox>
           </div>
         )}
+      </div>
 
-        {/* Optional — body scan */}
-        <button
-          type="button"
-          onClick={() => setScanOpen((v) => !v)}
-          className="w-full flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 text-left"
-        >
-          <span className="text-sm text-text-secondary">I have a body scan result</span>
-          <ChevronDown size={16} className={`text-text-tertiary transition-transform ${scanOpen ? "rotate-180" : ""}`} />
-        </button>
-        {scanOpen && (
-          <div className="space-y-2">
-            <UnitField label="Lean mass" cmValue={draft.dexaLean} onChangeCm={(v) => patch({ dexaLean: v })} unit={wUnit} convertToDisplay={kgToLb} convertFromDisplay={lbToKg} />
-            <p className="text-[11px] text-text-tertiary px-1">
-              From your InBody or DEXA report (PBF and SMM). Improves your BMR calculation.
-            </p>
-          </div>
+      {/* Eating pattern */}
+      <div className="mt-8">
+        <FieldLabel>How do you eat?</FieldLabel>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {EATING_PATTERNS.map(({ id, label, desc }) => {
+            const active = draft.eatingPattern === id;
+            return (
+              <button
+                key={id} type="button" onClick={() => patch({ eatingPattern: id })}
+                className="text-left"
+                style={active ? CARD_ACTIVE : CARD_BASE}
+              >
+                <p className="text-body font-medium text-text-primary">{label}</p>
+                <p className="text-body-sm text-text-tertiary mt-1 leading-snug">{desc}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Target weight */}
+      <div className="mt-8">
+        <FieldLabel>Target weight</FieldLabel>
+        <InputBox>
+          <input
+            type="text" inputMode="decimal"
+            value={targetWeightDisplay}
+            onChange={(e) => setTargetWeightDisplay(e.target.value)}
+            placeholder="—"
+            className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
+          />
+          <span className="text-body-sm text-text-tertiary ml-2">{draft.weightUnit}</span>
+        </InputBox>
+        {targetError && (
+          <p className="mt-2 text-body-sm" style={{ color: "var(--danger)" }}>{targetError}</p>
         )}
+      </div>
 
-        {/* Optional — circumferences */}
-        <button
-          type="button"
-          onClick={() => setMeasureOpen((v) => !v)}
-          className="w-full flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 text-left"
-        >
-          <span className="text-sm text-text-secondary">Add measurements</span>
-          <ChevronDown size={16} className={`text-text-tertiary transition-transform ${measureOpen ? "rotate-180" : ""}`} />
-        </button>
-        {measureOpen && (
-          <div className="space-y-2">
-            <UnitField label="Waist" cmValue={draft.waist} onChangeCm={(v) => patch({ waist: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-            <UnitField label="Hip" cmValue={draft.hip} onChangeCm={(v) => patch({ hip: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-            <UnitField label="Arm" cmValue={draft.arm} onChangeCm={(v) => patch({ arm: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
-            <UnitField label="Thigh" cmValue={draft.thigh} onChangeCm={(v) => patch({ thigh: v })} unit={lUnit} convertToDisplay={cmToIn} convertFromDisplay={inToCm} />
+      {/* Pace */}
+      {direction !== "maintain" && (
+        <div className="mt-8">
+          <FieldLabel>How fast?</FieldLabel>
+          <div className="mt-2 space-y-2">
+            {PACES.map((p) => {
+              const active = draft.pace === p.id;
+              return (
+                <button
+                  key={p.id} type="button" onClick={() => patch({ pace: p.id })}
+                  className="w-full text-left flex items-center justify-between"
+                  style={active ? CARD_ACTIVE : CARD_BASE}
+                >
+                  <div>
+                    <p className="text-body font-medium text-text-primary">{p.label}</p>
+                    <p className="text-body-sm text-text-tertiary mt-0.5">{p.blurb}</p>
+                  </div>
+                  {active && <Check size={18} style={{ color: "var(--amber-500)" }} />}
+                </button>
+              );
+            })}
           </div>
-        )}
+        </div>
+      )}
+    </>
+  );
+}
 
-        <button
-          type="button"
-          onClick={onSkip}
-          className="w-full bg-bg-2 border border-white/5 rounded-2xl py-3 text-sm text-text-tertiary"
-        >
-          Skip for now — I'll add this from my profile later
-        </button>
+function ReviewStep({ draft }: { draft: Draft }) {
+  const goalLabel = GOALS.find((g) => g.id === draft.goal)?.label ?? "—";
+  const expLabel = EXPERIENCE.find((e) => e.id === draft.experienceLevel)?.label ?? "—";
+  const eqLabel = EQUIPMENT_OPTIONS.find((e) => e.id === draft.equipment)?.label ?? "—";
+  const eatLabel = EATING_PATTERNS.find((e) => e.id === draft.eatingPattern)?.label ?? "—";
+  const paceLabel = draft.pace ? PACES.find((p) => p.id === draft.pace)!.label : "Standard (default)";
+
+  const dayLabels: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
+  const order = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  const daysPretty = order.filter((d) => draft.trainingDays.includes(d)).map((d) => dayLabels[d]).join(" ") || "—";
+
+  const heading = draft.name.trim() ? `Ready, ${draft.name.trim()}?` : "Ready?";
+  const weightStr = draft.weightKg ? `${Number(Number(draft.weightKg).toFixed(1))} kg` : "—";
+  const heightStr = draft.heightCm ? `${Number(Number(draft.heightCm).toFixed(1))} cm` : "—";
+  const targetStr = draft.targetWeightKg ? `${Number(Number(draft.targetWeightKg).toFixed(1))} kg` : "—";
+
+  return (
+    <>
+      <StepHeader title={heading} />
+      <div className="divide-y" style={{ background: "var(--bg-1)", borderRadius: "var(--radius-lg)", border: "1px solid var(--border-hairline)" }}>
+        <Row label="Name" value={draft.name || "—"} />
+        <Row label="Age" value={draft.age || "—"} />
+        <Row label="Sex" value={draft.sex ?? "—"} />
+        <Row label="Experience" value={expLabel} />
+        <Row label="Goal" value={goalLabel} />
+        <Row label="Training days" value={`${draft.trainingDays.length} / week · ${daysPretty}`} />
+        <Row label="Setup" value={eqLabel} />
+        <Row label="Eating" value={eatLabel} />
+        <Row label="Weight" value={weightStr} />
+        <Row label="Height" value={heightStr} />
+        <Row label="Target" value={targetStr} />
+        <Row label="Pace" value={paceLabel} />
       </div>
     </>
   );
 }
 
-function UnitToggle({ options, value, onChange }: { options: { id: string; label: string }[]; value: string; onChange: (v: string) => void }) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="inline-flex rounded-full bg-bg-2 border border-white/10 p-0.5">
+    <div className="flex items-center justify-between px-4 py-3.5 gap-3" style={{ borderColor: "var(--border-hairline)" }}>
+      <span className="text-body-sm text-text-secondary shrink-0">{label}</span>
+      <span className="text-body text-text-primary text-right capitalize">{value}</span>
+    </div>
+  );
+}
+
+function FieldLabel({ children, inline }: { children: React.ReactNode; inline?: boolean }) {
+  return <p className={`text-label text-text-tertiary ${inline ? "" : "mb-1"}`}>{children}</p>;
+}
+
+function InputBox({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center px-4"
+      style={{
+        height: 48,
+        background: "var(--bg-1)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: "var(--radius-md)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function SegmentedPill({ options, value, onChange }: { options: { id: string; label: string }[]; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="inline-flex p-0.5"
+      style={{ background: "var(--bg-2)", borderRadius: "var(--radius-pill)", border: "1px solid var(--border-hairline)" }}>
       {options.map((o) => {
         const active = o.id === value;
         return (
-          <button key={o.id} type="button" onClick={() => onChange(o.id)}
-            className={`px-3 py-1 text-xs rounded-full transition ${active ? "gradient-brand text-white" : "text-text-tertiary"}`}>
+          <button
+            key={o.id} type="button" onClick={() => onChange(o.id)}
+            className="text-body-sm font-medium transition-colors"
+            style={{
+              padding: "6px 14px",
+              borderRadius: "var(--radius-pill)",
+              background: active ? "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)" : "transparent",
+              color: active ? "#0A0B12" : "var(--text-tertiary)",
+              transitionDuration: "var(--dur-fast)",
+            }}
+          >
             {o.label}
           </button>
         );
@@ -901,195 +893,13 @@ function UnitToggle({ options, value, onChange }: { options: { id: string; label
   );
 }
 
-function UnitField({
-  label, cmValue, onChangeCm, unit, convertToDisplay, convertFromDisplay,
-}: {
-  label: string; cmValue: string; onChangeCm: (v: string) => void;
-  unit: string; convertToDisplay: (n: number) => number; convertFromDisplay: (n: number) => number;
-}) {
-  const isCanonical = unit === "cm" || unit === "kg";
-  const [localDisplay, setLocalDisplay] = useState<string>("");
-
-  useEffect(() => {
-    if (cmValue === "") { setLocalDisplay(""); return; }
-    if (isCanonical) { setLocalDisplay(cmValue); return; }
-    const n = Number(cmValue);
-    if (!Number.isFinite(n)) { setLocalDisplay(""); return; }
-    setLocalDisplay(String(Number(convertToDisplay(n).toFixed(1))));
-  }, [cmValue, unit, isCanonical, convertToDisplay]);
-
-  const handle = (raw: string) => {
-    if (raw === "") { setLocalDisplay(""); onChangeCm(""); return; }
-    if (!/^\d*\.?\d*$/.test(raw)) return;
-    setLocalDisplay(raw);
-    if (raw === "." || raw === "") return;
-    const n = Number(raw);
-    if (!Number.isFinite(n)) return;
-    if (isCanonical) onChangeCm(String(n));
-    else onChangeCm(String(Number(convertFromDisplay(n).toFixed(2))));
-  };
-
-  return (
-    <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3">
-      <span className="text-sm text-text-secondary">{label}</span>
-      <span className="flex items-center gap-1">
-        <input
-          type="text"
-          inputMode="decimal"
-          value={localDisplay}
-          onChange={(e) => handle(e.target.value)}
-          className="w-24 bg-transparent text-right text-sm font-semibold focus:outline-none"
-          placeholder="—"
-          style={{ fontSize: 16 }}
-        />
-        <span className="text-xs text-text-tertiary">{unit}</span>
-      </span>
-    </label>
-  );
-}
-
-function ReviewStep({ draft, bodyDataType }: { draft: Draft; bodyDataType: "dexa" | "measurements" | null }) {
-  const goalLabel = GOALS.find((g) => g.id === draft.goal)?.label ?? "—";
-  const eqLabel = EQUIPMENT.find((e) => e.id === draft.equipment)?.label ?? "—";
-  const expLabel = EXPERIENCE.find((e) => e.id === draft.experienceLevel)?.label ?? "—";
-  const eatLabel = EATING_PATTERNS.find((e) => e.id === draft.eatingPattern)?.label ?? "—";
-
-  const dayLabels: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
-  const order = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-  const daysPretty = draft.trainingDays.length
-    ? order.filter((d) => draft.trainingDays.includes(d)).map((d) => dayLabels[d]).join(" ")
-    : "—";
-
-  let bodyValue = "Not provided — macro targets will be estimated";
-  let bodyAmber = true;
-  const bfStr = draft.dexaBf !== "" && !draft.bodyFatSkipped ? `${draft.dexaBf}%bf` : "bf not set";
-  if (bodyDataType === "dexa") {
-    bodyValue = `DEXA · ${draft.weight}kg · ${bfStr}`;
-    bodyAmber = false;
-  } else if (bodyDataType === "measurements") {
-    bodyValue = `Visual estimate · ${draft.weight}kg · ${bfStr}`;
-    bodyAmber = false;
-  }
-
-  const paceLabel = draft.goal && draft.targetRatePct
-    ? getZone(draft.goal, Number(draft.targetRatePct) || 0).label
-    : "—";
-
-  return (
-    <>
-      <StepHeader title="All set" sub="Confirm and we'll build your plan." />
-      <div className="rounded-2xl bg-bg-2 border border-white/5 divide-y divide-white/5">
-        <Row label="Name" value={draft.name || "—"} />
-        <Row label="Experience" value={expLabel} />
-        <Row label="Goal" value={goalLabel} />
-        <Row label="Training days" value={`${draft.trainingDays.length} / week · ${daysPretty}`} />
-        <Row label="Equipment" value={eqLabel} />
-        <Row label="Eating pattern" value={eatLabel} />
-        <Row label="Body data" value={bodyValue} valueClass={bodyAmber ? "text-amber-400" : undefined} />
-        <Row label="Target weight" value={draft.targetWeight ? `${draft.targetWeight} kg` : "—"} />
-        <Row label="Pace" value={paceLabel} />
-      </div>
-    </>
-  );
-}
-
-function Row({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
-  return (
-    <div className="flex items-center justify-between px-4 py-3.5 gap-3">
-      <span className="text-sm text-text-secondary shrink-0">{label}</span>
-      <span className={`text-sm font-medium text-right ${valueClass ?? ""}`}>{value}</span>
-    </div>
-  );
-}
-
-function TargetRateStep({
-  goal, currentWeight, height, targetWeight, ratePct, onTargetWeight, onRatePct,
-}: {
-  goal: Goal; currentWeight: string; height: string; targetWeight: string; ratePct: string;
-  onTargetWeight: (v: string) => void; onRatePct: (v: string) => void;
-}) {
-  const direction = GOAL_DIRECTION[goal];
-  const ceiling = RATE_CEILING[goal];
-
-  useEffect(() => {
-    const ceiling = RATE_CEILING[goal];
-    const current = Number(ratePct) || 0;
-    if (!ratePct || current > ceiling) {
-      onRatePct(String(RATE_ZONES[goal][0].max / 2));
-    }
-    if (direction === "maintain" && !targetWeight && currentWeight) {
-      onTargetWeight(currentWeight);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [goal]);
-
-  const rateNum = Number(ratePct) || 0;
-  const zone = getZone(goal, rateNum);
-  const cw = Number(currentWeight) || 0;
-  const tw = Number(targetWeight) || 0;
-  const heightM = Number(height) / 100;
-  const bmiAtTarget = heightM > 0 && tw > 0 ? tw / (heightM * heightM) : 0;
-
-  let directionError: string | null = null;
-  if (direction === "lose" && tw > 0 && tw >= cw) directionError = "Target weight should be below your current weight.";
-  if (direction === "gain" && tw > 0 && tw <= cw) directionError = "Target weight should be above your current weight.";
-  if (direction === "lose" && bmiAtTarget > 0 && bmiAtTarget < 18.5) {
-    directionError = "This target weight is below a healthy BMI for your height.";
-  }
-  if (direction === "gain" && bmiAtTarget >= 35) {
-    directionError = "This target weight is above a safe range for your height — talk to a doctor before setting a goal this high.";
-  }
-
-  const headline = direction === "lose"
-    ? "How much would you like to lose, and how fast?"
-    : direction === "gain"
-    ? "How much would you like to gain, and how fast?"
-    : "Let's lock in your maintenance target";
-
-  return (
-    <>
-      <StepHeader title={headline} />
-      <label className="flex items-center justify-between rounded-2xl bg-bg-2 border border-white/5 px-4 py-3 mb-4">
-        <span className="text-sm text-text-secondary">Target weight</span>
-        <span className="flex items-center gap-1">
-          <input
-            type="text" inputMode="decimal"
-            value={targetWeight}
-            onChange={(e) => onTargetWeight(e.target.value.replace(/[^\d.]/g, ""))}
-            className="w-24 bg-transparent text-right text-sm font-semibold focus:outline-none"
-            style={{ fontSize: 16 }}
-          />
-          <span className="text-xs text-text-tertiary">kg</span>
-        </span>
-      </label>
-      {directionError && <p className="text-xs text-danger px-1 -mt-2 mb-3">{directionError}</p>}
-      <p className="text-[11px] uppercase tracking-wider text-text-tertiary mb-2">
-        {direction === "maintain" ? "Correction tightness" : "Pace"}
-      </p>
-      <input
-        type="range" min={0} max={ceiling} step={0.05}
-        value={rateNum}
-        onChange={(e) => onRatePct(e.target.value)}
-        className="w-full accent-violet-400"
-      />
-      <div className="mt-3 rounded-2xl bg-bg-2 border border-white/5 p-4 text-center">
-        <p className="text-sm font-semibold text-white">{zone.label} — {rateNum.toFixed(2)}%/week</p>
-        <p className="text-xs text-text-tertiary mt-1">{zone.blurb}</p>
-      </div>
-    </>
-  );
-}
-
-
 const APEX_FACTS = [
   "BMR calculated via Mifflin-St Jeor — the most validated formula for non-obese adults.",
   "Protein set at 1.8g/kg. During a cut APEX raises this to 2.2g/kg to protect lean mass.",
   "TDEE uses your training days as a PAL multiplier — not a generic activity level.",
   "APEX Shield scores 5 pillars: Recovery, Sleep, Nutrition, Training Load, and Mood.",
   "The adaptive macro engine adjusts targets weekly from real weight trend vs intake.",
-  "Engine B coaching unlocks Day 7 — grounded in your actual data, not generic advice.",
   "Fat floor: 0.4g/kg or 25% of calories, whichever is higher — for hormonal health.",
-  "Weekly macro review unlocks after 3 logged nutrition days and 3 weigh-ins.",
 ];
 
 function BuildingPlanScreen() {
@@ -1112,44 +922,32 @@ function BuildingPlanScreen() {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ backgroundColor: "#06080F" }}>
+    <div className="min-h-screen flex flex-col items-center justify-center px-6">
       <div className="flex items-center justify-center rounded-full"
-        style={{ width: 96, height: 96, backgroundImage: "linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%)", boxShadow: "0 0 60px rgba(124, 58, 237, 0.45)", animation: "coach-breathe 2.4s ease-in-out infinite" }}>
-        <Sparkles size={28} color="#fff" strokeWidth={2.5} />
+        style={{
+          width: 96, height: 96,
+          background: "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+          boxShadow: "var(--shadow-glow-amber)",
+          animation: "breathe 2.4s ease-in-out infinite",
+        }}>
+        <Sparkles size={28} color="#0A0B12" strokeWidth={2.5} />
       </div>
-      <h1 className="mt-8 text-2xl font-semibold text-white text-center">Generating your plan</h1>
+      <h1 className="mt-8 text-hero text-text-primary text-center">Generating your plan</h1>
       <div className="mt-4 max-w-sm w-full min-h-[60px] flex items-center justify-center">
-        <p
-          key={idx}
-          className="text-[14px] text-text-secondary text-center px-2"
-          style={{ animation: "fact-fade 3s ease-in-out" }}
-        >
+        <p key={idx} className="text-body text-text-secondary text-center px-2" style={{ animation: "fade-up 0.5s ease-out both" }}>
           {APEX_FACTS[idx]}
         </p>
       </div>
-      <div className="mt-6 flex gap-1.5">
-        {APEX_FACTS.map((_, i) => (
-          <span
-            key={i}
-            className="h-1.5 w-1.5 rounded-full transition-colors"
-            style={{ background: i === idx ? "white" : "rgba(255,255,255,0.2)" }}
-          />
-        ))}
-      </div>
-      <div className="mt-8 w-full max-w-sm h-[3px] rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
+      <div className="mt-8 w-full max-w-sm h-[3px] rounded-full overflow-hidden" style={{ background: "var(--border-hairline)" }}>
         <div
           className="h-full rounded-full"
           style={{
             width: `${progress}%`,
-            backgroundImage: "linear-gradient(90deg, #7C3AED 0%, #3B82F6 100%)",
+            background: "linear-gradient(90deg, var(--amber-500) 0%, var(--amber-300) 100%)",
             transition: "width 200ms linear",
           }}
         />
       </div>
-      <style>{`
-        @keyframes coach-breathe { 0%,100% { transform: scale(0.97); } 50% { transform: scale(1.04); } }
-        @keyframes fact-fade { 0% { opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0.6; } }
-      `}</style>
     </div>
   );
 }

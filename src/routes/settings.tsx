@@ -116,6 +116,11 @@ function Settings() {
         </div>
       </section>
 
+      <Group title="Precision">
+        <LinkRow to="/settings/body-composition" label="Body composition" Icon={Activity} />
+        <LinkRow to="/settings/device" label="Connect device" Icon={Watch} />
+      </Group>
+
       <Group title="Recovery tracking method">
         <div className="px-4 py-3 flex gap-2">
           {(["device", "manual"] as const).map((m) => {
