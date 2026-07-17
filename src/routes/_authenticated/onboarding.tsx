@@ -786,6 +786,15 @@ function TargetStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>)
   const goal = draft.goal!;
   const direction = GOAL_DIRECTION[goal];
 
+  // Prefill target weight = current weight for recomp / athletic on first entry.
+  useEffect(() => {
+    if ((goal === "recomposition" || goal === "athletic_performance") &&
+        draft.targetWeightKg === "" && draft.weightKg !== "") {
+      patch({ targetWeightKg: draft.weightKg });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goal]);
+
   const setTargetWeightDisplay = (raw: string) => {
     const clean = raw.replace(/[^\d.]/g, "");
     if (clean === "") { patch({ targetWeightKg: "" }); return; }
@@ -809,35 +818,101 @@ function TargetStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>)
   if (direction === "lose" && bmi > 0 && bmi < 18.5) targetError = "Target weight is below a healthy BMI for your height.";
   if (direction === "gain" && bmi >= 35) targetError = "Target weight is above a safe range for your height.";
 
-  const sub =
+  const title =
     goal === "fat_loss" ? "How much would you like to lose, and how fast?" :
     goal === "muscle_gain" || goal === "strength" ? "How much would you like to gain, and how fast?" :
-    goal === "recomposition" ? "Where do you want to land?" :
-    "What's your target weight for competition?";
+    goal === "recomposition" ? "How aggressive should the recomp be?" :
+    "What's your competition weight?";
+  const sub =
+    goal === "recomposition" ? "Recomp works best in a small deficit while training hard." :
+    goal === "athletic_performance" ? "We match your calories to training load — no target pace needed." :
+    undefined;
+
+  const ratePaces = ratePacesFor(goal);
+  const selectedRate = ratePaces?.find((p) => p.id === draft.pace) ?? ratePaces?.[1] ?? null;
+  const selectedRecomp = PACES_RECOMP.find((p) => p.id === draft.pace) ?? PACES_RECOMP[1];
+
+  // Guardrail computations (rate-based goals only).
+  let weeksToGoal: number | null = null;
+  let floorWarn: string | null = null;
+  let longCutHint = false;
+  if (ratePaces && selectedRate && cw > 0 && tw > 0) {
+    const delta = Math.abs(tw - cw);
+    const weeklyKg = cw * (selectedRate.pct / 100);
+    if (weeklyKg > 0) weeksToGoal = Math.ceil(delta / weeklyKg);
+
+    // Mifflin-St Jeor (kg/cm/age), activity 1.55
+    const age = Number(draft.age) || 30;
+    const isMale = draft.sex === "male";
+    const bmr = isMale
+      ? 10 * cw + 6.25 * Number(draft.heightCm) - 5 * age + 5
+      : 10 * cw + 6.25 * Number(draft.heightCm) - 5 * age - 161;
+    const tdee = bmr * 1.55;
+    const weeklyKcal = weeklyKg * 7700;
+    const dailyDelta = weeklyKcal / 7;
+    const estCalories = direction === "lose" ? tdee - dailyDelta : tdee + dailyDelta;
+    const floor = isMale ? 1500 : 1200;
+    if (direction === "lose" && estCalories < floor) {
+      floorWarn = `This would put you below ${floor} kcal. We'll cap at the floor and the timeline extends.`;
+    }
+    if (goal === "fat_loss" && weeksToGoal !== null && weeksToGoal > 20) longCutHint = true;
+  }
+
+  const unit = draft.weightUnit;
+  const targetDisplayForCopy = draft.targetWeightKg
+    ? (unit === "kg" ? Number(Number(draft.targetWeightKg).toFixed(1)) : Number((Number(draft.targetWeightKg) / 0.4536).toFixed(1)))
+    : null;
 
   return (
     <>
-      <StepHeader title="Your target" sub={sub} />
-      <FieldLabel>Target weight</FieldLabel>
-      <InputBox>
-        <input
-          type="text" inputMode="decimal"
-          value={targetWeightDisplay}
-          onChange={(e) => setTargetWeightDisplay(e.target.value)}
-          placeholder="—"
-          className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
-        />
-        <span className="text-body-sm text-text-tertiary ml-2">{draft.weightUnit}</span>
-      </InputBox>
-      {targetError && (
-        <p className="mt-2 text-body-sm" style={{ color: "var(--danger)" }}>{targetError}</p>
+      <StepHeader title={title} sub={sub} />
+
+      {goal !== "athletic_performance" && (
+        <>
+          <FieldLabel>{goal === "recomposition" ? "Target weight (usually your current weight)" : "Target weight"}</FieldLabel>
+          <InputBox>
+            <input
+              type="text" inputMode="decimal"
+              value={targetWeightDisplay}
+              onChange={(e) => setTargetWeightDisplay(e.target.value)}
+              placeholder="—"
+              className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
+            />
+            <span className="text-body-sm text-text-tertiary ml-2">{unit}</span>
+          </InputBox>
+          {targetError && (
+            <p className="mt-2 text-body-sm" style={{ color: "var(--danger)" }}>{targetError}</p>
+          )}
+        </>
       )}
 
-      {direction !== "maintain" && (
+      {goal === "athletic_performance" && (
+        <>
+          <FieldLabel>Competition weight</FieldLabel>
+          <InputBox>
+            <input
+              type="text" inputMode="decimal"
+              value={targetWeightDisplay}
+              onChange={(e) => setTargetWeightDisplay(e.target.value)}
+              placeholder="—"
+              className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
+            />
+            <span className="text-body-sm text-text-tertiary ml-2">{unit}</span>
+          </InputBox>
+          <div className="mt-4" style={CARD_BASE}>
+            <p className="text-body font-medium text-text-primary">Maintain your competition weight</p>
+            <p className="text-body-sm text-text-tertiary mt-1 leading-snug">
+              We'll match your calories to your training load. Your targets will move up on heavy days and down on rest days.
+            </p>
+          </div>
+        </>
+      )}
+
+      {ratePaces && (
         <div className="mt-6">
           <FieldLabel>How fast?</FieldLabel>
           <div className="mt-2 space-y-2">
-            {PACES.map((p) => {
+            {ratePaces.map((p) => {
               const active = draft.pace === p.id;
               return (
                 <button
@@ -854,11 +929,54 @@ function TargetStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>)
               );
             })}
           </div>
+
+          {selectedRate && weeksToGoal !== null && targetDisplayForCopy !== null && (
+            <p className="mt-3 text-body-sm text-text-secondary">
+              ~{weeksToGoal} weeks to reach {targetDisplayForCopy}{unit}
+            </p>
+          )}
+          {floorWarn && (
+            <p className="mt-2 text-body-sm" style={{ color: "var(--warn)" }}>{floorWarn}</p>
+          )}
+          {longCutHint && (
+            <p className="mt-2 text-body-sm italic text-text-secondary">
+              Long cuts are hard to sustain. Consider a Steady pace with a diet break every 8–12 weeks.
+            </p>
+          )}
+        </div>
+      )}
+
+      {goal === "recomposition" && (
+        <div className="mt-6">
+          <FieldLabel>How aggressive?</FieldLabel>
+          <div className="mt-2 space-y-2">
+            {PACES_RECOMP.map((p) => {
+              const active = draft.pace === p.id;
+              return (
+                <button
+                  key={p.id} type="button" onClick={() => patch({ pace: p.id })}
+                  className="w-full text-left flex items-center justify-between"
+                  style={active ? PACE_ACTIVE : CARD_BASE}
+                >
+                  <div>
+                    <p className="text-body font-medium text-text-primary">{p.label}</p>
+                    <p className="text-body-sm text-text-tertiary mt-0.5">{p.blurb}</p>
+                  </div>
+                  {active && <Check size={18} style={{ color: "var(--brand-500)" }} />}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-body-sm text-text-secondary">
+            Track for 8+ weeks to see change — scale weight won't move much.
+          </p>
+          {selectedRecomp && null}
         </div>
       )}
     </>
   );
 }
+
 
 function ReviewStep({ draft }: { draft: Draft }) {
   const goalLabel = GOALS.find((g) => g.id === draft.goal)?.label ?? "—";
