@@ -47,17 +47,36 @@
   --color-text-quaternary: var(--text-quaternary);
   --color-text-accent: var(--text-accent);
 
-  /* Signature palette — amber (readiness, action) */
-  --color-amber-100: #FFF4E0;
-  --color-amber-300: #FFC97A;
-  --color-amber-500: #F5A524;
-  --color-amber-600: #D97D0E;
+  /* Signature palette — royal blue (readiness, action, glows) */
+  --color-brand-100: #E8EDFF;
+  --color-brand-300: #8B9FFF;
+  --color-brand-500: #4F6BF6;
+  --color-brand-600: #3D51D9;
+
+  /* Legacy amber-* Tailwind names remap to WARN semantic (yellow).
+     Keeps existing amber-500/300 classes rendering as intended warning colors. */
+  --color-amber-100: #FEF9C3;
+  --color-amber-300: #FDE047;
+  --color-amber-500: #EAB308;
+  --color-amber-600: #CA8A04;
+
+  /* Warn helpers */
+  --color-warn-300: #FDE047;
+  --color-warn-500: #EAB308;
 
   /* Secondary palette — teal (data-viz, macros) */
   --color-teal-300: #7DD3C0;
   --color-teal-500: #2DD4BF;
 
-  /* Legacy shims (kept so dashboard/coach etc keep rendering) */
+  /* Ring semantic (traffic-light) */
+  --color-ring-high: #22C55E;
+  --color-ring-high-soft: #86EFAC;
+  --color-ring-medium: #EAB308;
+  --color-ring-medium-soft: #FDE047;
+  --color-ring-low: #EF4444;
+  --color-ring-low-soft: #FCA5A5;
+
+  /* Legacy shims (kept so downstream keeps rendering — all repoint to brand) */
   --color-ai: var(--ai-signal);
   --color-ai-glow: var(--ai-signal-glow);
   --color-success: var(--success);
@@ -66,37 +85,47 @@
   --color-sleep: var(--sleep-blue);
   --color-hrv: var(--hrv-teal);
 
-  --font-display: "Space Grotesk", system-ui, sans-serif;
-  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-display: "Inter", -apple-system, system-ui, sans-serif;
+  --font-sans: "Inter", -apple-system, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-numeric: "JetBrains Mono", "SF Mono", "Roboto Mono", ui-monospace, monospace;
 }
 
 :root {
-  /* Surfaces — layered depth, never flat black */
-  --bg-0: #08090E;
-  --bg-1: #0F1116;
-  --bg-2: #161822;
-  --bg-3: #1E2130;
+  /* Surfaces — cool blue-grey charcoals, layered */
+  --bg-0: #101518;
+  --bg-1: #1A2126;
+  --bg-2: #232B31;
+  --bg-3: #2C363D;
 
   /* Text — luminous, not pure white */
   --text-primary: #F0F0F5;
   --text-secondary: #A8A8C8;
   --text-tertiary: #6B6D82;
   --text-quaternary: #3E4052;
-  --text-accent: #F5A524; /* amber-500 — re-pointed from violet */
+  --text-accent: #4F6BF6; /* brand-500 */
 
   /* Borders */
   --border-hairline: rgba(255, 255, 255, 0.06);
   --border-subtle:   rgba(255, 255, 255, 0.10);
   --border-strong:   rgba(255, 255, 255, 0.16);
 
-  /* Signature — amber */
-  --amber-100: #FFF4E0;
-  --amber-300: #FFC97A;
-  --amber-500: #F5A524;
-  --amber-600: #D97D0E;
-  --amber-glow: rgba(245, 165, 36, 0.15);
-  --amber-gradient: linear-gradient(135deg, #F5A524 0%, #FFC97A 100%);
+  /* Signature — royal blue */
+  --brand-100: #E8EDFF;
+  --brand-300: #8B9FFF;
+  --brand-500: #4F6BF6;
+  --brand-600: #3D51D9;
+  --brand-glow: rgba(79, 107, 246, 0.18);
+  --brand-gradient: linear-gradient(135deg, #4F6BF6 0%, #8B9FFF 100%);
+
+  /* Legacy amber-* CSS var shims — repoint to WARN semantic yellow
+     (matches Tailwind amber-* class remap above). */
+  --amber-100: #FEF9C3;
+  --amber-300: #FDE047;
+  --amber-500: #EAB308;
+  --amber-600: #CA8A04;
+  --amber-glow: rgba(234, 179, 8, 0.15);
+  --amber-gradient: linear-gradient(135deg, #4F6BF6 0%, #8B9FFF 100%); /* alias to brand-gradient */
 
   /* Secondary — teal */
   --teal-300: #7DD3C0;
@@ -104,20 +133,29 @@
   --teal-glow: rgba(45, 212, 191, 0.12);
 
   /* Semantic */
-  --success: #34D399;
-  --warning: #F5A524;
-  --danger:  #EF6B6B;
+  --success: #22C55E;
+  --warn:    #EAB308;
+  --warning: #EAB308;
+  --danger:  #EF4444;
+
+  /* Ring semantic (traffic-light) */
+  --ring-high:        #22C55E;
+  --ring-high-soft:   #86EFAC;
+  --ring-medium:      #EAB308;
+  --ring-medium-soft: #FDE047;
+  --ring-low:         #EF4444;
+  --ring-low-soft:    #FCA5A5;
 
   /* Data-viz roles */
-  --dv-readiness: #F5A524;
+  --dv-readiness: #4F6BF6;
   --dv-training:  #B8A5F0;
   --dv-macros:    #2DD4BF;
   --dv-weight:    #F0F0F5;
 
-  /* Legacy AI/violet shims — repointed to amber so existing components stop rendering violet */
-  --ai-signal: #F5A524;
-  --ai-signal-glow: rgba(245, 165, 36, 0.24);
-  --sleep-blue: #F5A524;
+  /* Legacy AI/accent shims — repointed to brand */
+  --ai-signal: #4F6BF6;
+  --ai-signal-glow: rgba(79, 107, 246, 0.24);
+  --sleep-blue: #4F6BF6;
   --hrv-teal: #2DD4BF;
 
   /* Spacing scale */
@@ -138,7 +176,8 @@
   /* Shadows */
   --shadow-inset-top:  inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --shadow-card:       0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 20px rgba(0, 0, 0, 0.2);
-  --shadow-glow-amber: 0 0 40px rgba(245, 165, 36, 0.18);
+  --shadow-glow-brand: 0 0 40px rgba(79, 107, 246, 0.18);
+  --shadow-glow-amber: 0 0 40px rgba(79, 107, 246, 0.18); /* alias */
   --shadow-glow-teal:  0 0 30px rgba(45, 212, 191, 0.12);
 
   /* Motion */
@@ -147,7 +186,7 @@
   --dur-fast: 150ms;
   --dur-med:  250ms;
   --dur-slow: 400ms;
-  --dur-hero: 1200ms;
+  --dur-hero: 1600ms;
 
   /* shadcn maps */
   --background: var(--bg-0);
@@ -156,8 +195,8 @@
   --card-foreground: var(--text-primary);
   --popover: var(--bg-3);
   --popover-foreground: var(--text-primary);
-  --primary: #F5A524;
-  --primary-foreground: #0A0B12;
+  --primary: #4F6BF6;
+  --primary-foreground: #FFFFFF;
   --secondary: var(--bg-3);
   --secondary-foreground: var(--text-primary);
   --muted: var(--bg-3);
@@ -168,7 +207,7 @@
   --destructive-foreground: #ffffff;
   --border: rgba(255, 255, 255, 0.06);
   --input: rgba(255, 255, 255, 0.08);
-  --ring: rgba(245, 165, 36, 0.45);
+  --ring: rgba(79, 107, 246, 0.45);
   --radius: 14px;
 }
 
@@ -181,9 +220,9 @@
   }
   html, body {
     background:
-      radial-gradient(ellipse 80% 50% at 50% 0%, rgba(245, 165, 36, 0.04), transparent 60%),
+      radial-gradient(ellipse 80% 50% at 50% 0%, rgba(79, 107, 246, 0.05), transparent 60%),
       radial-gradient(ellipse 60% 40% at 10% 100%, rgba(45, 212, 191, 0.03), transparent 60%),
-      linear-gradient(180deg, #0A0B12 0%, #08090E 100%);
+      linear-gradient(180deg, #283339 0%, #101518 100%);
     background-attachment: fixed;
     background-color: var(--bg-0);
   }
@@ -192,17 +231,22 @@
   }
   * { border-color: var(--color-border); }
   h1, h2, h3, h4 {
-    font-family: var(--font-display);
+    font-family: var(--font-sans);
     letter-spacing: -0.02em;
     font-weight: 500;
   }
-  .tabular, [data-metric] { font-variant-numeric: tabular-nums; }
+  .tabular, [data-metric] {
+    font-family: var(--font-numeric);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
   ::-webkit-scrollbar { width: 0; height: 0; }
   input, textarea, select { font-size: 16px; }
 }
 
 /* Typography utilities */
 @utility text-display {
+  font-family: var(--font-sans);
   font-size: 32px;
   font-weight: 200;
   letter-spacing: 0.5em;
@@ -210,46 +254,60 @@
   line-height: 1;
 }
 @utility text-hero {
+  font-family: var(--font-sans);
   font-size: 34px;
   font-weight: 300;
   letter-spacing: -0.02em;
   line-height: 1.1;
 }
 @utility text-title {
+  font-family: var(--font-sans);
   font-size: 22px;
   font-weight: 400;
   letter-spacing: -0.01em;
   line-height: 1.25;
 }
 @utility text-body {
+  font-family: var(--font-sans);
   font-size: 15px;
   font-weight: 400;
   line-height: 1.55;
 }
 @utility text-body-sm {
+  font-family: var(--font-sans);
   font-size: 13px;
   font-weight: 400;
   line-height: 1.5;
 }
 @utility text-label {
+  font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 @utility text-numeric {
+  font-family: var(--font-numeric);
   font-size: 48px;
   font-weight: 300;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
   line-height: 1;
 }
 @utility text-numeric-lg {
+  font-family: var(--font-numeric);
   font-size: 72px;
   font-weight: 200;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
   line-height: 1;
+}
+@utility font-numeric {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
 }
 
 /* Safe-area helpers */
@@ -259,10 +317,10 @@
 @utility pr-safe { padding-right: env(safe-area-inset-right, 0px); }
 
 @utility gradient-brand {
-  background-image: var(--amber-gradient);
+  background-image: var(--brand-gradient);
 }
 @utility gradient-text {
-  background-image: linear-gradient(135deg, #F5A524 0%, #FFC97A 100%);
+  background-image: var(--brand-gradient);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -294,12 +352,12 @@
   50% { transform: scale(0.97); opacity: 0.92; }
 }
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 20px rgba(245, 165, 36, 0.22); }
-  50% { box-shadow: 0 0 40px rgba(245, 165, 36, 0.5); }
+  0%, 100% { box-shadow: 0 0 20px rgba(79, 107, 246, 0.22); }
+  50% { box-shadow: 0 0 40px rgba(79, 107, 246, 0.5); }
 }
 @keyframes pulse-ring {
-  0%, 100% { filter: drop-shadow(0 0 4px rgba(245, 165, 36, 0.22)); }
-  50% { filter: drop-shadow(0 0 12px rgba(245, 165, 36, 0.5)); }
+  0%, 100% { filter: drop-shadow(0 0 4px rgba(79, 107, 246, 0.22)); }
+  50% { filter: drop-shadow(0 0 12px rgba(79, 107, 246, 0.5)); }
 }
 .animate-pulse-ring { animation: pulse-ring 3s ease-in-out infinite; }
 @keyframes shimmer {
@@ -325,8 +383,8 @@
   to { transform: rotate(360deg); }
 }
 @keyframes ambient-pulse {
-  0%, 100% { opacity: 0.92; filter: drop-shadow(0 0 16px rgba(245, 165, 36, 0.28)); }
-  50% { opacity: 1; filter: drop-shadow(0 0 38px rgba(245, 165, 36, 0.55)); }
+  0%, 100% { opacity: 0.92; filter: drop-shadow(0 0 16px rgba(79, 107, 246, 0.28)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 38px rgba(79, 107, 246, 0.55)); }
 }
 @keyframes ambient-arc-breathe {
   0%, 100% { stroke-dasharray: 330 659; }
@@ -348,6 +406,16 @@
 }
 .score-ring-breathe { animation: score-ring-breathe 3.6s ease-in-out infinite; transform-origin: center; }
 
+@keyframes ring-count-up {
+  from { opacity: 0.7; }
+  to { opacity: 1; }
+}
+
+@keyframes ring-breathe {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ambient-ring, .ambient-ring-rotate, .ambient-ring-arc,
   .score-halo-breathe, .score-ring-breathe { animation: none; }
@@ -364,5 +432,5 @@
 .legal-prose li { margin: 0.35rem 0; }
 .legal-prose strong { color: var(--text-primary); font-weight: 600; }
 .legal-prose em { font-style: italic; }
-.legal-prose a { color: var(--amber-500); text-decoration: underline; }
+.legal-prose a { color: var(--brand-500); text-decoration: underline; }
 .legal-prose hr { border-color: var(--border); margin: 1.5rem 0; }

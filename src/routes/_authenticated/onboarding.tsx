@@ -305,7 +305,7 @@ function ProfileSetup() {
           className="h-full transition-all"
           style={{
             width: `${(displayStep / TOTAL) * 100}%`,
-            background: "var(--amber-gradient)",
+            background: "var(--brand-gradient)",
             transitionDuration: "var(--dur-med)",
           }}
         />
@@ -361,7 +361,7 @@ function ProfileSetup() {
               className="block w-full text-body font-medium disabled:opacity-40"
               style={{
                 height: 52, borderRadius: "var(--radius-md)",
-                background: "var(--amber-gradient)",
+                background: "var(--brand-gradient)",
                 color: "#0A0B12",
                 boxShadow: "var(--shadow-inset-top)",
               }}
@@ -375,7 +375,7 @@ function ProfileSetup() {
               className="block w-full text-body font-medium disabled:opacity-40"
               style={{
                 height: 52, borderRadius: "var(--radius-md)",
-                background: "var(--amber-gradient)",
+                background: "var(--brand-gradient)",
                 color: "#0A0B12",
                 boxShadow: "var(--shadow-inset-top)",
               }}
@@ -408,16 +408,16 @@ const CARD_BASE: React.CSSProperties = {
 
 const CARD_ACTIVE: React.CSSProperties = {
   ...CARD_BASE,
-  borderColor: "var(--amber-500)",
+  borderColor: "var(--brand-500)",
   background: "linear-gradient(135deg, rgba(245,165,36,0.04), rgba(255,201,122,0.02))",
-  boxShadow: "0 0 0 1px var(--amber-glow)",
+  boxShadow: "0 0 0 1px var(--brand-glow)",
 };
 
 const PACE_ACTIVE: React.CSSProperties = {
   ...CARD_BASE,
-  borderColor: "var(--amber-500)",
+  borderColor: "var(--brand-500)",
   background: "linear-gradient(135deg, rgba(245,165,36,0.10), rgba(255,201,122,0.04))",
-  boxShadow: "0 0 0 1px var(--amber-glow)",
+  boxShadow: "0 0 0 1px var(--brand-glow)",
 };
 
 function AboutYouStep({
@@ -465,7 +465,7 @@ function AboutYouStep({
                 style={{
                   height: 44,
                   borderRadius: "var(--radius-pill)",
-                  background: active ? "var(--amber-gradient)" : "var(--bg-1)",
+                  background: active ? "var(--brand-gradient)" : "var(--bg-1)",
                   color: active ? "#0A0B12" : "var(--text-secondary)",
                   border: active ? "1px solid transparent" : "1px solid var(--border-subtle)",
                 }}
@@ -500,7 +500,7 @@ function ExperienceStep({ name, value, onChange }: { name: string; value: Experi
                   <p className="text-body font-medium text-text-primary">{label}</p>
                   <p className="text-body-sm text-text-tertiary mt-1">{desc}</p>
                 </div>
-                {active && <Check size={18} style={{ color: "var(--amber-500)" }} className="shrink-0 mt-1" />}
+                {active && <Check size={18} style={{ color: "var(--brand-500)" }} className="shrink-0 mt-1" />}
               </div>
             </button>
           );
@@ -529,7 +529,7 @@ function GoalStep({ name, value, onChange }: { name: string; value: Goal | null;
                   <p className="text-body font-medium text-text-primary">{label}</p>
                   <p className="text-body-sm text-text-tertiary mt-1">{desc}</p>
                 </div>
-                {active && <Check size={18} style={{ color: "var(--amber-500)" }} className="shrink-0 mt-1" />}
+                {active && <Check size={18} style={{ color: "var(--brand-500)" }} className="shrink-0 mt-1" />}
               </div>
             </button>
           );
@@ -562,7 +562,7 @@ function DaysStep({ value, onChange }: { value: string[]; onChange: (days: strin
               style={{
                 width: 48, height: 48,
                 borderRadius: "var(--radius-pill)",
-                background: active ? "var(--amber-gradient)" : "var(--bg-1)",
+                background: active ? "var(--brand-gradient)" : "var(--bg-1)",
                 color: active ? "#0A0B12" : "var(--text-secondary)",
                 border: active ? "1px solid transparent" : "1px solid var(--border-subtle)",
                 margin: "0 auto",
@@ -574,7 +574,7 @@ function DaysStep({ value, onChange }: { value: string[]; onChange: (days: strin
         })}
       </div>
       <div className="text-center mt-8">
-        <span className="text-title text-text-primary" style={{ fontVariantNumeric: "tabular-nums", color: "var(--amber-500)" }}>{count}</span>
+        <span className="text-title text-text-primary" style={{ fontVariantNumeric: "tabular-nums", color: "var(--brand-500)" }}>{count}</span>
         <span className="ml-2 text-body text-text-secondary">{count === 1 ? "day" : "days"} / week</span>
       </div>
       <p className="mt-4 text-center text-body-sm text-text-tertiary">Pick at least one day to continue.</p>
@@ -600,7 +600,7 @@ function EquipmentStep({ value, onChange }: { value: EquipmentUi | null; onChang
                   <p className="text-body font-medium text-text-primary">{label}</p>
                   <p className="text-body-sm text-text-tertiary mt-1">{desc}</p>
                 </div>
-                {active && <Check size={18} style={{ color: "var(--amber-500)" }} className="shrink-0 mt-1" />}
+                {active && <Check size={18} style={{ color: "var(--brand-500)" }} className="shrink-0 mt-1" />}
               </div>
             </button>
           );
@@ -809,7 +809,7 @@ function TargetStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>)
                     <p className="text-body font-medium text-text-primary">{p.label}</p>
                     <p className="text-body-sm text-text-tertiary mt-0.5">{p.blurb}</p>
                   </div>
-                  {active && <Check size={18} style={{ color: "var(--amber-500)" }} />}
+                  {active && <Check size={18} style={{ color: "var(--brand-500)" }} />}
                 </button>
               );
             })}
@@ -898,7 +898,7 @@ function SegmentedPill({ options, value, onChange }: { options: { id: string; la
             style={{
               padding: "6px 14px",
               borderRadius: "var(--radius-pill)",
-              background: active ? "var(--amber-gradient)" : "transparent",
+              background: active ? "var(--brand-gradient)" : "transparent",
               color: active ? "#0A0B12" : "var(--text-tertiary)",
               transitionDuration: "var(--dur-fast)",
             }}
@@ -944,8 +944,8 @@ function BuildingPlanScreen() {
       <div className="flex items-center justify-center rounded-full"
         style={{
           width: 96, height: 96,
-          background: "var(--amber-gradient)",
-          boxShadow: "var(--shadow-glow-amber)",
+          background: "var(--brand-gradient)",
+          boxShadow: "var(--shadow-glow-brand)",
           animation: "breathe 2.4s ease-in-out infinite",
         }}>
         <Sparkles size={28} color="#0A0B12" strokeWidth={2.5} />
@@ -961,7 +961,7 @@ function BuildingPlanScreen() {
           className="h-full rounded-full"
           style={{
             width: `${progress}%`,
-            background: "var(--amber-gradient)",
+            background: "var(--brand-gradient)",
             transition: "width 200ms linear",
           }}
         />

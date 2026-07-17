@@ -1,92 +1,170 @@
-## Part 1 — Split Step 6 into three screens (6 → 8 steps)
+# APEX Royal Blue + WHOOP-Grade Rebuild — Single Commit
 
-**File:** `src/routes/_authenticated/onboarding.tsx`
+Six coordinated changes across tokens, auth, onboarding, legal routing, settings, and app-wide color propagation. No edge functions, no migrations, no schema changes. Every profile column currently written continues to be written.
 
-1. Change `const TOTAL = 6` to `const TOTAL = 8`. Progress bar denominator and label ("Step X of 8") update automatically since both derive from `TOTAL`.
-2. Retire the existing compound `FuelPlanStep` component. Replace the `step === 6` branch with three new single-focus step components rendered at `step === 6`, `7`, and `8`. Keep `AboutYouStep`, `ExperienceStep`, `GoalStep`, `DaysStep`, `EquipmentStep` unchanged.
-3. New step components (reusing existing `StepHeader`, `FieldLabel`, `InputBox`, unit-toggle, and card primitives already in the file):
+---
 
-   - **Step 6 — BodyBasicsStep** (`"Your body basics"` / `"We'll refine this from your weekly check-ins."`)
-     - Weight field (kg/lb unit toggle, numeric input, writes `weightKg` canonical kg).
-     - Height field (cm/ft-in unit toggle, ft+in dual input or cm single input, writes `heightCm`).
-     - Nothing else.
+## Part 1 — Design tokens (`src/styles.css`)
 
-   - **Step 7 — EatingPatternStep** (`"How do you eat, {name}?"` / `"So we can time your meals right."`)
-     - 2×2 grid of the existing `EATING_PATTERNS` cards, same card style as `GoalStep`.
-     - Helper below grid: `"You can change this any time in Settings."`
-     - Nothing else.
+Rewrite `:root` + `@theme inline`. Keep every existing token NAME (so downstream keeps compiling); swap VALUES.
 
-   - **Step 8 — TargetStep** (`"Your target"` + goal-specific sub-copy)
-     - Sub varies by `draft.goal`:
-       - `fat_loss` → `"How much would you like to lose, and how fast?"`
-       - `muscle_gain` / `strength` → `"How much would you like to gain, and how fast?"`
-       - `recomposition` → `"Where do you want to land?"`
-       - `athletic_performance` → `"What's your target weight for competition?"`
-     - Target-weight numeric input; unit matches Step 6's `weightUnit` (read-only display, no toggle here).
-     - `"How fast?"` label + three vertical pill buttons from existing `PACES` array (Steady / Standard / Aggressive with rate + descriptor).
-     - Writes `targetWeightKg` and `pace`.
+**Surfaces** (cool blue-grey charcoals):
+- `--bg-0 #101518`, `--bg-1 #1A2126`, `--bg-2 #232B31`, `--bg-3 #2C363D`
 
-4. Split the `canContinue` case-6 logic into three cases:
-   - `case 6`: `weightValid && heightValid`.
-   - `case 7`: `!!draft.eatingPattern`.
-   - `case 8`: target-weight + goal-direction + BMI safety checks currently living in case 6.
+**Text**: primary `#F0F0F5`, secondary `#A8A8C8`, tertiary `#6B6D82`, quaternary `#3E4052`
 
-5. `next()` now bumps to `TOTAL + 1 = 9` (Review). `isReview = step > TOTAL`. `displayStep` and progress fill (`displayStep / TOTAL * 100 = 12.5% increments`) both update automatically.
+**Borders**: hairline `rgba(255,255,255,0.06)`, subtle `.10`, strong `.16`
 
-6. Review copy: change `"All set"` → `"Ready, {name}?"` in `ReviewStep`, keep button `"Build my plan"`. Submission payload, engine columns, and `logBodyMeasurement` call are unchanged — every field currently written still writes.
+**Signature — royal blue**:
+- `--brand-100 #E8EDFF`, `--brand-300 #8B9FFF`, `--brand-500 #4F6BF6`, `--brand-600 #3D51D9`
+- `--brand-glow rgba(79,107,246,0.18)`
+- `--brand-gradient linear-gradient(135deg,#4F6BF6 0%,#8B9FFF 100%)`
 
-7. Reset-mode: `minStep = isReset ? 3 : 1` unchanged. Reset users still walk from Step 3 through the new Step 8 + Review.
+**Teal secondary**: `--teal-300 #7DD3C0`, `--teal-500 #2DD4BF`, `--teal-glow rgba(45,212,191,0.12)`
 
-**Viewport check:** With one decision per screen (Body basics = 2 fields; Eating pattern = 4 cards; Target = 1 field + 3 pills), every step fits iPhone SE (667pt) between the sticky header and the fixed footer button. No scroll.
+**Ring semantics** (traffic light, WHOOP-pattern — never deviate):
+- high `#22C55E` / soft `#86EFAC`
+- medium `#EAB308` / soft `#FDE047` (deeper mustard, not raw yellow)
+- low `#EF4444` / soft `#FCA5A5`
 
-## Part 2 — Amber gradient token, applied globally
+**Semantic UI**: `--success #22C55E`, `--warn #EAB308`, `--danger #EF4444`
 
-**File:** `src/styles.css`
+**Legacy shim repoint** (kill all amber/violet residue): `--ai-signal`, `--ai-signal-glow`, `--sleep-blue`, `--primary`, `--text-accent`, `--amber-*`, `--amber-gradient` → brand tokens. `--hrv-teal` → teal-500. `--gradient-brand` and `--gradient-text` utilities → `var(--brand-gradient)`. Add `--shadow-glow-brand`.
 
-1. Add token in `:root`:
-   ```css
-   --amber-gradient: linear-gradient(135deg, #F5A524 0%, #FFC97A 100%);
-   ```
-2. Update `@utility gradient-brand` body to reference `var(--amber-gradient)` so any consumer of `gradient-brand` inherits the fix.
+**Typography — two-font system**:
+- `--font-sans: 'Inter', -apple-system, system-ui, sans-serif`
+- `--font-numeric: 'JetBrains Mono', 'SF Mono', 'Roboto Mono', ui-monospace, monospace`
+- Load JetBrains Mono weights 200/300/400/500 via `<link>` in `src/routes/__root.tsx` head (project has no root `index.html`; TanStack Start head owns links per the tailwind4 remote-imports rules).
+- Type scale (CSS custom props + matching `@utility` classes): `text-display`, `text-hero`, `text-title`, `text-body`, `text-body-sm`, `text-label` on `--font-sans`; `text-numeric` (48/300/-.02em) and `text-numeric-lg` (72/200) on `--font-numeric` with `font-feature-settings: "tnum"; font-variant-numeric: tabular-nums`.
 
-**Retrofits (all in `src/routes/_authenticated/onboarding.tsx` unless noted):**
+**Spacing** `--space-1..16`, **radii** sm/md/lg/xl/pill, **shadows** inset-top/card/glow-brand/glow-teal, **motion** ease-standard/decel + dur-fast/med/slow/hero (1600ms).
 
-- **Continue and Build my plan buttons** — replace inline `linear-gradient(...)` with `var(--amber-gradient)`. Text color stays `#0A0B12`, weight 500. (Already correct dark text; just swap the background token.)
-- **Progress bar fill** — swap the inline `linear-gradient(90deg, ...)` for `var(--amber-gradient)` (135deg is fine on a 4px-tall bar; keeps one token).
-- **Weight kg/lb and height cm/ft-in segmented toggles** — selected pill background becomes `var(--amber-gradient)` with text `#0A0B12` weight 500. Unselected pill unchanged (bg-2 / text-secondary).
-- **Day-of-week selected circles** (`DaysStep`) — selected circle fill becomes `var(--amber-gradient)`, text `#0A0B12`.
-- **Pace pill selected state** (new `TargetStep`) — gradient inner wash + amber-500 hairline border, not solid fill. Pattern:
-  ```
-  background: linear-gradient(135deg, rgba(245,165,36,0.10), rgba(255,201,122,0.04));
-  border: 1px solid var(--amber-500);
-  ```
-- **Selected card border-glow** — `CARD_ACTIVE` keeps its `1px amber-500` border but adds an inner wash:
-  ```
-  background: linear-gradient(135deg, rgba(245,165,36,0.04), rgba(255,201,122,0.02));
-  ```
-  Applies automatically to Experience, Goal, Equipment, Eating-pattern cards since they all consume `CARD_ACTIVE`.
+**Ambient background** on `html, body, #root`:
+```
+radial-gradient(ellipse 80% 50% at 50% 0%, rgba(79,107,246,0.05), transparent 60%),
+radial-gradient(ellipse 60% 40% at 10% 100%, rgba(45,212,191,0.03), transparent 60%),
+linear-gradient(180deg, #283339 0%, #101518 100%);
+background-attachment: fixed;
+```
 
-**Auth screen ring arc** (`src/routes/index.tsx`) and **ambient body gradient** — verify the arc references the same gradient stops; do not touch the ambient body radial gradients (per Part 3 instructions).
+Preserve animations, `legal-prose`, safe-area utilities.
 
-**Left flat (reserved for < 20×20 accents):** ring endpoint dot, small dividers, PR badges (future), semantic warning inline text/icons.
+---
 
-## Part 3 — Explicitly untouched
+## Part 2 — Ring color helper (`src/lib/ringColor.ts`, new)
 
-- `src/styles.css` `html, body` background — the amber-top / teal-bottom-left radial stack stays exactly as-is.
-- Every edge function, engine, migration, and profile column written on submit.
-- `logBodyMeasurement` call and its arguments.
-- Reset-mode `minStep = 3` behaviour.
+```ts
+export function ringGradient(score: number | null): string { … }
+export function ringGlow(score: number | null): string { … }
+```
+Thresholds: ≥67 green, 34–66 yellow, <34 red, null grey. Every ring in the app consumes these — no hardcoded ring color anywhere.
 
-## Part 4 — Verification checklist (post-build)
+---
 
-1. iPhone SE 667pt height: steps 1–8 + Review each fit without vertical scroll.
-2. Header shows `"Step 1 of 8"` … `"Step 8 of 8"`, `"Review"`.
-3. Progress bar fills in 12.5% increments and uses `--amber-gradient`.
-4. kg/lb and cm/ft-in toggles: selected pill visibly gradient (top-left brighter, bottom-right warmer), text near-black weight 500.
-5. Continue and Build my plan buttons: gradient background, near-black text.
-6. Selected goal/experience/equipment/eating cards show subtle inner amber wash + amber hairline border; unselected cards unchanged.
-7. Selected pace pill uses gradient wash + amber hairline border (not solid fill).
-8. Ambient body background unchanged.
-9. On submit, `profiles` row still contains `measurement_weight_kg`, `measurement_height_cm`, `target_weight_kg`, `target_rate_pct`, `eating_pattern`, `training_day_codes`, `equipment_access`, `goal`, `experience_level`, `biological_sex`, `age`, `name`, `input_path_preference`, `body_data_type`, `profile_completed_at`, `plan_unlock_date`, `timezone`.
+## Part 3 — Auth screen (`src/routes/index.tsx`)
 
-No engine, migration, or edge-function changes.
+Full rebuild against tokens.
+
+- Root: viewport-centered column, max-w 380px, `animate-fade-up` (dur-slow / ease-decel).
+- Wordmark **APEX** in `text-display`. Sub `ADAPTIVE PERFORMANCE COACH` (`text-label text-tertiary`, mt space-2). Remove "SHIELD + INTELLIGENCE" and "Powered by Anthropic".
+- **DemoRing** inline SVG 200px, track stroke 4 in `--border-hairline`, progress arc 0→74% with `<linearGradient>` derived from `ringGradient(74)` (green), `stroke-linecap="round"`, filter `ringGlow(74)`. Center `74` in `text-numeric-lg` (visibly monospace, distinct from body). 6px endpoint dot pulsing opacity 0.7↔1.0 over 2.4s.
+- **Motion**: mount count-up 0→74 over 1600ms `cubic-bezier(0.16,1,0.3,1)` synced with `stroke-dashoffset`. After settle, arc opacity 0.85↔1.0 and glow blur 30↔46px on 4s sine cycle. Dot keeps 2.4s pulse.
+- Tagline: "Your body speaks." / "We listen." (`text-body text-secondary`, line-height 1.7, mt space-10).
+- **Buttons** (stack, gap space-3):
+  - Google: bg `#FFFFFF`, text `#0A0B12`, height **exactly 52px**, radius-md, icon + gap space-3, `shadow-inset-top` with `rgba(255,255,255,0.4)`. Press → `#F3F3F5`.
+  - Apple: `bg-2`, `border-subtle`, `text-primary`, 52px, radius-md, shadow-inset-top. Press → `bg-3`.
+  - Email: text button "Continue with email" (`text-body-sm text-tertiary`, mt space-4). Tap → inline expand (dur-med ease-decel) to input (`bg-2`, `border-subtle`, h-48, radius-md) + "Send sign-in link" (h-48, `--brand-gradient`, white weight 500, press `--brand-600`). Uses existing `supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } })`. Success → confirmation + "Send another link" reset. Error toast preserved.
+- **Legal footer**: "By continuing you agree to our Terms and Privacy Policy." explicit `text-body-sm text-quaternary` (fixes ~15px bug). "Terms" → `/terms`, "Privacy Policy" → `/privacy` (plain `<Link>`, underlined, `text-tertiary`). Bottom padding space-6.
+- Session-check redirect and OAuth `signInWithOAuth` handlers preserved unchanged.
+
+---
+
+## Part 4 — Onboarding rebuild (`src/routes/_authenticated/onboarding.tsx`)
+
+9 → 8 steps. Every step fits iPhone SE (667pt) without scroll. `TOTAL = 8`; progress bar 12.5% increments using `--brand-gradient`; header "STEP N OF 8" with N in `--font-numeric`.
+
+**Step 1 — About you**: name (label above field), age (numeric + "yrs"), sex (M/F pills, h-44 radius-pill). Helper: "For accurate calorie targets."
+
+**Step 2 — "How long have you been training, {name}?"** / "Shapes how we talk to you." Three cards Beginner / Intermediate / Advanced with new copy. Selected: 1px `--brand-500` + `--brand-glow`.
+
+**Step 3 — "What's your goal, {name}?"** / "We'll tune training and nutrition around this." Five cards (existing `GOALS`), sentence-cased.
+
+**Step 4 — Training days**: 7 day-circles 48px radius-pill (M T W T F S S). Unselected `bg-1` + `border-subtle` + `text-secondary`; selected `--brand-gradient` fill + white weight 500. Below: "{n} days / week" in `text-title` with n in numeric font. Helper: "Pick at least one day to continue." Writes `training_day_codes` + derived `training_days_per_week`.
+
+**Step 5 — Setup** (3 cards only, delete Home gym + Limited):
+- Commercial gym → `commercial_gym`
+- Dumbbells only → `home_gym_db_only`
+- Bodyweight only → `bodyweight_only`
+
+**Step 6 — Body basics**: weight + kg/lb segmented pill (selected `--brand-gradient`, white weight 500), lb→kg × 0.4536. Height: cm → single input; in → **two inputs ft + in**, `cm = ft*30.48 + in*2.54` (fixes existing bug where "5 in" stored 12.7 cm). Nothing else on screen.
+
+**Step 7 — "How do you eat, {name}?"** / "So we can time your meals right." 2×2 grid of `EATING_PATTERNS`. Selected: brand-highlighted card. Helper: "You can change this any time in Settings." Writes `eating_pattern`.
+
+**Step 8 — Target**: title varies by goal (fat_loss / muscle_gain|strength / recomposition / athletic_performance sub-copy). Target weight numeric, unit inherited from Step 6. "How fast?" label + **three vertical pill buttons** (delete slider): Steady 0.15%/week, Standard 0.25%/week, Aggressive 0.5%/week. Sign flipped by goal (fat_loss negative; muscle_gain/strength positive; recomposition/athletic null-safe → Standard default persisted on submit even if untapped, so engines never see null).
+
+**Review — "Ready, {name}?"** — table of every captured field. Button "Build my plan" full-width h-52 radius-md `--brand-gradient` white weight 500 shadow-inset-top.
+
+**Removed from onboarding but written to keep engines happy**: `body_fat`, DEXA lean mass, tape → null. `coaching_time` default `'08:00'` if unset. `timezone` via existing `getBrowserTimezone()`.
+
+**Copy pass**: interpolate name only in Steps 2, 3, 7. Sentence case, no emoji/markdown. Replace robotic strings per spec.
+
+**Reset mode**: `minStep = isReset ? 3 : 1` preserved. `canContinue` split per-step.
+
+---
+
+## Part 5 — Legal routing + auth gate
+
+**5a. `src/routes/_authenticated/route.tsx`** — extend `beforeLoad`: if `profile_completed_at` null AND `disclaimer_accepted_at` null → `/disclaimer`; else if `profile_completed_at` null → `/onboarding` (exempting `/onboarding` itself to avoid loop). Current gate already close; adjust exempt list.
+
+**5b. Legal pages** (`privacy.tsx`, `terms.tsx`, `health-data.tsx` — shared `LegalShell`): back chevron becomes `router.history.length > 1 ? router.history.back() : navigate({ to: fallback })`. Fallback: disclaimer_accepted_at null → `/disclaimer`; else authenticated → `/settings`; else → `/`.
+
+**5c. Auth-screen legal links**: plain `<Link>`; browser history returns to `/` naturally.
+
+---
+
+## Part 6 — Settings (`src/routes/settings.tsx`)
+
+New **"Precision"** group above "Recovery tracking method":
+- **Body composition** → existing `/settings/body-composition` (already scaffolded). Header copy: "Optional — add these to sharpen your calorie targets. Otherwise we adapt from your weekly weight trend." Reuses body-fat slider + stub upload + optional tape.
+- **Connect device** → existing `/settings/device`. Copy: "Coming with the iOS app. For now, use the daily check-in to log recovery." No fake vendor buttons.
+
+All other sections preserved.
+
+---
+
+## Part 7 — App-wide color propagation (token-level only)
+
+Kill the visible seam. NO structural changes — color only:
+- `src/components/dashboard/tokens.ts` — every hardcoded violet/`#8B7FF7`/purple → `var(--brand-500)` / `var(--brand-gradient)` / `var(--brand-glow)`.
+- `src/routes/workouts.tsx`, `nutrition.tsx`, `coach.tsx` — same sweep.
+- Any `src/components/dashboard/*` with hardcoded violet — same.
+- Every ring render (dashboard `HeroRing`, previews) consumes `ringGradient(score)` + `ringGlow(score)`. No hardcoded ring color.
+
+Structural work on those routes (Home density, PR celebration, Weekly Review, Fuel logging) is deferred.
+
+---
+
+## Out of scope
+- Edge functions, migrations, `.env`, `supabase/*`
+- New npm dependencies (JetBrains Mono via CDN `<link>`, not a package)
+- Structural component rework beyond color on dashboard/workouts/nutrition/coach
+
+---
+
+## Verification checklist
+
+1. `rg "amber|#F5A524|#FFC97A|violet|purple|#8B7FF7" src/` → no hits outside comments.
+2. JetBrains Mono `<link>` present in `__root.tsx` head; auth "74" visibly monospace.
+3. Fresh signup → 8 steps → all 13 profile columns non-null.
+4. 5 ft 10 in → `measurement_height_cm ≈ 177.8`.
+5. `equipment_access ∈ {commercial_gym, home_gym_db_only, bodyweight_only}`; `generate-plan` accepts.
+6. `target_rate_pct` never null; sign matches goal.
+7. Legal back nav: disclaimer → Privacy → back → disclaimer. Auth (logged out) → Terms → back → `/`. Settings → Privacy → back → Settings.
+8. `/dashboard` mid-onboarding redirects to `/onboarding`.
+9. Auth ring green (74≥67), royal-blue buttons/glows, count-up on mount, breathing after.
+10. Dashboard HeroRing adapts: seed readiness 25 red, 55 yellow, 82 green.
+11. Ambient bg cool charcoal `#283339 → #101518` with royal-blue top tint, teal bottom-left.
+12. Legal footer text 13px; Google/Apple buttons exactly 52px.
+13. Every onboarding step fits iPhone SE without scroll.
+14. Every visible number uses `--font-numeric` (scores, weight, macros, PRs, timers, %s, step counters).
+15. `bun run test:visual` and `bun run lint:ui` pass or baselines regenerated intentionally.

@@ -1,46 +1,49 @@
-// Midnight Bevel — premium APEX palette.
-// Single violet accent (#8B7FF7) for AI / interactive; teal reserved for
-// positive metric movement only. No neon, no signal cyan, no electric green.
+// APEX design tokens — royal-blue signature, teal secondary.
+// Ring semantics follow traffic-light (green/yellow/red) via
+// src/lib/ringColor.ts — never hardcode ring color at call sites.
 
 export const T = {
-  // Surfaces
-  bg: "#0A0E1A",
-  surface: "#10162A",
-  surface2: "#161B2E",
+  // Surfaces (cool blue-grey charcoals)
+  bg: "#101518",
+  surface: "#1A2126",
+  surface2: "#232B31",
   border: "rgba(255,255,255,0.06)",
   borderStrong: "rgba(255,255,255,0.10)",
 
-  // Single accent
-  primary: "#8B7FF7", // violet — AI / decisions / interactive
-  green: "#5FE3C4",   // teal — positive movement
-  amber: "#F5B544",
-  red: "#F2727A",
-  victory: "#5FE3C4",
+  // Signature accent — royal blue (AI / decisions / interactive)
+  primary: "#4F6BF6",
+  primaryGlow: "rgba(79,107,246,0.24)",
+
+  // Semantic (traffic-light)
+  green: "#22C55E",
+  amber: "#EAB308", // repurposed: WARN yellow (not the old orange amber)
+  red: "#EF4444",
+  victory: "#22C55E",
 
   // Typography tiers
-  text1: "#F5F5F7",
-  text2: "#A8ADBD",
-  text3: "#5E6478",
-  label: "#3E4256",
+  text1: "#F0F0F5",
+  text2: "#A8A8C8",
+  text3: "#6B6D82",
+  label: "#3E4052",
   disabled: "#2A2E40",
 
-  // Ring colors — quiet, monochrome-leaning
-  ringRecovery: "#5FE3C4",
-  ringFuel: "#8B7FF7",
-  ringEffort: "#A8ADBD",
+  // Ring colors (metric-neutral defaults; use ringGradient() for readiness)
+  ringRecovery: "#22C55E",
+  ringFuel: "#4F6BF6",
+  ringEffort: "#A8A8C8",
   ringTrack: "rgba(255,255,255,0.05)",
 
   // State zones
-  zoneRecover: "#F2727A",
-  zoneSteady: "#F5B544",
-  zoneBuild: "#5FE3C4",
-  zonePeak: "#8B7FF7",
+  zoneRecover: "#EF4444",
+  zoneSteady: "#EAB308",
+  zoneBuild: "#22C55E",
+  zonePeak: "#4F6BF6",
 
-  // Subtle spectrum (used sparingly, e.g. weight delta gradient)
+  // Spectrum (weight-delta etc — use sparingly)
   spectrum:
-    "linear-gradient(90deg,#F2727A 0%,#F5B544 33%,#A8ADBD 50%,#5FE3C4 66%,#8B7FF7 100%)",
-  dotted: "rgba(139,127,247,0.20)",
-  dottedSoft: "rgba(139,127,247,0.12)",
+    "linear-gradient(90deg,#EF4444 0%,#EAB308 33%,#A8A8C8 50%,#22C55E 66%,#4F6BF6 100%)",
+  dotted: "rgba(79,107,246,0.20)",
+  dottedSoft: "rgba(79,107,246,0.12)",
 } as const;
 
 export const cardStyle: React.CSSProperties = {
