@@ -983,7 +983,19 @@ function ReviewStep({ draft }: { draft: Draft }) {
   const expLabel = EXPERIENCE.find((e) => e.id === draft.experienceLevel)?.label ?? "—";
   const eqLabel = EQUIPMENT_OPTIONS.find((e) => e.id === draft.equipment)?.label ?? "—";
   const eatLabel = EATING_PATTERNS.find((e) => e.id === draft.eatingPattern)?.label ?? "—";
-  const paceLabel = draft.pace ? PACES.find((p) => p.id === draft.pace)!.label : "Standard (default)";
+  const paceLabel = (() => {
+    const g = draft.goal;
+    if (!g) return "—";
+    if (g === "athletic_performance") return "Match training load";
+    if (g === "recomposition") {
+      const item = PACES_RECOMP.find((p) => p.id === draft.pace) ?? PACES_RECOMP[1];
+      return `${item.label} · ~${item.kcalDelta} kcal/day below TDEE`;
+    }
+    const table = ratePacesFor(g);
+    if (!table) return "—";
+    const item = table.find((p) => p.id === draft.pace) ?? table[1];
+    return `${item.label} · ${item.pct}%/week`;
+  })();
 
   const dayLabels: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
   const order = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
