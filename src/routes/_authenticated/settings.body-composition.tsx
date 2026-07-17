@@ -75,13 +75,16 @@ function BodyCompositionPage() {
     try {
       const { data: u } = await supabase.auth.getUser();
       if (!u.user) throw new Error("Not signed in");
-      const payload: Record<string, unknown> = { user_id: u.user.id };
-      payload.dexa_body_fat_pct = bf === "" ? null : Number(bf);
-      payload.dexa_lean_mass_kg = lean === "" ? null : Number(lean);
-      payload.measurement_waist_cm = waist === "" ? null : Number(waist);
-      payload.measurement_hip_cm = hip === "" ? null : Number(hip);
-      if (lean !== "") payload.body_data_type = "dexa";
-      else if (waist !== "" || hip !== "") payload.body_data_type = "measurements";
+      const bodyDataType: "dexa" | "measurements" | null =
+        lean !== "" ? "dexa" : (waist !== "" || hip !== "") ? "measurements" : null;
+      const payload = {
+        user_id: u.user.id,
+        dexa_body_fat_pct: bf === "" ? null : Number(bf),
+        dexa_lean_mass_kg: lean === "" ? null : Number(lean),
+        measurement_waist_cm: waist === "" ? null : Number(waist),
+        measurement_hip_cm: hip === "" ? null : Number(hip),
+        body_data_type: bodyDataType,
+      };
       const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "user_id" });
       if (error) throw error;
       toast.success("Saved");
