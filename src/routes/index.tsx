@@ -165,6 +165,38 @@ function AuthScreen() {
           {loading === "apple" ? "Connecting…" : "Continue with Apple"}
         </button>
 
+        {emailOpen ? (
+          <div className="mt-4 space-y-2">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              aria-label="Email address"
+              autoComplete="email"
+              inputMode="email"
+              disabled={loading !== null || checking || sending}
+              className="w-full bg-bg-2 border border-white/10 rounded-2xl py-3.5 px-4 text-sm text-white placeholder:text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-bg-0"
+            />
+            <button
+              onClick={sendMagicLink}
+              disabled={loading !== null || checking || sending || !email.trim()}
+              className="w-full rounded-2xl bg-bg-2 border border-white/10 py-3.5 text-sm font-semibold disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-bg-0"
+            >
+              {sending ? "Sending…" : "Send magic link"}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setEmailOpen(true)}
+            disabled={loading !== null || checking}
+            aria-expanded={false}
+            className="mt-4 w-full text-center text-[13px] text-text-tertiary disabled:opacity-60"
+          >
+            Continue with email
+          </button>
+        )}
+
         <p className="mt-6 text-center text-[11px] text-text-tertiary">
           By continuing you agree to our terms and privacy policy.
         </p>
