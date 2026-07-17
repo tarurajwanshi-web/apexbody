@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, RotateCcw, LogOut, FileText, FileLock, ShieldCheck, Heart, Plug } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw, LogOut, FileText, FileLock, ShieldCheck, Heart, Plug, Activity, Watch } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useProfile } from "@/lib/store";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
@@ -115,6 +115,11 @@ function Settings() {
           </p>
         </div>
       </section>
+
+      <Group title="Precision">
+        <LinkRow to="/settings/body-composition" label="Body composition" Icon={Activity} />
+        <LinkRow to="/settings/device" label="Connect device" Icon={Watch} />
+      </Group>
 
       <Group title="Recovery tracking method">
         <div className="px-4 py-3 flex gap-2">
