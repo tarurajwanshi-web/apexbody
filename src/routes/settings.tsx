@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, RotateCcw, LogOut, FileText, FileLock, ShieldCheck, Heart, Plug } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw, LogOut, FileText, FileLock, ShieldCheck, Heart, Plug, Activity, Watch } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useProfile } from "@/lib/store";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
