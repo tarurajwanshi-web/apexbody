@@ -224,8 +224,7 @@ function ProfileSetup() {
       const userId = userRes.user.id;
 
       const trainingDaysCount = draft.trainingDays.length;
-      const chosenPace = draft.pace ? PACES.find((p) => p.id === draft.pace)!.pct : null;
-      const targetRatePct = chosenPace ?? goalRateDefault(draft.goal);
+      const targetRatePct = computeTargetRatePct(draft);
       const equipmentDb = draft.equipment ? EQUIPMENT_UI_TO_DB[draft.equipment] : null;
 
       const commonBody = {
