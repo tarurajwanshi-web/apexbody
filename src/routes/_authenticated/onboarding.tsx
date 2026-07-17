@@ -23,7 +23,7 @@ type Sex = "male" | "female";
 type ExperienceLevel = "beginner" | "intermediate" | "advanced";
 type EatingPattern = "standard" | "intermittent" | "plant_based" | "flexible";
 
-const TOTAL = 6;
+const TOTAL = 8;
 
 const EQUIPMENT_UI_TO_DB: Record<EquipmentUi, EquipmentDb> = {
   commercial_gym: "commercial_gym",
@@ -171,8 +171,10 @@ function ProfileSetup() {
       case 4: return draft.trainingDays.length >= 1;
       case 5: return !!draft.equipment;
       case 6: {
-        if (!weightValid || !heightValid) return false;
-        if (!draft.eatingPattern) return false;
+        return weightValid && heightValid;
+      }
+      case 7: return !!draft.eatingPattern;
+      case 8: {
         const cw = Number(draft.weightKg);
         const tw = Number(draft.targetWeightKg);
         if (!(tw > 0)) return false;
@@ -303,7 +305,7 @@ function ProfileSetup() {
           className="h-full transition-all"
           style={{
             width: `${(displayStep / TOTAL) * 100}%`,
-            background: "linear-gradient(90deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+            background: "var(--amber-gradient)",
             transitionDuration: "var(--dur-med)",
           }}
         />
@@ -338,11 +340,9 @@ function ProfileSetup() {
         {step === 5 && (
           <EquipmentStep value={draft.equipment} onChange={(equipment) => patch({ equipment })} />
         )}
-        {step === 6 && (
-          <FuelPlanStep
-            draft={draft} patch={patch}
-          />
-        )}
+        {step === 6 && <BodyBasicsStep draft={draft} patch={patch} />}
+        {step === 7 && <EatingPatternStep name={draft.name.trim()} value={draft.eatingPattern} onChange={(v) => patch({ eatingPattern: v })} />}
+        {step === 8 && <TargetStep draft={draft} patch={patch} />}
         {isReview && <ReviewStep draft={draft} />}
       </main>
 
@@ -361,7 +361,7 @@ function ProfileSetup() {
               className="block w-full text-body font-medium disabled:opacity-40"
               style={{
                 height: 52, borderRadius: "var(--radius-md)",
-                background: "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+                background: "var(--amber-gradient)",
                 color: "#0A0B12",
                 boxShadow: "var(--shadow-inset-top)",
               }}
@@ -375,7 +375,7 @@ function ProfileSetup() {
               className="block w-full text-body font-medium disabled:opacity-40"
               style={{
                 height: 52, borderRadius: "var(--radius-md)",
-                background: "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+                background: "var(--amber-gradient)",
                 color: "#0A0B12",
                 boxShadow: "var(--shadow-inset-top)",
               }}
@@ -409,6 +409,14 @@ const CARD_BASE: React.CSSProperties = {
 const CARD_ACTIVE: React.CSSProperties = {
   ...CARD_BASE,
   borderColor: "var(--amber-500)",
+  background: "linear-gradient(135deg, rgba(245,165,36,0.04), rgba(255,201,122,0.02))",
+  boxShadow: "0 0 0 1px var(--amber-glow)",
+};
+
+const PACE_ACTIVE: React.CSSProperties = {
+  ...CARD_BASE,
+  borderColor: "var(--amber-500)",
+  background: "linear-gradient(135deg, rgba(245,165,36,0.10), rgba(255,201,122,0.04))",
   boxShadow: "0 0 0 1px var(--amber-glow)",
 };
 
@@ -457,7 +465,7 @@ function AboutYouStep({
                 style={{
                   height: 44,
                   borderRadius: "var(--radius-pill)",
-                  background: active ? "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)" : "var(--bg-1)",
+                  background: active ? "var(--amber-gradient)" : "var(--bg-1)",
                   color: active ? "#0A0B12" : "var(--text-secondary)",
                   border: active ? "1px solid transparent" : "1px solid var(--border-subtle)",
                 }}
@@ -554,7 +562,7 @@ function DaysStep({ value, onChange }: { value: string[]; onChange: (days: strin
               style={{
                 width: 48, height: 48,
                 borderRadius: "var(--radius-pill)",
-                background: active ? "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)" : "var(--bg-1)",
+                background: active ? "var(--amber-gradient)" : "var(--bg-1)",
                 color: active ? "#0A0B12" : "var(--text-secondary)",
                 border: active ? "1px solid transparent" : "1px solid var(--border-subtle)",
                 margin: "0 auto",
@@ -602,11 +610,7 @@ function EquipmentStep({ value, onChange }: { value: EquipmentUi | null; onChang
   );
 }
 
-function FuelPlanStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>) => void }) {
-  const goal = draft.goal!;
-  const direction = GOAL_DIRECTION[goal];
-
-  // Weight IO — canonical kg, display in weightUnit.
+function BodyBasicsStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>) => void }) {
   const setWeightDisplay = (raw: string) => {
     const clean = raw.replace(/[^\d.]/g, "");
     if (clean === "") { patch({ weightKg: "" }); return; }
@@ -619,19 +623,6 @@ function FuelPlanStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft
     ? String(Number(Number(draft.weightKg).toFixed(1)))
     : String(Number((Number(draft.weightKg) / 0.4536).toFixed(1))));
 
-  const setTargetWeightDisplay = (raw: string) => {
-    const clean = raw.replace(/[^\d.]/g, "");
-    if (clean === "") { patch({ targetWeightKg: "" }); return; }
-    const n = Number(clean);
-    if (!Number.isFinite(n)) return;
-    const kg = draft.weightUnit === "kg" ? n : n * 0.4536;
-    patch({ targetWeightKg: String(Number(kg.toFixed(2))) });
-  };
-  const targetWeightDisplay = draft.targetWeightKg === "" ? "" : (draft.weightUnit === "kg"
-    ? String(Number(Number(draft.targetWeightKg).toFixed(1)))
-    : String(Number((Number(draft.targetWeightKg) / 0.4536).toFixed(1))));
-
-  // Height IO
   const setHeightCmDisplay = (raw: string) => {
     const clean = raw.replace(/[^\d.]/g, "");
     if (clean === "") { patch({ heightCm: "", heightFt: "", heightIn: "" }); return; }
@@ -655,22 +646,9 @@ function FuelPlanStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft
   };
   const heightCmDisplay = draft.heightCm === "" ? "" : String(Number(Number(draft.heightCm).toFixed(1)));
 
-  const cw = Number(draft.weightKg) || 0;
-  const tw = Number(draft.targetWeightKg) || 0;
-  const heightM = Number(draft.heightCm) / 100;
-  const bmi = heightM > 0 && tw > 0 ? tw / (heightM * heightM) : 0;
-
-  let targetError: string | null = null;
-  if (direction === "lose" && tw > 0 && tw >= cw) targetError = "Target should be below your current weight.";
-  if (direction === "gain" && tw > 0 && tw <= cw) targetError = "Target should be above your current weight.";
-  if (direction === "lose" && bmi > 0 && bmi < 18.5) targetError = "Target weight is below a healthy BMI for your height.";
-  if (direction === "gain" && bmi >= 35) targetError = "Target weight is above a safe range for your height.";
-
   return (
     <>
-      <StepHeader title="Your fuel plan" sub="We'll refine this from your weekly check-ins." />
-
-      {/* Body basics */}
+      <StepHeader title="Your body basics" sub="We'll refine this from your weekly check-ins." />
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <FieldLabel inline>Weight</FieldLabel>
@@ -735,48 +713,88 @@ function FuelPlanStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft
           </div>
         )}
       </div>
+    </>
+  );
+}
 
-      {/* Eating pattern */}
-      <div className="mt-8">
-        <FieldLabel>How do you eat?</FieldLabel>
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          {EATING_PATTERNS.map(({ id, label, desc }) => {
-            const active = draft.eatingPattern === id;
-            return (
-              <button
-                key={id} type="button" onClick={() => patch({ eatingPattern: id })}
-                className="text-left"
-                style={active ? CARD_ACTIVE : CARD_BASE}
-              >
-                <p className="text-body font-medium text-text-primary">{label}</p>
-                <p className="text-body-sm text-text-tertiary mt-1 leading-snug">{desc}</p>
-              </button>
-            );
-          })}
-        </div>
+function EatingPatternStep({ name, value, onChange }: { name: string; value: EatingPattern | null; onChange: (v: EatingPattern) => void }) {
+  const title = name ? `How do you eat, ${name}?` : "How do you eat?";
+  return (
+    <>
+      <StepHeader title={title} sub="So we can time your meals right." />
+      <div className="grid grid-cols-2 gap-2">
+        {EATING_PATTERNS.map(({ id, label, desc }) => {
+          const active = value === id;
+          return (
+            <button
+              key={id} type="button" onClick={() => onChange(id)}
+              className="text-left"
+              style={active ? CARD_ACTIVE : CARD_BASE}
+            >
+              <p className="text-body font-medium text-text-primary">{label}</p>
+              <p className="text-body-sm text-text-tertiary mt-1 leading-snug">{desc}</p>
+            </button>
+          );
+        })}
       </div>
+      <p className="mt-4 text-body-sm text-text-tertiary">You can change this any time in Settings.</p>
+    </>
+  );
+}
 
-      {/* Target weight */}
-      <div className="mt-8">
-        <FieldLabel>Target weight</FieldLabel>
-        <InputBox>
-          <input
-            type="text" inputMode="decimal"
-            value={targetWeightDisplay}
-            onChange={(e) => setTargetWeightDisplay(e.target.value)}
-            placeholder="—"
-            className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
-          />
-          <span className="text-body-sm text-text-tertiary ml-2">{draft.weightUnit}</span>
-        </InputBox>
-        {targetError && (
-          <p className="mt-2 text-body-sm" style={{ color: "var(--danger)" }}>{targetError}</p>
-        )}
-      </div>
+function TargetStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>) => void }) {
+  const goal = draft.goal!;
+  const direction = GOAL_DIRECTION[goal];
 
-      {/* Pace */}
+  const setTargetWeightDisplay = (raw: string) => {
+    const clean = raw.replace(/[^\d.]/g, "");
+    if (clean === "") { patch({ targetWeightKg: "" }); return; }
+    const n = Number(clean);
+    if (!Number.isFinite(n)) return;
+    const kg = draft.weightUnit === "kg" ? n : n * 0.4536;
+    patch({ targetWeightKg: String(Number(kg.toFixed(2))) });
+  };
+  const targetWeightDisplay = draft.targetWeightKg === "" ? "" : (draft.weightUnit === "kg"
+    ? String(Number(Number(draft.targetWeightKg).toFixed(1)))
+    : String(Number((Number(draft.targetWeightKg) / 0.4536).toFixed(1))));
+
+  const cw = Number(draft.weightKg) || 0;
+  const tw = Number(draft.targetWeightKg) || 0;
+  const heightM = Number(draft.heightCm) / 100;
+  const bmi = heightM > 0 && tw > 0 ? tw / (heightM * heightM) : 0;
+
+  let targetError: string | null = null;
+  if (direction === "lose" && tw > 0 && tw >= cw) targetError = "Target should be below your current weight.";
+  if (direction === "gain" && tw > 0 && tw <= cw) targetError = "Target should be above your current weight.";
+  if (direction === "lose" && bmi > 0 && bmi < 18.5) targetError = "Target weight is below a healthy BMI for your height.";
+  if (direction === "gain" && bmi >= 35) targetError = "Target weight is above a safe range for your height.";
+
+  const sub =
+    goal === "fat_loss" ? "How much would you like to lose, and how fast?" :
+    goal === "muscle_gain" || goal === "strength" ? "How much would you like to gain, and how fast?" :
+    goal === "recomposition" ? "Where do you want to land?" :
+    "What's your target weight for competition?";
+
+  return (
+    <>
+      <StepHeader title="Your target" sub={sub} />
+      <FieldLabel>Target weight</FieldLabel>
+      <InputBox>
+        <input
+          type="text" inputMode="decimal"
+          value={targetWeightDisplay}
+          onChange={(e) => setTargetWeightDisplay(e.target.value)}
+          placeholder="—"
+          className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
+        />
+        <span className="text-body-sm text-text-tertiary ml-2">{draft.weightUnit}</span>
+      </InputBox>
+      {targetError && (
+        <p className="mt-2 text-body-sm" style={{ color: "var(--danger)" }}>{targetError}</p>
+      )}
+
       {direction !== "maintain" && (
-        <div className="mt-8">
+        <div className="mt-6">
           <FieldLabel>How fast?</FieldLabel>
           <div className="mt-2 space-y-2">
             {PACES.map((p) => {
@@ -785,7 +803,7 @@ function FuelPlanStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft
                 <button
                   key={p.id} type="button" onClick={() => patch({ pace: p.id })}
                   className="w-full text-left flex items-center justify-between"
-                  style={active ? CARD_ACTIVE : CARD_BASE}
+                  style={active ? PACE_ACTIVE : CARD_BASE}
                 >
                   <div>
                     <p className="text-body font-medium text-text-primary">{p.label}</p>
@@ -880,7 +898,7 @@ function SegmentedPill({ options, value, onChange }: { options: { id: string; la
             style={{
               padding: "6px 14px",
               borderRadius: "var(--radius-pill)",
-              background: active ? "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)" : "transparent",
+              background: active ? "var(--amber-gradient)" : "transparent",
               color: active ? "#0A0B12" : "var(--text-tertiary)",
               transitionDuration: "var(--dur-fast)",
             }}
@@ -926,7 +944,7 @@ function BuildingPlanScreen() {
       <div className="flex items-center justify-center rounded-full"
         style={{
           width: 96, height: 96,
-          background: "linear-gradient(135deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+          background: "var(--amber-gradient)",
           boxShadow: "var(--shadow-glow-amber)",
           animation: "breathe 2.4s ease-in-out infinite",
         }}>
@@ -943,7 +961,7 @@ function BuildingPlanScreen() {
           className="h-full rounded-full"
           style={{
             width: `${progress}%`,
-            background: "linear-gradient(90deg, var(--amber-500) 0%, var(--amber-300) 100%)",
+            background: "var(--amber-gradient)",
             transition: "width 200ms linear",
           }}
         />
