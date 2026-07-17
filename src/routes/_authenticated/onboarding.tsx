@@ -610,11 +610,7 @@ function EquipmentStep({ value, onChange }: { value: EquipmentUi | null; onChang
   );
 }
 
-function FuelPlanStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>) => void }) {
-  const goal = draft.goal!;
-  const direction = GOAL_DIRECTION[goal];
-
-  // Weight IO — canonical kg, display in weightUnit.
+function BodyBasicsStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>) => void }) {
   const setWeightDisplay = (raw: string) => {
     const clean = raw.replace(/[^\d.]/g, "");
     if (clean === "") { patch({ weightKg: "" }); return; }
@@ -627,19 +623,6 @@ function FuelPlanStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft
     ? String(Number(Number(draft.weightKg).toFixed(1)))
     : String(Number((Number(draft.weightKg) / 0.4536).toFixed(1))));
 
-  const setTargetWeightDisplay = (raw: string) => {
-    const clean = raw.replace(/[^\d.]/g, "");
-    if (clean === "") { patch({ targetWeightKg: "" }); return; }
-    const n = Number(clean);
-    if (!Number.isFinite(n)) return;
-    const kg = draft.weightUnit === "kg" ? n : n * 0.4536;
-    patch({ targetWeightKg: String(Number(kg.toFixed(2))) });
-  };
-  const targetWeightDisplay = draft.targetWeightKg === "" ? "" : (draft.weightUnit === "kg"
-    ? String(Number(Number(draft.targetWeightKg).toFixed(1)))
-    : String(Number((Number(draft.targetWeightKg) / 0.4536).toFixed(1))));
-
-  // Height IO
   const setHeightCmDisplay = (raw: string) => {
     const clean = raw.replace(/[^\d.]/g, "");
     if (clean === "") { patch({ heightCm: "", heightFt: "", heightIn: "" }); return; }
@@ -663,22 +646,9 @@ function FuelPlanStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft
   };
   const heightCmDisplay = draft.heightCm === "" ? "" : String(Number(Number(draft.heightCm).toFixed(1)));
 
-  const cw = Number(draft.weightKg) || 0;
-  const tw = Number(draft.targetWeightKg) || 0;
-  const heightM = Number(draft.heightCm) / 100;
-  const bmi = heightM > 0 && tw > 0 ? tw / (heightM * heightM) : 0;
-
-  let targetError: string | null = null;
-  if (direction === "lose" && tw > 0 && tw >= cw) targetError = "Target should be below your current weight.";
-  if (direction === "gain" && tw > 0 && tw <= cw) targetError = "Target should be above your current weight.";
-  if (direction === "lose" && bmi > 0 && bmi < 18.5) targetError = "Target weight is below a healthy BMI for your height.";
-  if (direction === "gain" && bmi >= 35) targetError = "Target weight is above a safe range for your height.";
-
   return (
     <>
-      <StepHeader title="Your fuel plan" sub="We'll refine this from your weekly check-ins." />
-
-      {/* Body basics */}
+      <StepHeader title="Your body basics" sub="We'll refine this from your weekly check-ins." />
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <FieldLabel inline>Weight</FieldLabel>
@@ -743,48 +713,88 @@ function FuelPlanStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft
           </div>
         )}
       </div>
+    </>
+  );
+}
 
-      {/* Eating pattern */}
-      <div className="mt-8">
-        <FieldLabel>How do you eat?</FieldLabel>
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          {EATING_PATTERNS.map(({ id, label, desc }) => {
-            const active = draft.eatingPattern === id;
-            return (
-              <button
-                key={id} type="button" onClick={() => patch({ eatingPattern: id })}
-                className="text-left"
-                style={active ? CARD_ACTIVE : CARD_BASE}
-              >
-                <p className="text-body font-medium text-text-primary">{label}</p>
-                <p className="text-body-sm text-text-tertiary mt-1 leading-snug">{desc}</p>
-              </button>
-            );
-          })}
-        </div>
+function EatingPatternStep({ name, value, onChange }: { name: string; value: EatingPattern | null; onChange: (v: EatingPattern) => void }) {
+  const title = name ? `How do you eat, ${name}?` : "How do you eat?";
+  return (
+    <>
+      <StepHeader title={title} sub="So we can time your meals right." />
+      <div className="grid grid-cols-2 gap-2">
+        {EATING_PATTERNS.map(({ id, label, desc }) => {
+          const active = value === id;
+          return (
+            <button
+              key={id} type="button" onClick={() => onChange(id)}
+              className="text-left"
+              style={active ? CARD_ACTIVE : CARD_BASE}
+            >
+              <p className="text-body font-medium text-text-primary">{label}</p>
+              <p className="text-body-sm text-text-tertiary mt-1 leading-snug">{desc}</p>
+            </button>
+          );
+        })}
       </div>
+      <p className="mt-4 text-body-sm text-text-tertiary">You can change this any time in Settings.</p>
+    </>
+  );
+}
 
-      {/* Target weight */}
-      <div className="mt-8">
-        <FieldLabel>Target weight</FieldLabel>
-        <InputBox>
-          <input
-            type="text" inputMode="decimal"
-            value={targetWeightDisplay}
-            onChange={(e) => setTargetWeightDisplay(e.target.value)}
-            placeholder="—"
-            className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
-          />
-          <span className="text-body-sm text-text-tertiary ml-2">{draft.weightUnit}</span>
-        </InputBox>
-        {targetError && (
-          <p className="mt-2 text-body-sm" style={{ color: "var(--danger)" }}>{targetError}</p>
-        )}
-      </div>
+function TargetStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft>) => void }) {
+  const goal = draft.goal!;
+  const direction = GOAL_DIRECTION[goal];
 
-      {/* Pace */}
+  const setTargetWeightDisplay = (raw: string) => {
+    const clean = raw.replace(/[^\d.]/g, "");
+    if (clean === "") { patch({ targetWeightKg: "" }); return; }
+    const n = Number(clean);
+    if (!Number.isFinite(n)) return;
+    const kg = draft.weightUnit === "kg" ? n : n * 0.4536;
+    patch({ targetWeightKg: String(Number(kg.toFixed(2))) });
+  };
+  const targetWeightDisplay = draft.targetWeightKg === "" ? "" : (draft.weightUnit === "kg"
+    ? String(Number(Number(draft.targetWeightKg).toFixed(1)))
+    : String(Number((Number(draft.targetWeightKg) / 0.4536).toFixed(1))));
+
+  const cw = Number(draft.weightKg) || 0;
+  const tw = Number(draft.targetWeightKg) || 0;
+  const heightM = Number(draft.heightCm) / 100;
+  const bmi = heightM > 0 && tw > 0 ? tw / (heightM * heightM) : 0;
+
+  let targetError: string | null = null;
+  if (direction === "lose" && tw > 0 && tw >= cw) targetError = "Target should be below your current weight.";
+  if (direction === "gain" && tw > 0 && tw <= cw) targetError = "Target should be above your current weight.";
+  if (direction === "lose" && bmi > 0 && bmi < 18.5) targetError = "Target weight is below a healthy BMI for your height.";
+  if (direction === "gain" && bmi >= 35) targetError = "Target weight is above a safe range for your height.";
+
+  const sub =
+    goal === "fat_loss" ? "How much would you like to lose, and how fast?" :
+    goal === "muscle_gain" || goal === "strength" ? "How much would you like to gain, and how fast?" :
+    goal === "recomposition" ? "Where do you want to land?" :
+    "What's your target weight for competition?";
+
+  return (
+    <>
+      <StepHeader title="Your target" sub={sub} />
+      <FieldLabel>Target weight</FieldLabel>
+      <InputBox>
+        <input
+          type="text" inputMode="decimal"
+          value={targetWeightDisplay}
+          onChange={(e) => setTargetWeightDisplay(e.target.value)}
+          placeholder="—"
+          className="flex-1 bg-transparent text-body text-text-primary placeholder:text-text-tertiary focus:outline-none"
+        />
+        <span className="text-body-sm text-text-tertiary ml-2">{draft.weightUnit}</span>
+      </InputBox>
+      {targetError && (
+        <p className="mt-2 text-body-sm" style={{ color: "var(--danger)" }}>{targetError}</p>
+      )}
+
       {direction !== "maintain" && (
-        <div className="mt-8">
+        <div className="mt-6">
           <FieldLabel>How fast?</FieldLabel>
           <div className="mt-2 space-y-2">
             {PACES.map((p) => {
@@ -793,7 +803,7 @@ function FuelPlanStep({ draft, patch }: { draft: Draft; patch: (p: Partial<Draft
                 <button
                   key={p.id} type="button" onClick={() => patch({ pace: p.id })}
                   className="w-full text-left flex items-center justify-between"
-                  style={active ? CARD_ACTIVE : CARD_BASE}
+                  style={active ? PACE_ACTIVE : CARD_BASE}
                 >
                   <div>
                     <p className="text-body font-medium text-text-primary">{p.label}</p>
