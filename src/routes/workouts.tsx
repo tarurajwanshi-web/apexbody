@@ -683,7 +683,18 @@ function ExerciseLogger({
   );
 }
 
+function prLabel(p: { pr_type: string; value: number; exercise_name: string }): string {
+  switch (p.pr_type) {
+    case "max_weight": return `${p.exercise_name} ${p.value}kg`;
+    case "max_est_1rm": return `${p.exercise_name} est 1RM ${p.value}kg`;
+    case "max_reps_at_weight": return `${p.exercise_name} ${p.value} reps`;
+    case "max_volume": return `${p.exercise_name} volume ${p.value}kg`;
+    default: return `${p.exercise_name} PR`;
+  }
+}
+
 function SetRow({
+
   exercise, setNumber, existing, onLogged, dayPlan, allLogs, todayISO,
 }: {
   exercise: Exercise; setNumber: number; existing: SetLog | null; onLogged: () => void;
