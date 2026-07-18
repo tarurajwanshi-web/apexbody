@@ -738,10 +738,23 @@ function SetRow({
       if (error) throw error;
       onLogged();
       if (completed) await maybeWriteTrainingSummary(dayPlan, allLogs, row, todayISO);
+      if (completed) {
+        try {
+          const { data: prRes } = await supabase.functions.invoke("detect-prs", {
+            body: { user_id: uid, entry_date: todayISO, exercise_name: exercise.name },
+          });
+          const prs = (prRes as any)?.prs as Array<{ pr_type: string; value: number; exercise_name: string }> | undefined;
+          if (prs && prs.length > 0) {
+            const label = prs.map(prLabel).join(" · ");
+            toast.success(`New PR — ${label}`);
+          }
+        } catch { /* PR detection must never block save */ }
+      }
       // If we couldn't classify, open the picker AFTER the save landed.
       if (!resolvedMuscle && upserted?.id) {
         setPickerFor({ setId: upserted.id as string, exerciseName: exercise.name });
       }
+
     } catch (e: any) {
       toast.error(e?.message ?? "Save failed");
     } finally {
