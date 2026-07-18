@@ -11,6 +11,11 @@ import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { toast } from "sonner";
 import { useUserTimezone, getLocalDateISO } from "@/lib/dates";
 import { resolveTodayPlanDay } from "@/lib/plan.functions";
+import {
+  MUSCLE_GROUP_DISPLAY_ORDER,
+  MUSCLE_GROUP_LABELS,
+  normaliseMuscleGroup,
+} from "@/lib/volume-landmarks";
 
 
 export const Route = createFileRoute("/workouts")({
@@ -688,7 +693,23 @@ function SetRow({
   const [weight, setWeight] = useState<string>(existing?.weight_kg?.toString() ?? "");
   const [rir, setRir] = useState<number | null>(existing?.rir ?? null);
   const [saving, setSaving] = useState(false);
+  const [pickerFor, setPickerFor] = useState<{ setId: string; exerciseName: string } | null>(null);
   const done = existing?.completed ?? false;
+
+  const resolveMuscleForInsert = async (uid: string): Promise<string | null> => {
+    // 1) Plan-tagged exercise wins
+    const planTag = normaliseMuscleGroup(exercise.muscle_group ?? null);
+    if (planTag) return planTag;
+    // 2) User memory table
+    const key = exercise.name.trim().toLowerCase();
+    const { data } = await supabase
+      .from("user_exercise_muscle_map")
+      .select("muscle_group")
+      .eq("user_id", uid)
+      .eq("exercise_name_key", key)
+      .maybeSingle();
+    return normaliseMuscleGroup((data as any)?.muscle_group ?? null);
+  };
 
   const save = async (completed: boolean) => {
     setSaving(true);
@@ -696,6 +717,7 @@ function SetRow({
       const { data: u } = await supabase.auth.getUser();
       const uid = u.user?.id;
       if (!uid) throw new Error("Not signed in");
+      const resolvedMuscle = await resolveMuscleForInsert(uid);
       const row = {
         user_id: uid,
         entry_date: todayISO,
@@ -705,14 +727,21 @@ function SetRow({
         weight_kg: weight === "" ? null : Number(weight),
         completed,
         rir: rir,
-        muscle_group: exercise.muscle_group ?? null,
+        muscle_group: resolvedMuscle,
       };
-      const { error } = await supabase
+      // Save immediately — never block on muscle classification.
+      const { data: upserted, error } = await supabase
         .from("workout_set_logs")
-        .upsert(row, { onConflict: "user_id,entry_date,exercise_name,set_number" });
+        .upsert(row, { onConflict: "user_id,entry_date,exercise_name,set_number" })
+        .select("id")
+        .maybeSingle();
       if (error) throw error;
       onLogged();
       if (completed) await maybeWriteTrainingSummary(dayPlan, allLogs, row, todayISO);
+      // If we couldn't classify, open the picker AFTER the save landed.
+      if (!resolvedMuscle && upserted?.id) {
+        setPickerFor({ setId: upserted.id as string, exerciseName: exercise.name });
+      }
     } catch (e: any) {
       toast.error(e?.message ?? "Save failed");
     } finally {
@@ -721,6 +750,7 @@ function SetRow({
   };
 
   return (
+    <>
     <div className={`flex items-center gap-2 rounded-lg px-2 py-1.5 ${done ? "bg-success/10" : "bg-bg-3/30"}`}>
       <span className="w-6 text-[12px] text-text-tertiary tabular-nums">#{setNumber}</span>
       <input
@@ -758,6 +788,92 @@ function SetRow({
       >
         <Check size={14} />
       </button>
+    </div>
+    {pickerFor && (
+      <MusclePickerSheet
+        setId={pickerFor.setId}
+        exerciseName={pickerFor.exerciseName}
+        onClose={() => setPickerFor(null)}
+      />
+    )}
+    </>
+  );
+}
+
+function MusclePickerSheet({
+  setId, exerciseName, onClose,
+}: { setId: string; exerciseName: string; onClose: () => void }) {
+  const [saving, setSaving] = useState(false);
+  const pick = async (muscle: string) => {
+    setSaving(true);
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const uid = u.user?.id;
+      if (!uid) throw new Error("Not signed in");
+      const key = exerciseName.trim().toLowerCase();
+      const [{ error: patchErr }, { error: mapErr }] = await Promise.all([
+        supabase
+          .from("workout_set_logs")
+          .update({ muscle_group: muscle })
+          .eq("id", setId),
+        supabase
+          .from("user_exercise_muscle_map")
+          .upsert(
+            {
+              user_id: uid,
+              exercise_name_key: key,
+              exercise_name: exerciseName,
+              muscle_group: muscle,
+            },
+            { onConflict: "user_id,exercise_name_key" },
+          ),
+      ]);
+      if (patchErr) throw patchErr;
+      if (mapErr) throw mapErr;
+      toast.success(`Tagged as ${MUSCLE_GROUP_LABELS[muscle] ?? muscle}`);
+      onClose();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Could not tag");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-t-2xl bg-bg-2 p-4 pb-6 border-t border-bg-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-widest text-text-tertiary">Which muscle?</div>
+            <div className="text-[15px] text-text-primary mt-0.5">{exerciseName}</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="h-7 w-7 rounded-md bg-bg-3 text-text-secondary flex items-center justify-center"
+          ><X size={14} /></button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {MUSCLE_GROUP_DISPLAY_ORDER.map((m) => (
+            <button
+              key={m}
+              disabled={saving}
+              onClick={() => pick(m)}
+              className="px-3 py-1.5 rounded-full bg-bg-3 text-[13px] text-text-primary active:scale-95 disabled:opacity-50"
+            >
+              {MUSCLE_GROUP_LABELS[m]}
+            </button>
+          ))}
+        </div>
+        <div className="text-[11px] text-text-tertiary mt-3">
+          We'll remember this for next time.
+        </div>
+      </div>
     </div>
   );
 }

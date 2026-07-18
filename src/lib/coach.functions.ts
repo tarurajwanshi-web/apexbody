@@ -312,26 +312,59 @@ export const getMuscleGroupWeeklyVolume = createServerFn({ method: "GET" })
     const today = getLocalDateISO(tz);
     const { start, end } = getLocalWeekRange(today);
 
-    const { data: rows } = await context.supabase
-      .from("workout_set_logs")
-      .select("muscle_group")
-      .eq("user_id", context.userId)
-      .eq("completed", true)
-      .gte("entry_date", start)
-      .lte("entry_date", end);
+    const [{ data: rows }, { data: profileRow }] = await Promise.all([
+      context.supabase
+        .from("workout_set_logs")
+        .select("muscle_group")
+        .eq("user_id", context.userId)
+        .eq("completed", true)
+        .gte("entry_date", start)
+        .lte("entry_date", end),
+      context.supabase
+        .from("profiles")
+        .select("goal, experience_level")
+        .eq("user_id", context.userId)
+        .maybeSingle(),
+    ]);
 
-    const groups = { chest: 0, back: 0, shoulders: 0, legs: 0, arms: 0, core: 0 };
+    // Import canonical helpers lazily to keep server-fn module lean.
+    const { MUSCLE_GROUP_DISPLAY_ORDER, normaliseMuscleGroup } = await import(
+      "@/lib/volume-landmarks"
+    );
+
+    const groups: Record<string, number> = {};
+    for (const key of MUSCLE_GROUP_DISPLAY_ORDER) groups[key] = 0;
+    let unclassified = 0;
+    const unknownSeen = new Set<string>();
+
     for (const r of (rows as { muscle_group: string | null }[] | null) ?? []) {
-      const g = (r.muscle_group ?? "").toLowerCase().trim();
-      if (!g) continue;
-      if (g === "chest") groups.chest++;
-      else if (g === "back" || g === "lats") groups.back++;
-      else if (g === "shoulders" || g === "delts" || g === "deltoids") groups.shoulders++;
-      else if (["legs", "glutes", "quads", "quadriceps", "hamstrings", "calves"].includes(g)) groups.legs++;
-      else if (["arms", "biceps", "triceps", "forearms"].includes(g)) groups.arms++;
-      else if (["core", "abs", "obliques"].includes(g)) groups.core++;
+      const raw = (r.muscle_group ?? "").toLowerCase().trim();
+      if (!raw) {
+        unclassified++;
+        continue;
+      }
+      const canonical = normaliseMuscleGroup(raw);
+      if (canonical) {
+        groups[canonical] = (groups[canonical] ?? 0) + 1;
+      } else {
+        unclassified++;
+        if (!unknownSeen.has(raw)) {
+          unknownSeen.add(raw);
+          // Surface unmapped muscle_group values so we can add them to the
+          // alias list before they distort chronic-volume math.
+          console.warn(`[getMuscleGroupWeeklyVolume] unmapped muscle_group="${raw}"`);
+        }
+      }
     }
-    return { groups };
+
+    return {
+      groups,
+      unclassified,
+      profile: {
+        goal: (profileRow as any)?.goal ?? null,
+        experience_level: (profileRow as any)?.experience_level ?? null,
+      },
+    };
   });
 
 export const getWeightTrend = createServerFn({ method: "GET" })
