@@ -41,15 +41,25 @@ export function MuscleGroupVolumeGrid() {
   const groups = (data?.groups ?? {}) as Record<string, number>;
   const experience = data?.profile?.experience_level ?? null;
   const goal = data?.profile?.goal ?? null;
+  // This-week weekly_volume_landmarks rows, keyed by canonical muscle_group.
+  // Present once compute-volume-landmarks has run (onboarding + Monday cron).
+  // When present we band against fuel_adjusted_mrv so an under-eating user's
+  // ceiling shrinks — the moat, visible.
+  const landmarksByMuscle = (data?.landmarks ?? {}) as Record<
+    string,
+    { mev: number; mav: number; mrv: number; fuel_adjusted_mrv: number; target_sets: number }
+  >;
 
   return (
     <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2">
       {MUSCLE_GROUP_DISPLAY_ORDER.map((key) => {
         const sets = groups[key] ?? 0;
-        // TODO(B5): after weekly_volume_landmarks.fuel_adjusted_mrv is written
-        // per week, prefer that row's MRV over effectiveLandmarks().mrv when
-        // one exists for the current week.
-        const landmarks = effectiveLandmarks(key, experience, goal);
+        // Prefer this-week landmark row (fuel/readiness-adjusted). Fall back
+        // to static effectiveLandmarks only for brand-new users pre-first-B5.
+        const row = landmarksByMuscle[key];
+        const landmarks: Landmarks | null = row
+          ? { mev: row.mev, mav: row.mav, mrv: row.fuel_adjusted_mrv }
+          : effectiveLandmarks(key, experience, goal);
         const band = bandFor(sets, landmarks);
         const c = colorFor(band);
         return (

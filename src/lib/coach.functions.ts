@@ -312,7 +312,17 @@ export const getMuscleGroupWeeklyVolume = createServerFn({ method: "GET" })
     const today = getLocalDateISO(tz);
     const { start, end } = getLocalWeekRange(today);
 
-    const [{ data: rows }, { data: profileRow }] = await Promise.all([
+    // UTC-Monday for landmark lookup (landmarks are keyed to UTC-Monday to
+    // match the training-plan clock, not the user-local week).
+    const utcTodayIso = new Date().toISOString().slice(0, 10);
+    const [y, m, d] = utcTodayIso.split("-").map(Number);
+    const utcDt = new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1));
+    const dow = utcDt.getUTCDay();
+    const delta = dow === 0 ? -6 : 1 - dow;
+    utcDt.setUTCDate(utcDt.getUTCDate() + delta);
+    const utcMonday = utcDt.toISOString().slice(0, 10);
+
+    const [{ data: rows }, { data: profileRow }, { data: landmarkRows }] = await Promise.all([
       context.supabase
         .from("workout_set_logs")
         .select("muscle_group")
@@ -325,6 +335,11 @@ export const getMuscleGroupWeeklyVolume = createServerFn({ method: "GET" })
         .select("goal, experience_level")
         .eq("user_id", context.userId)
         .maybeSingle(),
+      context.supabase
+        .from("weekly_volume_landmarks")
+        .select("muscle_group, mev, mav, mrv, fuel_adjusted_mrv, target_sets")
+        .eq("user_id", context.userId)
+        .eq("week_start_date", utcMonday),
     ]);
 
     // Import canonical helpers lazily to keep server-fn module lean.
@@ -350,11 +365,26 @@ export const getMuscleGroupWeeklyVolume = createServerFn({ method: "GET" })
         unclassified++;
         if (!unknownSeen.has(raw)) {
           unknownSeen.add(raw);
-          // Surface unmapped muscle_group values so we can add them to the
-          // alias list before they distort chronic-volume math.
           console.warn(`[getMuscleGroupWeeklyVolume] unmapped muscle_group="${raw}"`);
         }
       }
+    }
+
+    // Landmark rows keyed by muscle_group for O(1) lookup in the heat map.
+    // fuel_adjusted_mrv is the recovery-shrunk ceiling — under-eating drops
+    // this below static MRV so tiles turn red at lower set counts.
+    const landmarks: Record<
+      string,
+      { mev: number; mav: number; mrv: number; fuel_adjusted_mrv: number; target_sets: number }
+    > = {};
+    for (const l of (landmarkRows as any[] | null) ?? []) {
+      landmarks[l.muscle_group] = {
+        mev: Number(l.mev),
+        mav: Number(l.mav),
+        mrv: Number(l.mrv),
+        fuel_adjusted_mrv: Number(l.fuel_adjusted_mrv),
+        target_sets: Number(l.target_sets),
+      };
     }
 
     return {
@@ -364,8 +394,11 @@ export const getMuscleGroupWeeklyVolume = createServerFn({ method: "GET" })
         goal: (profileRow as any)?.goal ?? null,
         experience_level: (profileRow as any)?.experience_level ?? null,
       },
+      landmarks,
+      week_start_date: utcMonday,
     };
   });
+
 
 export const getWeightTrend = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
