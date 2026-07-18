@@ -683,7 +683,18 @@ function ExerciseLogger({
   );
 }
 
+function prLabel(p: { pr_type: string; value: number; exercise_name: string }): string {
+  switch (p.pr_type) {
+    case "max_weight": return `${p.exercise_name} ${p.value}kg`;
+    case "max_est_1rm": return `${p.exercise_name} est 1RM ${p.value}kg`;
+    case "max_reps_at_weight": return `${p.exercise_name} ${p.value} reps`;
+    case "max_volume": return `${p.exercise_name} volume ${p.value}kg`;
+    default: return `${p.exercise_name} PR`;
+  }
+}
+
 function SetRow({
+
   exercise, setNumber, existing, onLogged, dayPlan, allLogs, todayISO,
 }: {
   exercise: Exercise; setNumber: number; existing: SetLog | null; onLogged: () => void;
@@ -738,10 +749,23 @@ function SetRow({
       if (error) throw error;
       onLogged();
       if (completed) await maybeWriteTrainingSummary(dayPlan, allLogs, row, todayISO);
+      if (completed) {
+        try {
+          const { data: prRes } = await supabase.functions.invoke("detect-prs", {
+            body: { user_id: uid, entry_date: todayISO, exercise_name: exercise.name },
+          });
+          const prs = (prRes as any)?.prs as Array<{ pr_type: string; value: number; exercise_name: string }> | undefined;
+          if (prs && prs.length > 0) {
+            const label = prs.map(prLabel).join(" · ");
+            toast.success(`New PR — ${label}`);
+          }
+        } catch { /* PR detection must never block save */ }
+      }
       // If we couldn't classify, open the picker AFTER the save landed.
       if (!resolvedMuscle && upserted?.id) {
         setPickerFor({ setId: upserted.id as string, exerciseName: exercise.name });
       }
+
     } catch (e: any) {
       toast.error(e?.message ?? "Save failed");
     } finally {
