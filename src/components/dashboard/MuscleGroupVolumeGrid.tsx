@@ -1,26 +1,32 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { getMuscleGroupWeeklyVolume } from "@/lib/coach.functions";
+import {
+  MUSCLE_GROUP_DISPLAY_ORDER,
+  MUSCLE_GROUP_LABELS,
+  effectiveLandmarks,
+  type Landmarks,
+} from "@/lib/volume-landmarks";
 import { T } from "./tokens";
 
-const MUSCLE_GROUPS: Array<{ key: keyof Groups; label: string }> = [
-  { key: "chest", label: "Chest" },
-  { key: "back", label: "Back" },
-  { key: "shoulders", label: "Shoulders" },
-  { key: "legs", label: "Legs" },
-  { key: "arms", label: "Arms" },
-  { key: "core", label: "Core" },
-];
+type Band = "neutral" | "undertrained" | "productive" | "high" | "overreach";
 
-type Groups = {
-  chest: number; back: number; shoulders: number;
-  legs: number; arms: number; core: number;
-};
+function bandFor(sets: number, l: Landmarks | null): Band {
+  if (!l) return "neutral";
+  if (sets < l.mev) return "undertrained";
+  if (sets < l.mav) return "productive";
+  if (sets <= l.mrv) return "high";
+  return "overreach";
+}
 
-function color(sets: number) {
-  if (sets >= 10 && sets <= 20) return T.green;
-  if (sets < 5 || sets > 25) return T.red;
-  return T.amber;
+function colorFor(band: Band): string {
+  switch (band) {
+    case "productive": return T.green;
+    case "high": return T.amber;
+    case "overreach": return T.red;
+    case "undertrained": return T.text3;
+    case "neutral": default: return T.text3;
+  }
 }
 
 export function MuscleGroupVolumeGrid() {
@@ -32,11 +38,20 @@ export function MuscleGroupVolumeGrid() {
     gcTime: 1000 * 60 * 60 * 2,
   });
 
+  const groups = (data?.groups ?? {}) as Record<string, number>;
+  const experience = data?.profile?.experience_level ?? null;
+  const goal = data?.profile?.goal ?? null;
+
   return (
-    <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-      {MUSCLE_GROUPS.map(({ key, label }) => {
-        const sets = data?.groups?.[key] ?? 0;
-        const c = color(sets);
+    <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2">
+      {MUSCLE_GROUP_DISPLAY_ORDER.map((key) => {
+        const sets = groups[key] ?? 0;
+        // TODO(B5): after weekly_volume_landmarks.fuel_adjusted_mrv is written
+        // per week, prefer that row's MRV over effectiveLandmarks().mrv when
+        // one exists for the current week.
+        const landmarks = effectiveLandmarks(key, experience, goal);
+        const band = bandFor(sets, landmarks);
+        const c = colorFor(band);
         return (
           <div
             key={key}
@@ -46,7 +61,7 @@ export function MuscleGroupVolumeGrid() {
               borderRadius: 12,
               padding: 12,
               textAlign: "center",
-              borderTop: `2px solid ${c}`,
+              borderTop: band === "neutral" ? `1px solid ${T.border}` : `2px solid ${c}`,
             }}
           >
             <div
@@ -58,7 +73,7 @@ export function MuscleGroupVolumeGrid() {
                 marginBottom: 6,
               }}
             >
-              {label}
+              {MUSCLE_GROUP_LABELS[key]}
             </div>
             <div
               style={{
