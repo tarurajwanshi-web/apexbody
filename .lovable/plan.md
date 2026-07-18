@@ -1,98 +1,78 @@
-## Step 8 rebuild — goal-differentiated pace, evidence-based rates
+## Batch: Training Engine Schema Foundation
 
-Single file: `src/routes/_authenticated/onboarding.tsx`. No schema changes, no engine changes. Contract with `macro-calculation.ts` preserved: `target_rate_pct` is the only value written, signed by goal, nullable for athletic performance.
+One new migration file `supabase/migrations/<ts>_training_engine_foundation.sql` containing the exact SQL you specified, in the exact order (Part 1 → Part 4), followed by the 4 verification queries.
 
-### 1. Replace the global `PACES` constant with per-goal rate tables
+### Pre-flight confirmations
 
-```ts
-type PaceId = "steady" | "standard" | "aggressive";
+- `public.update_updated_at_column()` exists (confirmed in db-functions context — plpgsql, sets `NEW.updated_at`). Safe to attach as `BEFORE UPDATE` trigger on the three new tables.
+- `public.workout_set_logs` exists with 16 columns. `ADD COLUMN IF NOT EXISTS` is safe for all 8 additions.
+- Existing RLS pattern verified: own-rows via `auth.uid() = user_id`, `SELECT` to authenticated, engine tables (like `readiness_scores`) have no authenticated write policies — matches the spec.
 
-// pct is the |%/week| magnitude. Sign applied at submit from GOAL_DIRECTION.
-const PACES_FAT_LOSS: PaceItem[] = [
-  { id: "steady",     label: "Steady",     pct: 0.35, blurb: "0.35%/week — sustainable, protects lean mass" },
-  { id: "standard",   label: "Standard",   pct: 0.5,  blurb: "0.5%/week — recommended for most" },
-  { id: "aggressive", label: "Aggressive", pct: 0.75, blurb: "0.75%/week — lean users, short cuts only" },
-];
-const PACES_MUSCLE_GAIN = [ 0.25 / 0.4 / 0.6, "Steady / Standard / Aggressive", copy per spec ];
-const PACES_STRENGTH    = [ 0.15 / 0.25 / 0.4, "Recover-eat / Standard / Push harder" ];
-const PACES_RECOMP      = [ { id, label, kcalDelta: 100 / 250 / 400, blurb } ]; // magnitude, not %
-```
+### ⚠️ Two overlap conflicts to resolve before I write the migration
 
-Recomp items carry `kcalDelta` (kcal/day below TDEE), not `pct`. Convert at submit:  
-`target_rate_pct = -((kcalDelta * 7) / 7700) / currentWeightKg` → small negative (~-0.0013 to -0.005).
+`workout_set_logs` already has columns that partially overlap the additive block:
 
-### 2. `TargetStep` — branch by goal
 
-- `fat_loss` / `muscle_gain` / `strength`: current layout (target weight input + three pills), but pace list comes from the goal-specific table. Sub-copy per spec.
-- `recomposition`:
-  - Title: "How aggressive should the recomp be?" Sub: "Recomp works best in a small deficit while training hard."
-  - Target weight input **prefilled to current weight and editable** (users maintaining scale weight).
-  - Three magnitude pills: Mild 100 / Moderate 250 / Focused 400 kcal/day.
-  - Below the selected pill: "Track for 8+ weeks to see change" (patience copy, replaces time-to-goal).
-- `athletic_performance`:
-  - Title: "What's your competition weight?" Target weight input only.
-  - **No pace pills.** Single info card: "Maintain your competition weight — We'll match your calories to your training load. Your targets will move up on heavy days and down on rest days."
+| Existing column               | Spec adds               | Behavior with `IF NOT EXISTS`                                     |
+| ----------------------------- | ----------------------- | ----------------------------------------------------------------- |
+| `rir smallint`                | `actual_rir smallint`   | Both will exist. `rir` untouched, new `actual_rir` created empty. |
+| `rest_seconds_actual integer` | `rest_seconds smallint` | Both will exist. Redundant storage, two-source-of-truth risk.     |
+| `muscle_group text`           | `muscle_group text`     | No-op (IF NOT EXISTS skips). ✅ Fine.                              |
 
-### 3. Real-time guardrail block under the selected pill
 
-Rendered for fat_loss / muscle_gain / strength (skipped for recomp and athletic):
+Also existing (no conflict, just FYI): `rpe smallint`, `target_reps int`, `target_weight_kg numeric` — spec adds `target_rir` which is the RIR sibling of `target_reps`, so that pairing is clean.
 
-- **Time-to-goal:** `weeks = ceil(|target - current| / (current * pct))` → `"~{weeks} weeks to reach {targetWeight}{unit}"`.
-- **Calorie floor warning:** compute est. target calories via Mifflin-St Jeor + 1.55 activity, subtract kcal delta implied by the pill (`pct * currentKg * 7700 / 7` for fat_loss). Floor: 1500 M / 1200 F. If below → `--warn` line "This would put you below {floor} kcal. We'll cap at the floor and the timeline extends." **Does not block selection.**
-- **Long-cut nudge (fat_loss only, weeks > 20):** italic secondary text "Long cuts are hard to sustain. Consider a Steady pace with a diet break every 8–12 weeks."
+**Question:** how do you want to handle `rir` and `rest_seconds_actual`?
 
-Recomp shows only the patience line. Athletic shows nothing (no pills).
+- **Option A (recommended, still pure SQL):** Skip adding `actual_rir` and `rest_seconds` — treat existing `rir` as `actual_rir` and `rest_seconds_actual` as `rest_seconds`. Migration adds 6 columns instead of 8. Verification query updated to reflect 6.
+- **Option B:** Apply spec verbatim (adds duplicates). B3/B4/B5 will need to pick one column and ignore the other; downstream code has to remember which.
+- **Option C:** Rename existing columns to the spec names in this migration (`rir` → `actual_rir`, `rest_seconds_actual` → `rest_seconds`). Not additive — touches existing data, but zero rows today likely makes this cheap. Requires I check row count first.
 
-BMI unrealistic-target check: keep the existing `targetError` red messages for now (spec says "silent for engine, no onboarding warning" — but the current code already hard-blocks BMI < 18.5 / ≥ 35 via `canContinue`. Keeping the current behavior avoids regressing safety; the "silent guardrail via engine_audit_log" is out of scope for this file). Flagging as follow-up.
+No other conflicts. Parts 2–4 (`mesocycle_state`, `weekly_volume_landmarks`, `personal_records`) reference no existing objects beyond `auth.users`, `workout_set_logs.id`, and `update_updated_at_column()` — all present.
 
-### 4. Submit logic (`submit` function, ~line 205)
+### What the migration will contain once you pick A/B/C
 
-Replace the current `chosenPace` line:
+1. Part 1: `ALTER TABLE workout_set_logs` — 6 or 8 `ADD COLUMN IF NOT EXISTS` (depending on choice), plus the two `CHECK` constraints (`set_type_check`, `pr_type_check`) with `DROP … IF EXISTS` first for idempotency.
+2. Part 2: `mesocycle_state` — CREATE TABLE → GRANT (authenticated SELECT, service_role ALL) → ENABLE RLS → own-rows SELECT policy → partial unique index on `(user_id) WHERE is_active` → `updated_at` trigger.
+3. Part 3: `weekly_volume_landmarks` — same 4-step order, unique `(user_id, week_start_date, muscle_group)`, `updated_at` trigger.
+4. Part 4: `personal_records` — same 4-step order, index `(user_id, exercise_name, achieved_date DESC)`. No `updated_at` (spec has no updated_at column).
+5. Verification block as SQL comments at the bottom, plus I'll run the 4 queries after apply and paste results.
 
-```ts
-let targetRatePct: number | null;
-if (goal === "athletic_performance") {
-  targetRatePct = null;
-} else if (goal === "recomposition") {
-  const item = PACES_RECOMP.find(p => p.id === draft.pace) ?? PACES_RECOMP[1]; // Moderate default
-  const weeklyKg = (item.kcalDelta * 7) / 7700;
-  targetRatePct = -(weeklyKg / Number(draft.weightKg)); // small negative
-} else {
-  const table = tableFor(goal);
-  const item = table.find(p => p.id === draft.pace) ?? table[1]; // Standard default
-  const sign = GOAL_DIRECTION[goal] === "lose" ? -1 : 1;
-  targetRatePct = sign * (item.pct / 100);
-}
-```
+Grants match the spec (authenticated SELECT only, service_role ALL — writes are engine-owned, no anon).
 
-Ensures target_rate_pct is never null for fat_loss/muscle_gain/strength/recomp even if the user skips (Standard/Moderate default persisted). `athletic_performance` writes null intentionally.
+### Approve with your choice
 
-### 5. `canContinue` for step 8
+# Reply "A", "B", or "C" (or override the plan) and I'll build the migration file.  
+  
+  
+Option A, modified — reuse existing columns, add only what's genuinely missing. Do NOT rename anything (rir and rest_seconds_actual are referenced in 9+ live code locations: workouts.tsx set logger, coach.functions.ts, generate-plan, generate-daily-coach-note, ExerciseHistoryPanel — renaming breaks all of them).
 
-- `athletic_performance`: only requires valid target weight.
-- `recomposition`: target weight defaults to current, so valid by construction; require a pace pill selected? → No, allow Moderate default (matches spec "engines never see null"). Same rule for the other three goals — pace optional, defaulted at submit. Keeps flow fast.
-- Existing BMI/direction validation retained.
+Reconcile the additive block as follows:
 
-### 6. Review row (line 854)
+KEEP EXISTING, DO NOT ADD:
 
-`Pace` row copy adapts:
-- fat_loss / muscle_gain / strength: `{Label} · {pct}%/week`
-- recomp: `{Label} · ~{kcalDelta} kcal/day below TDEE`
-- athletic: `Match training load`
+- Existing `rir` IS actual_rir. Do not add actual_rir. Downstream functions (B3/B4/B5) will read `rir`.
 
-### Verification (per spec)
+- Existing `rest_seconds_actual` IS rest_seconds. Do not add rest_seconds. Downstream reads `rest_seconds_actual`.
 
-Manual walkthroughs after build:
-1. 90→80kg fat loss, Aggressive → shows ~15 weeks, no floor warning.
-2. 55→50kg female, Aggressive → floor warning fires, selection still allowed.
-3. Muscle gain user → three pills 0.25 / 0.4 / 0.6, submit writes positive target_rate_pct.
-4. Strength user → 0.15 / 0.25 / 0.4 surplus pills, positive rate.
-5. Recomp user, 70kg, Moderate → target_rate_pct ≈ -0.00325; patience copy shown.
-6. Athletic → no pills, single maintenance card, submit writes null.
-7. Every pill selection updates time-to-goal / warning inline.
+- Existing `muscle_group` — no-op, already present.
 
-### Out of scope (flagged, not done here)
+ADD ONLY these 5 genuinely-missing columns:
 
-- New `recomp_kcal_delta` column (spec explicitly says defer — we reuse target_rate_pct as designed).
-- Silent BMI guardrail via `engine_audit_log` (keep current visible BMI blocks; engine-side silent logging is a follow-up).
-- Any macro-calculation.ts / edge function changes.
+  target_rir smallint          (the RIR sibling of existing target_reps — clean pairing, confirmed absent)
+
+  set_type text NOT NULL DEFAULT 'working'
+
+  is_pr boolean NOT NULL DEFAULT false
+
+  pr_type text
+
+  is_accessory_block boolean NOT NULL DEFAULT false
+
+KEEP both CHECK constraints (set_type_check, pr_type_check) with DROP IF EXISTS first.
+
+Parts 2-4 (mesocycle_state, weekly_volume_landmarks, personal_records) — apply verbatim, no changes.
+
+Update the verification query to check for these 5 new columns (not 8): target_rir, set_type, is_pr, pr_type, is_accessory_block. Plus confirm existing rir, rest_seconds_actual, muscle_group are still present and untouched.
+
+Confirm before applying: grep the codebase for any existing target_rir, set_type, is_pr, pr_type, is_accessory_block on workout_set_logs to be 100% sure none already exist. If any do, skip that ADD.
