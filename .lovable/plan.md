@@ -1,127 +1,101 @@
-## B2 — Close the chronic-fatigue gap (per-muscle weekly volume)
+# B3 — PR Detection
 
-Two fatigue clocks stay separate: **acute** (`calculate-score` systemic_load, 4-day decay — untouched) and **chronic** (weekly sets per muscle vs landmarks — this batch). Nothing in `calculate-score/index.ts` is edited.
+Deterministic edge function `detect-prs` + minimal client hook. No LLM, no schema changes (schema landed in `20260718135813`).
 
-### Pre-flight confirmations from reads
+## 1. New file: `supabase/functions/detect-prs/index.ts`
 
-- `training-rules.ts` lines 36–40: `MUSCLE_GROUPS` = 14 keys — chest, back, shoulders, quads, hamstrings, glutes, calves, biceps, triceps, forearms, core, full_body, cardio, mobility. My `VOLUME_LANDMARKS` matches this exactly.
-- `training-rules.ts` `Goal` type = 5 values: fat_loss, muscle_gain, strength, recomposition, athletic_performance. The spec's `GOAL_MAV_MULTIPLIER` also lists `hypertrophy` and `general_fitness` which don't exist in that enum. **I'll keep them in the map (harmless dead keys) and rely on the "unknown goal → 1.0 fallback" branch so any drift in `profiles.goal` never crashes.** Called out for the reviewer, not a blocker.
-- `workouts.tsx` line 708: set-log insert already writes `muscle_group: exercise.muscle_group ?? null` when the exercise object carries it. Gap is only the null branch (custom / swapped / manually-typed exercises).
-- `coach.functions.ts` line 315–333: `getMuscleGroupWeeklyVolume` reads `workout_set_logs.muscle_group` but currently buckets into 6 coarse groups (chest/back/shoulders/legs/arms/core), losing quads vs hamstrings vs glutes granularity that the heat map needs for per-muscle MEV/MAV/MRV coloring. Fixing this is required for Part 4 to be honest — extending the plan by one small piece.
-- `MuscleGroupVolumeGrid.tsx` renders 6 tiles with a shared `color()` threshold — matches the spec's diagnosis.
-- `weekly_volume_landmarks` table already exists (foundation batch); `fuel_adjusted_mrv` column is expected there for the post-B5 upgrade path. TODO comment only, no code today.
+Auth: reuse `authorizeCaller(req, supabase, user_id)` (same pattern as `calculate-score`) so the user's session JWT is accepted. CORS block identical to `calculate-score`. Service-role client for all reads/writes (personal_records has service-role-only writes).
 
-### Part 1 — `supabase/functions/_shared/volume-landmarks.ts` (new, pure module)
+Input (POST JSON):
 
-- Export `VOLUME_LANDMARKS` keyed to all 14 `MUSCLE_GROUPS`, exact numbers from the spec, 3 non-hypertrophy keys `null`.
-- Export `EXPERIENCE_MULTIPLIER` and `GOAL_MAV_MULTIPLIER` as specified.
-- Export `effectiveLandmarks(muscle, experience, goal)` → applies `EXPERIENCE_MULTIPLIER` to mev/mav/mrv and `GOAL_MAV_MULTIPLIER` to `mav` only (per RP convention — goal shifts the productive ceiling, not the floor or true max); unknown muscle / null landmarks → returns `null`; unknown experience or goal → falls back to 1.0 silently, never throws.
-- **Mirror the module to `src/lib/volume-landmarks.ts` as a thin re-export** (or duplicate constants) so the browser bundle can import it without pulling the `_shared/` Deno path. Same numbers, single source of truth via the constants living in one of the two files and the other re-exporting.
+```
+{ user_id: string, entry_date: string (YYYY-MM-DD), exercise_name: string }
+```
 
-### Part 2 — Muscle resolution at log time (`src/routes/workouts.tsx`)
+### Algorithm
 
-Extend the existing `save()` in `SetRow` (line 693):
+1. **Load history.** `SELECT id, entry_date, weight_kg, reps_completed FROM workout_set_logs` WHERE `user_id`, `exercise_name` match, `completed = true`, `weight_kg IS NOT NULL`, `reps_completed IS NOT NULL AND reps_completed > 0`, `set_type <> 'warmup'`.
+2. **Split** into `today` (entry_date === input.entry_date) and `history` (entry_date < input.entry_date). If `history.length === 0` → return `{ prs: [] }` (first-ever entry never celebrates; step 5 also clears `is_pr` for today).
+3. **Epley 1RM** per set: `est1rm = weight * (1 + reps / 30)`. Comment cites Epley (1985). Skip est1rm PR candidacy when `reps > 12` (still eligible for max_weight / max_reps / max_volume).
+4. **Compute prior bests from history:**
+  - `priorMaxWeight = max(weight_kg)`
+  - `priorMaxEst1rm = max(est1rm) over sets with reps <= 12`
+  - `priorMaxRepsAtWeight: Map<weight_kg, maxReps>`
+  - `priorMaxVolume = max(weight_kg * reps_completed)` (single-set)
+5. **Recompute `is_pr` for today's sets from scratch:** first `UPDATE workout_set_logs SET is_pr=false, pr_type=NULL` for user+exercise+entry_date. Then iterate today's sets in `set_number` order and, for each set, check the four PR types against the running bests (bests update as we iterate today's sets, so the second identical-weight set of the day doesn't double-flag max_weight). A set that triggers any PR type gets `is_pr = true` and `pr_type = <highest priority>` with priority `max_est_1rm > max_weight > max_volume > max_reps_at_weight`.
+6. **De-dupe personal_records writes:** for each detected PR, `SELECT value FROM personal_records WHERE user_id, exercise_name, pr_type ORDER BY achieved_date DESC, created_at DESC LIMIT 1`. Insert only when new value is strictly greater. Row: `{ user_id, exercise_name, pr_type, value, reps: reps_completed, weight_kg, achieved_date: entry_date, set_log_id }`. `value` rounded to 1 decimal for `max_est_1rm`, kept exact for others.
+7. **Return** `{ prs: [{ pr_type, value, exercise_name }, ...] }` — one entry per PR row inserted.
 
-1. Resolve `resolvedMuscle` before insert:
-  - if `exercise.muscle_group` present → use it (current behavior).
-  - else look up `user_exercise_muscle_map` by `(user_id, exercise_name_key)` where `exercise_name_key = exercise.name.trim().toLowerCase()` → use it if found.
-  - else `null` — proceed with insert unblocked.
-2. Insert the set immediately with whatever `resolvedMuscle` we have. **Never block the save on classification.**
-3. If `resolvedMuscle` was `null` after save, open a lightweight modal/sheet `<MusclePickerSheet>` (new small component, same file) that shows chips for the 14 `MUSCLE_GROUPS` values (with human labels). On pick:
-  - `UPDATE workout_set_logs SET muscle_group = <pick> WHERE id = <inserted id>` (RLS lets the owner update their own set — existing policy).
-  - `INSERT` into `user_exercise_muscle_map` `ON CONFLICT (user_id, exercise_name_key) DO UPDATE SET muscle_group = EXCLUDED.muscle_group`.
-  - Toast the confirmation.
-4. Dismissing the picker is fine — set stays saved with `muscle_group = null`; next time it prompts again.
+Idempotency: step 5 wipes+recomputes `is_pr` each call; step 6 blocks duplicate personal_records rows. Editing a set down never deletes historical PRs; `is_pr` on that set drops to false on next call.
 
-Reuse the existing bg-3/text-primary tokens; no new styling primitives.
+## 2. Client wire-up: `src/routes/workouts.tsx` SetRow.save (~L740)
 
-### Part 3 — Migration: `user_exercise_muscle_map`
+Right after `if (completed) await maybeWriteTrainingSummary(...)`:
 
-Exact SQL from the spec. Ordered: `CREATE TABLE` → `GRANT` (authenticated select/insert/update, service_role all — no delete since it's user-owned classification with no destructive UX) → `ENABLE RLS` → 3 own-rows policies (select/insert/update). `exercise_name_key` is the lowercased trimmed name (same nameKey approach as `exercise_image_cache`, called out as a code comment above the constraint). No trigger needed.
+```ts
+if (completed) {
+  try {
+    const { data: prRes } = await supabase.functions.invoke("detect-prs", {
+      body: { user_id: uid, entry_date: todayISO, exercise_name: exercise.name },
+    });
+    const prs = (prRes as any)?.prs as Array<{ pr_type: string; value: number; exercise_name: string }> | undefined;
+    if (prs && prs.length > 0) {
+      const label = prs.map(p => prLabel(p)).join(" · ");
+      toast.success(`New PR — ${label}`);
+    }
+  } catch { /* PR detection must never break saving */ }
+}
+```
 
-### Part 4 — Heat map coloring (`MuscleGroupVolumeGrid.tsx` + data source)
+Small local `prLabel({pr_type, value, exercise_name})` helper (plain text, no emoji):
 
-**Data source change (`coach.functions.ts` `getMuscleGroupWeeklyVolume`):**
+- `max_weight` → `${exercise_name} ${value}kg`
+- `max_est_1rm` → `${exercise_name} est 1RM ${value}kg`
+- `max_reps_at_weight` → `${exercise_name} ${value} reps`
+- `max_volume` → `${exercise_name} volume ${value}kg`
 
-- Return the full 14-key bucket (chest, back, shoulders, quads, hamstrings, glutes, calves, biceps, triceps, forearms, core, full_body, cardio, mobility). Alias legacy strings once: `delts→shoulders`, `abs/obliques→core`, `lats→back`, `quadriceps→quads` — everything else must be a canonical `MUSCLE_GROUPS` value or dropped.
-- Also return the user's `experience_level` and `goal` from `profiles` in the same call (single extra select, avoids threading through the dashboard loader).
+Gate: only invoked when `completed === true`. Warmup skipping is enforced server-side (via `set_type <> 'warmup'`); today's UI has no warmup toggle yet, so nothing extra to guard client-side.
 
-**Component change (`MuscleGroupVolumeGrid.tsx`):**
+## 3. No config changes
 
-- Replace the hardcoded `color()` with `bandFor(sets, landmarks)`:
-  - `landmarks === null` → neutral (grey text on default surface, no top-border tint) — cardio/mobility/full_body just show count.
-  - `sets < mev` → undertrained (blue-ish / muted, uses `--bg-3` border + text-secondary; **not red** — headroom, not alarm).
-  - `mev ≤ sets < mav` → productive (`T.green`).
-  - `mav ≤ sets ≤ mrv` → high-but-recoverable (`T.amber`).
-  - `sets > mrv` → overreaching (`T.red`).
-- Grid changes from 6 tiles to 14 tiles. Layout: `grid-cols-3 md:grid-cols-4 lg:grid-cols-7` (keeps mobile density reasonable). Hypertrophy muscles first, then non-scored (cardio/mobility/full_body) grouped last so the neutral tiles don't fragment the productive band visually.
-- Compute per-tile via `effectiveLandmarks(key, profile.experience_level, profile.goal)`.
-- **TODO comment** above the landmarks call: "After B5 ships `weekly_volume_landmarks.fuel_adjusted_mrv` per-week rows, prefer that value over `effectiveLandmarks().mrv` when a row exists for the current week."
+`supabase/config.toml`: not touched. detect-prs runs with the platform default (JWT verified by our own `authorizeCaller`, same as calculate-score).
 
-Existing `T` tokens (`tokens.ts`) provide green/amber/red — no new colors.
+## 4. Verification (must pass before B4)
 
-### What is NOT in this batch
+Using a clean synthetic user:
 
-- No changes to `calculate-score/index.ts` (acute clock stays intact).
-- No `fuel_adjusted_mrv` writes — B5's job.
-- No exercise-video / large exercise dataset import.
-- No deload-trigger logic — reads landmarks but decisioning is a later batch.
+1. Log Bench Press 60kg x 8 → invoke detect-prs → `{ prs: [] }`. `personal_records` empty; `is_pr` false.
+2. Next day, Bench 62.5kg x 8 → prs contain `max_weight (62.5)`, `max_volume (500)`, `max_est_1rm (~79)`. Row's `is_pr=true`, `pr_type='max_est_1rm'`.
+3. Next day, Bench 62.5kg x 10 → `max_reps_at_weight (10)` and `max_volume (625)` (and likely `max_est_1rm`).
+4. Re-invoke detect-prs for the same day+exercise → 0 new rows inserted.
+5. Insert a warmup set (`set_type='warmup'`) at 100kg x 3 directly via SQL → invoke → no PR.
+6. `SELECT exercise_name, pr_type, value, achieved_date FROM personal_records WHERE user_id=<test> ORDER BY created_at DESC` matches expectations.
+7. Log Bench 60kg x 15 (fresh user) after a prior 60kg x 12 baseline → `max_reps_at_weight` and `max_volume` fire; `max_est_1rm` does NOT (reps > 12).
 
-### Files touched
+## Out of scope
 
+- Full PR feed UI (later frontend batch)
+- Landmark-based warmup autodetection
+- Deleting personal_records on downward edits (per spec: PRs are historical facts)
 
-| File                                                    | Change                                                                                                    |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `supabase/functions/_shared/volume-landmarks.ts`        | NEW — landmarks, multipliers, `effectiveLandmarks()` helper.                                              |
-| `src/lib/volume-landmarks.ts`                           | NEW — browser-safe mirror (re-exports constants).                                                         |
-| `supabase/migrations/<ts>_user_exercise_muscle_map.sql` | NEW — table + grants + RLS + 3 policies.                                                                  |
-| `src/routes/workouts.tsx`                               | Extend `SetRow.save()` with lookup + non-blocking `MusclePickerSheet`; add small sheet component in-file. |
-| `src/lib/coach.functions.ts`                            | Widen `getMuscleGroupWeeklyVolume` to 14 canonical keys + return profile experience/goal.                 |
-| `src/components/dashboard/MuscleGroupVolumeGrid.tsx`    | 14-tile layout; `bandFor()` per-muscle landmark coloring; TODO for post-B5.                               |
+&nbsp;
 
-
-### Verification (post-build)
-
-1. `grep -n "chest:\|full_body:\s*null" supabase/functions/_shared/volume-landmarks.ts` — all 14 keys present, 3 null.
-2. Log a set from a generated plan exercise on a test user → `SELECT exercise_name, muscle_group FROM workout_set_logs WHERE user_id=... ORDER BY created_at DESC LIMIT 5;` shows non-null muscle_group.
-3. Log a custom exercise → set inserts immediately, picker appears, pick chest → row patched, `user_exercise_muscle_map` row present; log the same name again → no picker.
-4. Seed a user with 8 sets on back + 8 sets on core → heat map shows back tile in the undertrained band (below MEV 10) and core tile in the productive band (above MEV 6) — proves per-muscle landmarks.
-5. Cardio/mobility tiles render neutral (no red/green).
-6. `sed -n '700,720p' supabase/functions/calculate-score/index.ts` matches pre-batch content (decay map untouched).
-
-# Reply **approve** to build, or push back on any part (esp. the 14-tile grid layout, the `hypertrophy`/`general_fitness` dead-key handling, or the browser/edge landmark mirror).  
+#   
   
-  
-Approve, with ONE required change to Part 4's data-source remap and two confirmations.
+Approve, with ONE correctness fix to step 6 de-dupe.
 
-REQUIRED CHANGE — do not silently DROP unmapped muscle_group values. Instead:
-
-- Map the known legacy aliases exactly as the CURRENT code already does (it's the source of truth for what legacy strings exist): lats→back, delts/deltoids→shoulders, quadriceps→quads, abs/obliques→core. Preserve ALL of these — the current getMuscleGroupWeeklyVolume already handles them, so your 14-key version must too or you REGRESS existing counts.
-
-- For any value that is neither a canonical MUSCLE_GROUPS key nor a known alias: bucket it into a "unclassified" count that is RETURNED (not dropped), and log a console.warn with the offending string. Reason: a dropped set silently under-reports weekly volume, which later mis-fires the deload trigger. We must SEE unmapped values, not lose them. The heat map can render unclassified separately or ignore it for coloring, but the data must not vanish.
-
-CONFIRM before building:
-
-1. Run this to see what legacy values actually exist so we know the alias list is complete:
-
-   SELECT DISTINCT lower(trim(muscle_group)) AS mg, count(*) 
-
-   FROM workout_set_logs WHERE muscle_group IS NOT NULL GROUP BY 1 ORDER BY 2 DESC;
-
-   Paste the result. If anything appears that isn't a canonical key or a known alias, add it to the alias map before shipping.
-
-2. The browser mirror (src/lib/volume-landmarks.ts): confirm the constants live in ONE file and the other re-exports, so the numbers can never drift between edge and browser. A duplicate-constants approach where both files hardcode the same numbers is NOT acceptable — one source, one re-export.
-
-Everything else in your plan is approved as written:
-
-- hypertrophy/general_fitness dead keys with 1.0 fallback: fine.
-
-- 14-tile grid grid-cols-3 md:grid-cols-4 lg:grid-cols-7, hypertrophy muscles first, neutral tiles last: fine.
-
-- effectiveLandmarks applying goal multiplier to MAV only (not MEV/MRV): correct, that's proper RP convention.
-
-- Non-blocking set save + MusclePickerSheet + user_exercise_muscle_map ON CONFLICT upsert: correct.
-
-- calculate-score untouched: required, confirmed.
-
-- The post-B5 fuel_adjusted_mrv TODO comment (no fake value now): correct.
+- The de-dupe currently compares the new PR value against the MOST RECENT personal_records row (ORDER BY achieved_date DESC LIMIT 1). This is wrong — a PR is only real if it beats the ALL-TIME best, not the latest-dated one. With backdated edits or out-of-order logging, "most recent" can be lower than a genuine prior best, letting a non-PR through.
+  Change step 6 to:
+    SELECT MAX(value) AS best FROM personal_records
+    WHERE user_id = $1 AND exercise_name = $2 AND pr_type = $3;
+  Insert only when the new value is strictly greater than best (or best IS NULL = first PR of this type). This makes "is it a PR?" mean "beats all-time best for this type," which is the only correct definition.
+  Note this must stay CONSISTENT with step 4, which already computes prior bests from the workout_set_logs history (not from personal_records). Two sources of "prior best" now exist: step 4 reads set-log history, step 6 reads personal_records. They should agree, but personal_records is the authoritative PR ledger. Keep step 4 as the detection trigger (fast, from live sets) and step 6 MAX(value) as the write-guard (authoritative, prevents a duplicate/regressive row). If they ever disagree (e.g. a set was deleted but its PR row remains), the personal_records MAX wins for the write guard — that's correct, because a PR that was genuinely hit remains a historical fact even if the set row was later removed.
+  Everything else approved as written:
+  - history/today split with entry_date < input.entry_date: correct
+  - first-ever entry returns {prs:[]} and clears is_pr: correct
+  - Epley with reps>12 skip for est_1rm only: correct
+  - step 5 wipe-and-recompute is_pr per call (idempotent): correct
+  - running bests update as today's sets iterate (no double-flag): correct, good catch by you
+  - priority max_est_1rm > max_weight > max_volume > max_reps_at_weight: correct
+  - client try/catch never blocks save, plain-text toast: correct
+  - authorizeCaller + service-role writes: correct
