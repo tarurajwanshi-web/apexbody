@@ -259,6 +259,48 @@ export type Database = {
         }
         Relationships: []
       }
+      mesocycle_state: {
+        Row: {
+          block_length_weeks: number
+          block_number: number
+          block_start_date: string
+          created_at: string
+          goal: string
+          id: string
+          is_active: boolean
+          phase: string
+          updated_at: string
+          user_id: string
+          week_in_block: number
+        }
+        Insert: {
+          block_length_weeks?: number
+          block_number?: number
+          block_start_date: string
+          created_at?: string
+          goal: string
+          id?: string
+          is_active?: boolean
+          phase?: string
+          updated_at?: string
+          user_id: string
+          week_in_block?: number
+        }
+        Update: {
+          block_length_weeks?: number
+          block_number?: number
+          block_start_date?: string
+          created_at?: string
+          goal?: string
+          id?: string
+          is_active?: boolean
+          phase?: string
+          updated_at?: string
+          user_id?: string
+          week_in_block?: number
+        }
+        Relationships: []
+      }
       nutrition_daily_summaries: {
         Row: {
           compliance_pct: number | null
@@ -482,6 +524,53 @@ export type Database = {
             columns: ["applied_target_id"]
             isOneToOne: false
             referencedRelation: "daily_macro_targets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      personal_records: {
+        Row: {
+          achieved_date: string
+          created_at: string
+          exercise_name: string
+          id: string
+          pr_type: string
+          reps: number | null
+          set_log_id: string | null
+          user_id: string
+          value: number
+          weight_kg: number | null
+        }
+        Insert: {
+          achieved_date: string
+          created_at?: string
+          exercise_name: string
+          id?: string
+          pr_type: string
+          reps?: number | null
+          set_log_id?: string | null
+          user_id: string
+          value: number
+          weight_kg?: number | null
+        }
+        Update: {
+          achieved_date?: string
+          created_at?: string
+          exercise_name?: string
+          id?: string
+          pr_type?: string
+          reps?: number | null
+          set_log_id?: string | null
+          user_id?: string
+          value?: number
+          weight_kg?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "personal_records_set_log_id_fkey"
+            columns: ["set_log_id"]
+            isOneToOne: false
+            referencedRelation: "workout_set_logs"
             referencedColumns: ["id"]
           },
         ]
@@ -1182,6 +1271,51 @@ export type Database = {
         }
         Relationships: []
       }
+      weekly_volume_landmarks: {
+        Row: {
+          completed_sets: number
+          created_at: string
+          fuel_adjusted_mrv: number
+          id: string
+          mav: number
+          mev: number
+          mrv: number
+          muscle_group: string
+          target_sets: number
+          updated_at: string
+          user_id: string
+          week_start_date: string
+        }
+        Insert: {
+          completed_sets?: number
+          created_at?: string
+          fuel_adjusted_mrv: number
+          id?: string
+          mav: number
+          mev: number
+          mrv: number
+          muscle_group: string
+          target_sets: number
+          updated_at?: string
+          user_id: string
+          week_start_date: string
+        }
+        Update: {
+          completed_sets?: number
+          created_at?: string
+          fuel_adjusted_mrv?: number
+          id?: string
+          mav?: number
+          mev?: number
+          mrv?: number
+          muscle_group?: string
+          target_sets?: number
+          updated_at?: string
+          user_id?: string
+          week_start_date?: string
+        }
+        Relationships: []
+      }
       weight_trend_state: {
         Row: {
           last_computed_date: string
@@ -1210,13 +1344,18 @@ export type Database = {
           entry_date: string
           exercise_name: string
           id: string
+          is_accessory_block: boolean
+          is_pr: boolean
           muscle_group: string | null
+          pr_type: string | null
           reps_completed: number | null
           rest_seconds_actual: number | null
           rir: number | null
           rpe: number | null
           set_number: number
+          set_type: string
           target_reps: number | null
+          target_rir: number | null
           target_weight_kg: number | null
           updated_at: string
           user_id: string
@@ -1228,13 +1367,18 @@ export type Database = {
           entry_date: string
           exercise_name: string
           id?: string
+          is_accessory_block?: boolean
+          is_pr?: boolean
           muscle_group?: string | null
+          pr_type?: string | null
           reps_completed?: number | null
           rest_seconds_actual?: number | null
           rir?: number | null
           rpe?: number | null
           set_number: number
+          set_type?: string
           target_reps?: number | null
+          target_rir?: number | null
           target_weight_kg?: number | null
           updated_at?: string
           user_id: string
@@ -1246,13 +1390,18 @@ export type Database = {
           entry_date?: string
           exercise_name?: string
           id?: string
+          is_accessory_block?: boolean
+          is_pr?: boolean
           muscle_group?: string | null
+          pr_type?: string | null
           reps_completed?: number | null
           rest_seconds_actual?: number | null
           rir?: number | null
           rpe?: number | null
           set_number?: number
+          set_type?: string
           target_reps?: number | null
+          target_rir?: number | null
           target_weight_kg?: number | null
           updated_at?: string
           user_id?: string
