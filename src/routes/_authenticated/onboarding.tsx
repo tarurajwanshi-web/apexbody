@@ -310,12 +310,14 @@ function ProfileSetup() {
         } catch {}
       }
 
-      const [macroRes, planRes] = await Promise.allSettled([
+      const [macroRes, planRes, mesoRes] = await Promise.allSettled([
         supabase.functions.invoke("calculate-macros", { body: { user_id: userId } }),
         supabase.functions.invoke("generate-plan", { body: { user_id: userId } }),
+        supabase.functions.invoke("advance-mesocycle", { body: { user_id: userId, mode: "init" } }),
       ]);
       if (macroRes.status === "rejected") console.warn("calculate-macros failed", macroRes.reason);
       if (planRes.status === "rejected") console.warn("generate-plan failed", planRes.reason);
+      if (mesoRes.status === "rejected") console.warn("advance-mesocycle init failed", mesoRes.reason);
 
       navigate({ to: "/dashboard" });
     } catch (e: any) {
