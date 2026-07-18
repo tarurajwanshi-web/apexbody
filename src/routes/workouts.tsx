@@ -11,6 +11,11 @@ import { useAutoRefreshOnVisible } from "@/hooks/use-auto-refresh";
 import { toast } from "sonner";
 import { useUserTimezone, getLocalDateISO } from "@/lib/dates";
 import { resolveTodayPlanDay } from "@/lib/plan.functions";
+import {
+  MUSCLE_GROUP_DISPLAY_ORDER,
+  MUSCLE_GROUP_LABELS,
+  normaliseMuscleGroup,
+} from "@/lib/volume-landmarks";
 
 
 export const Route = createFileRoute("/workouts")({
