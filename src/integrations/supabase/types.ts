@@ -1133,6 +1133,33 @@ export type Database = {
         }
         Relationships: []
       }
+      user_exercise_muscle_map: {
+        Row: {
+          created_at: string
+          exercise_name: string
+          exercise_name_key: string
+          id: string
+          muscle_group: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          exercise_name: string
+          exercise_name_key: string
+          id?: string
+          muscle_group: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          exercise_name?: string
+          exercise_name_key?: string
+          id?: string
+          muscle_group?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_fuelling_evaluations: {
         Row: {
           action: string | null
