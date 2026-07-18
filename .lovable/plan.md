@@ -1,101 +1,113 @@
-# B3 — PR Detection
+# B4 — advance-mesocycle
 
-Deterministic edge function `detect-prs` + minimal client hook. No LLM, no schema changes (schema landed in `20260718135813`).
+Deterministic, service-role-only edge function. No LLM. No schema changes (confirmed: `mesocycle_state` has no `deload_reason` column — spec's "deload_reason set" is returned in JSON only, not persisted). Complements shipped `20260718135813` (mesocycle_state) and B1 landmarks. Onboarding already calls `calculate-macros` + `generate-plan` via `Promise.allSettled`; we append init here.
 
-## 1. New file: `supabase/functions/detect-prs/index.ts`
+## 1. New file: `supabase/functions/advance-mesocycle/index.ts`
 
-Auth: reuse `authorizeCaller(req, supabase, user_id)` (same pattern as `calculate-score`) so the user's session JWT is accepted. CORS block identical to `calculate-score`. Service-role client for all reads/writes (personal_records has service-role-only writes).
+Auth: `authorizeCaller(req, supa, user_id)` — same pattern as detect-prs/calculate-score. Service-role client for reads/writes (mesocycle_state is service-role-write-only). Input: `{ user_id: string, mode?: 'init'|'weekly' }`, default `weekly`. Standard CORS block.
 
-Input (POST JSON):
+### Anchors (module-scoped helpers)
+
+- `upcomingMondayISO(todayISO)`: **byte-for-byte the same math** as `generate-plan/upcomingMonday` (`day===1 ? 0 : (8-day)%7`, UTC). Must not drift — if it does, block_start_date and weekly_plans.week_start_date desynchronize.
+- `getPreviousCompletedLocalWeek(tz)`: import from an inline copy of `src/lib/dates.ts` logic (Deno can't import the src helper directly; re-implement `getLocalDateISO` + Monday-anchored range with `addDaysISO`). One shared helper in `_shared/time-helpers.ts` already handles `userLocalMonday`; extend it with `previousCompletedWeek(tz)` returning `{ start, end }` so the function stays consistent with the rest of the engine.
+
+### Step 0 — mode='init'
+
+1. `SELECT * FROM mesocycle_state WHERE user_id=$1 AND is_active=true` → if row exists, no-op, return `{ initialized:false, alreadyActive:true, ...currentState }`.
+2. Load `profiles.plan_unlock_date, goal, timezone`.
+3. `planMonday = plan_unlock_date ?? upcomingMondayISO(today_UTC)`. Same UTC anchor as generate-plan — do NOT switch to user TZ here; the plan itself is UTC-Monday-anchored so the block must match.
+4. INSERT `{ user_id, block_number:1, week_in_block:1, block_length_weeks:4, block_start_date:planMonday, phase:'accumulation', goal, is_active:true }`. On unique-index conflict (race with a parallel init), swallow and re-select.
+5. Return `{ initialized:true, block_start_date:planMonday, block_number:1, week_in_block:1, phase:'accumulation' }`.
+
+### Step 1 — mode='weekly' guards
+
+1. Load active row → none: `{ skipped:'no_active_block' }`.
+2. Resolve `tz = profiles.timezone ?? 'UTC'`. Compute `todayLocalISO`, `thisMonday` (local Mon of current week), `finishedWeek = previousCompletedWeek(tz)`.
+3. If `todayLocalISO < block_start_date` → `{ skipped:'block_not_started' }`.
+4. **Idempotency:** if `updated_at` falls within `[thisMonday 00:00, thisMonday+7)` in `tz` **and** we've already been through the weekly path this Monday (proxy: `updated_at >= thisMonday` local start), return `{ skipped:'already_advanced_this_week', ...currentState }`. Simpler and no schema change; a second cron fire the same Monday no-ops.
+
+### Step 2 — did they train the finished week?
 
 ```
-{ user_id: string, entry_date: string (YYYY-MM-DD), exercise_name: string }
+SELECT count(*) FROM workout_set_logs
+WHERE user_id=$1 AND completed=true AND set_type<>'warmup'
+  AND entry_date >= finishedWeek.start AND entry_date <= finishedWeek.end
 ```
 
-### Algorithm
+- Count 0 → HOLD. Do NOT UPDATE the row (leaves updated_at untouched, so the idempotency guard still permits a future run if needed on catch-up). Return `{ held:true, reason:'no_training_last_week', block_number, week_in_block, phase }`.
+- Count ≥1 → step 3.
 
-1. **Load history.** `SELECT id, entry_date, weight_kg, reps_completed FROM workout_set_logs` WHERE `user_id`, `exercise_name` match, `completed = true`, `weight_kg IS NOT NULL`, `reps_completed IS NOT NULL AND reps_completed > 0`, `set_type <> 'warmup'`.
-2. **Split** into `today` (entry_date === input.entry_date) and `history` (entry_date < input.entry_date). If `history.length === 0` → return `{ prs: [] }` (first-ever entry never celebrates; step 5 also clears `is_pr` for today).
-3. **Epley 1RM** per set: `est1rm = weight * (1 + reps / 30)`. Comment cites Epley (1985). Skip est1rm PR candidacy when `reps > 12` (still eligible for max_weight / max_reps / max_volume).
-4. **Compute prior bests from history:**
-  - `priorMaxWeight = max(weight_kg)`
-  - `priorMaxEst1rm = max(est1rm) over sets with reps <= 12`
-  - `priorMaxRepsAtWeight: Map<weight_kg, maxReps>`
-  - `priorMaxVolume = max(weight_kg * reps_completed)` (single-set)
-5. **Recompute `is_pr` for today's sets from scratch:** first `UPDATE workout_set_logs SET is_pr=false, pr_type=NULL` for user+exercise+entry_date. Then iterate today's sets in `set_number` order and, for each set, check the four PR types against the running bests (bests update as we iterate today's sets, so the second identical-weight set of the day doesn't double-flag max_weight). A set that triggers any PR type gets `is_pr = true` and `pr_type = <highest priority>` with priority `max_est_1rm > max_weight > max_volume > max_reps_at_weight`.
-6. **De-dupe personal_records writes:** for each detected PR, `SELECT value FROM personal_records WHERE user_id, exercise_name, pr_type ORDER BY achieved_date DESC, created_at DESC LIMIT 1`. Insert only when new value is strictly greater. Row: `{ user_id, exercise_name, pr_type, value, reps: reps_completed, weight_kg, achieved_date: entry_date, set_log_id }`. `value` rounded to 1 decimal for `max_est_1rm`, kept exact for others.
-7. **Return** `{ prs: [{ pr_type, value, exercise_name }, ...] }` — one entry per PR row inserted.
+### Step 3 — fatigue signals (only if advancing)
 
-Idempotency: step 5 wipes+recomputes `is_pr` each call; step 6 blocks duplicate personal_records rows. Editing a set down never deletes historical PRs; `is_pr` on that set drops to false on next call.
+- **Chronic overreach:** read `weekly_volume_landmarks` for the two most recent completed weeks (`finishedWeek` + the one before). `chronic_overreach = ∃ muscle where completed_sets > fuel_adjusted_mrv in BOTH weeks`. Missing rows → false.
+- **Systemic breakdown:** `readiness_scores` last 7 days by `entry_date` (user TZ). Only compute if `>= 3` rows: `avg(final_score) < 40 AND count(training_permission='red_recover') >= 2`. Else false.
 
-## 2. Client wire-up: `src/routes/workouts.tsx` SetRow.save (~L740)
+### Step 4 — advance / deload (precedence A→D)
 
-Right after `if (completed) await maybeWriteTrainingSummary(...)`:
-
-```ts
-if (completed) {
-  try {
-    const { data: prRes } = await supabase.functions.invoke("detect-prs", {
-      body: { user_id: uid, entry_date: todayISO, exercise_name: exercise.name },
-    });
-    const prs = (prRes as any)?.prs as Array<{ pr_type: string; value: number; exercise_name: string }> | undefined;
-    if (prs && prs.length > 0) {
-      const label = prs.map(p => prLabel(p)).join(" · ");
-      toast.success(`New PR — ${label}`);
-    }
-  } catch { /* PR detection must never break saving */ }
-}
+```
+if phase=='accumulation' && (chronic_overreach || systemic_breakdown):
+  A. phase='deload'; deload_reason='chronic_overreach'|'systemic_breakdown'|'both' (return only)
+     week_in_block unchanged; block_number unchanged
+elif phase=='accumulation' && week_in_block >= block_length_weeks:
+  B. phase='deload' (planned); deload_reason='planned'
+elif phase=='deload':
+  C. block_number+=1; week_in_block=1; phase='accumulation'; block_start_date=thisMonday
+else:
+  D. week_in_block+=1     // guard: capped by CHECK; unreachable-overflow routed to B/C above
 ```
 
-Small local `prLabel({pr_type, value, exercise_name})` helper (plain text, no emoji):
+Goal unchanged here — B8 owns goal transitions.
 
-- `max_weight` → `${exercise_name} ${value}kg`
-- `max_est_1rm` → `${exercise_name} est 1RM ${value}kg`
-- `max_reps_at_weight` → `${exercise_name} ${value} reps`
-- `max_volume` → `${exercise_name} volume ${value}kg`
+### Step 5 — write + return
 
-Gate: only invoked when `completed === true`. Warmup skipping is enforced server-side (via `set_type <> 'warmup'`); today's UI has no warmup toggle yet, so nothing extra to guard client-side.
+UPDATE the active row with new `{ block_number, week_in_block, phase, block_start_date?, updated_at=now() }`. Return `{ advanced:true, block_number, week_in_block, phase, is_deload_week: phase==='deload', deload_reason: <string|null> }`.
 
-## 3. No config changes
+## 2. Wiring
 
-`supabase/config.toml`: not touched. detect-prs runs with the platform default (JWT verified by our own `authorizeCaller`, same as calculate-score).
+- **Onboarding** (`src/routes/_authenticated/onboarding.tsx` L314): append a third promise to the `Promise.allSettled([calculate-macros, generate-plan])` — add `supabase.functions.invoke('advance-mesocycle', { body:{ user_id:userId, mode:'init' } })`. Log warn on rejection; never block onboarding.
+- **Weekly cron:** existing Monday slots are `0 6` (generate-weekly-pattern) and `30 6` (adaptive-macros-weekly). Schedule advance-mesocycle at `**45 5 * * 1**` (05:45 UTC Monday) via `supabase--insert` calling `cron.schedule` + `net.http_post` with `x-internal-secret` header (pattern matches shield_dispatch_calculate_score). Iterates users via a small wrapper SQL or the function loops all users itself; cleanest: the cron posts once with no user_id, and the function selects all `is_active=true` mesocycle rows and processes each (bounded, service-role). Alternative if the "loop inside function" pattern doesn't fit existing style: keep the current per-user dispatch RPC pattern. I'll match existing style during build.
 
-## 4. Verification (must pass before B4)
+## 3. Config
 
-Using a clean synthetic user:
+`supabase/config.toml`: nothing to change (default `verify_jwt` handling is fine; auth is enforced by `authorizeCaller` + `x-internal-secret` for cron).
 
-1. Log Bench Press 60kg x 8 → invoke detect-prs → `{ prs: [] }`. `personal_records` empty; `is_pr` false.
-2. Next day, Bench 62.5kg x 8 → prs contain `max_weight (62.5)`, `max_volume (500)`, `max_est_1rm (~79)`. Row's `is_pr=true`, `pr_type='max_est_1rm'`.
-3. Next day, Bench 62.5kg x 10 → `max_reps_at_weight (10)` and `max_volume (625)` (and likely `max_est_1rm`).
-4. Re-invoke detect-prs for the same day+exercise → 0 new rows inserted.
-5. Insert a warmup set (`set_type='warmup'`) at 100kg x 3 directly via SQL → invoke → no PR.
-6. `SELECT exercise_name, pr_type, value, achieved_date FROM personal_records WHERE user_id=<test> ORDER BY created_at DESC` matches expectations.
-7. Log Bench 60kg x 15 (fresh user) after a prior 60kg x 12 baseline → `max_reps_at_weight` and `max_volume` fire; `max_est_1rm` does NOT (reps > 12).
+## 4. Verification (must pass before B5)
+
+Synthetic users. All 12 cases from the spec:
+
+1. Wed joiner init → `block_start_date` = upcoming Monday (not Wed). SQL confirms.
+2. Weekly cron run on the Monday BEFORE block starts → `skipped:'block_not_started'`.
+3. Trains first full Mon–Sun → next Monday advance: `week_in_block` 1→2.
+4. Zero sets that week → `held`, week_in_block unchanged, `updated_at` unchanged.
+5. 4 trained weeks → weeks 1,2,3 accumulation; week 4 → planned deload (B); next Monday → new block (C), block_number 2, week 1.
+6. Chronic overreach two consecutive weeks at week 2 → early deload (A).
+7. Systemic breakdown (avg<40, ≥2 red_recover) at week 2 → early deload (A).
+8. Thin data (0–2 readiness rows / no landmarks) → never forces deload.
+9. Double cron same Monday → second run no-ops (idempotency guard via updated_at within current local week).
+10. Cron misses a Monday, fires next week → advances ONE week only (evaluates most recent finished week).
+11. Non-UTC user (e.g. Asia/Dubai) → `finishedWeek` computed in `profiles.timezone`.
+12. `week_in_block` never exceeds `block_length_weeks` (CHECK holds).
 
 ## Out of scope
 
-- Full PR feed UI (later frontend batch)
-- Landmark-based warmup autodetection
-- Deleting personal_records on downward edits (per spec: PRs are historical facts)
-
-&nbsp;
-
-#   
+- Persisting `deload_reason` / `missed_week` — returned in response only, not written (no schema change per spec).
+- Goal transitions (B8).
+- Daily readiness ceiling enforcement (B6).  
   
-Approve, with ONE correctness fix to step 6 de-dupe.
-
-- The de-dupe currently compares the new PR value against the MOST RECENT personal_records row (ORDER BY achieved_date DESC LIMIT 1). This is wrong — a PR is only real if it beats the ALL-TIME best, not the latest-dated one. With backdated edits or out-of-order logging, "most recent" can be lower than a genuine prior best, letting a non-PR through.
-  Change step 6 to:
-    SELECT MAX(value) AS best FROM personal_records
-    WHERE user_id = $1 AND exercise_name = $2 AND pr_type = $3;
-  Insert only when the new value is strictly greater than best (or best IS NULL = first PR of this type). This makes "is it a PR?" mean "beats all-time best for this type," which is the only correct definition.
-  Note this must stay CONSISTENT with step 4, which already computes prior bests from the workout_set_logs history (not from personal_records). Two sources of "prior best" now exist: step 4 reads set-log history, step 6 reads personal_records. They should agree, but personal_records is the authoritative PR ledger. Keep step 4 as the detection trigger (fast, from live sets) and step 6 MAX(value) as the write-guard (authoritative, prevents a duplicate/regressive row). If they ever disagree (e.g. a set was deleted but its PR row remains), the personal_records MAX wins for the write guard — that's correct, because a PR that was genuinely hit remains a historical fact even if the set row was later removed.
+  
+Approve with ONE required consistency fix: the plan week and the mesocycle training-week MUST use the same Monday definition. Right now Step 0 anchors block_start_date to UTC-Monday (matching generate-plan) but Step 2 evaluates the finished training week in user-local timezone. For any non-UTC user these two windows can differ by up to a day, causing the clock to hold a week they trained or advance one they didn't.
+  Pick ONE Monday definition and use it everywhere in this function. Since generate-plan and weekly_plans.week_start_date are already UTC-Monday-anchored, and the plan is the source of truth the block must track, use UTC-Monday consistently:
+  - Step 0 planMonday: UTC upcomingMonday (as written) — keep.
+  - Step 2 finishedWeek: compute the previous completed UTC Mon-Sun window (NOT user-local). The training-week window that decides advancement must match the plan's week boundaries exactly, so a set logged "in plan week N" counts toward advancing past week N.
+  - Step 1 thisMonday / idempotency guard: also UTC-Monday, consistent with the above.
+  Drop the previousCompletedWeek(tz) / user-timezone approach for the advancement window. The block clock tracks the PLAN's weeks, and the plan is UTC-Monday. One definition, no seam.
+  Document this explicitly in the function: "All week boundaries here are UTC-Monday to match generate-plan/weekly_plans.week_start_date. Do not introduce user-timezone week math — it desyncs the block clock from the plan."
+  Note: this does mean a user's "week" for block purposes is UTC Mon-Sun, which for far-from-UTC users is slightly offset from their local calendar week. That is ACCEPTABLE and CORRECT here, because the block must align to the plan, and the plan is UTC-anchored. If we ever move plans to user-local weeks, we move both together. Consistency between plan and block is what matters, not which timezone — pick the one the plan already uses.
   Everything else approved as written:
-  - history/today split with entry_date < input.entry_date: correct
-  - first-ever entry returns {prs:[]} and clears is_pr: correct
-  - Epley with reps>12 skip for est_1rm only: correct
-  - step 5 wipe-and-recompute is_pr per call (idempotent): correct
-  - running bests update as today's sets iterate (no double-flag): correct, good catch by you
-  - priority max_est_1rm > max_weight > max_volume > max_reps_at_weight: correct
-  - client try/catch never blocks save, plain-text toast: correct
-  - authorizeCaller + service-role writes: correct
+  - init idempotency / unique-index conflict swallow: correct
+  - HOLD leaves updated_at untouched: correct and clever (preserves catch-up)
+  - single-advance per run, no catch-up multi-advance: correct
+  - precedence A>B>C>D: correct
+  - deload_reason returned not persisted (no schema change): correct
+  - 05:45 UTC Monday slot before 06:00/06:30 jobs: correct
+  - function loops all is_active rows from one cron post: fine, matches bounded service-role pattern
