@@ -310,24 +310,38 @@ function ProfileSetup() {
         } catch {}
       }
 
-      // Mesocycle init must land BEFORE compute-volume-landmarks — B5 skips
-      // when no active mesocycle_state row exists.
-      const mesoRes = await Promise.allSettled([
-        supabase.functions.invoke("advance-mesocycle", { body: { user_id: userId, mode: "init" } }),
-      ]);
-      if (mesoRes[0].status === "rejected") console.warn("advance-mesocycle init failed", mesoRes[0].reason);
+      // Strict sequential dependency chain: mesocycle init → macros → landmarks.
+      // generate-plan reads weekly_volume_landmarks and macro/fuel context, so
+      // it must fire AFTER landmarks. It returns 202 (writes a fallback plan
+      // synchronously and queues the Sonnet upgrade for cron), so we
+      // fire-and-forget and navigate immediately.
+      const step1 = await supabase.functions.invoke("advance-mesocycle", { body: { user_id: userId, mode: "init" } });
+      if (step1.error) {
+        setSubmitting(false);
+        toast.error("Could not initialize training block");
+        return;
+      }
 
-      const [macroRes, planRes, landmarksRes] = await Promise.allSettled([
-        supabase.functions.invoke("calculate-macros", { body: { user_id: userId } }),
-        supabase.functions.invoke("generate-plan", { body: { user_id: userId } }),
-        supabase.functions.invoke("compute-volume-landmarks", { body: { user_id: userId } }),
-      ]);
-      if (macroRes.status === "rejected") console.warn("calculate-macros failed", macroRes.reason);
-      if (planRes.status === "rejected") console.warn("generate-plan failed", planRes.reason);
-      if (landmarksRes.status === "rejected") console.warn("compute-volume-landmarks failed", landmarksRes.reason);
+      const step2 = await supabase.functions.invoke("calculate-macros", { body: { user_id: userId } });
+      if (step2.error) {
+        setSubmitting(false);
+        toast.error("Could not calculate macros");
+        return;
+      }
 
+      const step3 = await supabase.functions.invoke("compute-volume-landmarks", { body: { user_id: userId } });
+      if (step3.error) {
+        setSubmitting(false);
+        toast.error("Could not compute volume targets");
+        return;
+      }
+
+      supabase.functions
+        .invoke("generate-plan", { body: { user_id: userId } })
+        .catch((err) => console.warn("generate-plan dispatch failed", err));
 
       navigate({ to: "/dashboard" });
+
     } catch (e: any) {
       toast.error(e?.message ?? "Could not save profile");
       setSubmitting(false);
