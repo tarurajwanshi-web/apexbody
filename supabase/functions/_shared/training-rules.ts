@@ -762,13 +762,11 @@ export function buildFallbackPlan(
   planTimezone: string,
   trainingDaysPerWeek: number,
   restMask?: boolean[],
+  cardioPlacements?: (CardioPlacementLite | null)[],
 ): any {
   const daysCount = clamp(trainingDaysPerWeek || 3, 2, 6);
   const patterns: SessionKind[] = pickPatternsByGoal(envelope.input.goal, daysCount);
 
-  // Rest/train indices. If a caller-supplied restMask is valid, honour it
-  // exactly (deterministic pin from profile.training_day_codes). Otherwise
-  // fall back to the historical even-spread across the week.
   const useMask = Array.isArray(restMask)
     && restMask.length === 7
     && restMask.filter((r) => r === false).length > 0;
@@ -786,17 +784,20 @@ export function buildFallbackPlan(
     }
   }
 
-  // First non-rest gets recovery/reduce/modify treatment via envelope
   const days: any[] = [];
   let pIdx = 0;
   let firstNonRestApplied = false;
   for (let i = 0; i < 7; i++) {
     const date = isoAddDays(planStartISO, i);
     const day_name = isoWeekdayName(date);
+    const cardio = Array.isArray(cardioPlacements) && cardioPlacements.length === 7
+      ? cardioPlacements[i] ?? null
+      : null;
     if (!trainingIdx.has(i)) {
       days.push({
         day: i + 1, date, day_name, rest: true,
         session_name: null, session_purpose: null, exercises: [],
+        cardio,
       });
       continue;
     }
@@ -813,8 +814,10 @@ export function buildFallbackPlan(
       session_name: template.session_name,
       session_purpose: template.session_purpose,
       exercises: template.exercises,
+      cardio,
     });
   }
+
 
   return {
     plan_data_version: PLAN_DATA_VERSION,
