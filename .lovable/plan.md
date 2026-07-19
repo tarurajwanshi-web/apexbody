@@ -1,85 +1,69 @@
-# B6.3 — Deterministic Set-Count Filler
+# B6.2c — Queue + Cron Drain for Plan Generation
 
-## Problem
-Real Sonnet plans now write (B6.2b) but under-prescribe volume — roughly half of target per muscle. Ceilings hold; targets exist; the clamp only trims down. Nothing fills up to the engine's `target_sets`. Fix deterministically — engine computes, LLM expresses.
+## Problem (confirmed)
+`EdgeRuntime.waitUntil` in B6.2b does not reliably survive on Supabase edge. The background Sonnet task is killed after the 202 returns — every plan for the last several hours is the fallback floor, never the real Sonnet upgrade. Synchronous engines (B1–B5.5) work fine; the async-in-request pattern is the regression.
 
-## Scope
-- **NEW**: `fillPlanToTargets` in `supabase/functions/_shared/training-rules.ts` (mirror of `clampPlanToCeilings`).
-- **EDIT**: `supabase/functions/generate-plan/index.ts` — invoke filler immediately before the existing clamp at ~line 475.
+## Fix
+Stop running Sonnet inside a request that returns. Enqueue the upgrade and let a 1-minute cron drain it inside its own fresh function invocation — full wall-clock budget, no background-task teardown. Plan logic (`generateForUser`, filler, clamp, block_context) is unchanged; only delivery changes.
 
-No other files. No new LLM calls. No schema changes.
+## Changes
 
-## `fillPlanToTargets(plan, targetByMuscle, ceilingByMuscle)`
+### 1. Migration — new queue table + cron
 
-Mirror-image of the clamp; reuses the same `sumsByMuscle` walk pattern and role-priority helpers.
+`public.plan_generation_queue`:
+- `id uuid pk`, `user_id uuid` (FK auth.users, cascade)
+- `status text` — pending/processing/done/failed
+- `attempts smallint default 0`, `last_error text`
+- `created_at`, `updated_at`
 
-### Per-role caps and priority
-- **Set cap per exercise** (`maxSetsForRole`):
-  - `primary`, `power`, `secondary` → 6
-  - `accessory` → 5
-  - `isolation`, `core` → 4
-- **Growth priority** (inverse of clamp — highest first):
-  - `primary`/`power` → 3
-  - `secondary` → 2
-  - `accessory` → 1
-  - `isolation`/`core` → 0
+Indexes:
+- Unique partial on `(user_id) where status in ('pending','processing')` — dedupes rapid re-dispatch (one active job per user)
+- `(status, created_at)` for drain ordering
 
-### Loop (guard 200, same as clamp)
-1. Compute `sumsByMuscle()`.
-2. Find muscle with largest positive deficit: `target_sets - currentSum`. Apply tolerance — skip if `currentSum >= target_sets - 1`.
-3. If none → break.
-4. For that muscle, pick the best exercise to add ONE set to:
-   - Skip exercises already at their role cap.
-   - Skip if adding one set would breach `ceilingByMuscle[muscle]`.
-   - Tiebreak: highest growth priority; then lowest current sets (spread across compounds before piling on one).
-5. If no legal exercise → record `"<muscle>: under target by N, no legal fill (cap/ceiling)"` and mark that muscle done for this pass.
-6. Otherwise `ex.sets += 1`; log `"<muscle>: +1 set to <name> (<role>, day <n>) → <sets> sets"`.
+Grants: `service_role` only. RLS enabled, no user policies (queue is internal).
 
-Returns `{ plan, fills: string[] }`.
+Cron: `drain-plan-queue`, `* * * * *`, `net.http_post` to `/functions/v1/generate-plan` with `x-internal-secret` (vault `dispatch_secret`) and body `{"drain": true}`. Same shape as existing dispatch functions.
 
-### Termination
-- Fills strictly increase set counts and each muscle either reaches target-tolerance or is marked done.
-- Ceiling is never exceeded — filler is monotone up, clamp is monotone down. Fill-then-clamp terminates and clamp should be a no-op on correct output.
+### 2. `supabase/functions/generate-plan/index.ts` — single-user path
 
-## Call site — `generate-plan/index.ts` (~line 475)
+Replace the `const upgrade = (async () => {...})(); rt.waitUntil(upgrade)` block with a queue upsert:
+- Keep the synchronous `generateForUser(..., "fallback_only")` write exactly as is.
+- `upsert` a row into `plan_generation_queue` with `onConflict: "user_id"`, `status: 'pending'`, `attempts: 0`. Never block the 202 on the enqueue (swallow enqueue errors).
+- Return 202 `{status:"accepted", used_fallback:true, upgrade:"queued", ...dates}`.
+- Delete the `EdgeRuntime.waitUntil` logic entirely.
 
-Insert immediately BEFORE the existing `clampPlanToCeilings(plan, ceilings)` call, inside the same `if (hasLandmarks)` block, using landmarks already assembled there:
+### 3. `generate-plan/index.ts` — new `drain` branch
 
-```ts
-const targets: Record<string, number> = {};
-const ceilings: Record<string, number> = {};
-for (const [m, v] of Object.entries(landmarksByMuscle)) {
-  targets[m] = v.target_sets;
-  ceilings[m] = v.fuel_adjusted_mrv;
-}
-const filled = fillPlanToTargets(plan, targets, ceilings);
-plan = filled.plan;
-if (filled.fills.length) {
-  console.log(`[generate-plan] filled ${user_id}: ${filled.fills.length} add(s)`, filled.fills);
-}
-// existing clamp call unchanged — safety net, should be a no-op on correct fill
-const clamped = clampPlanToCeilings(plan, ceilings);
-```
+Add near the top of `Deno.serve`, before fan-out and single-user branches:
+- Gate with `requireInternalSecret(req, supa)` (from `_shared/authorize.ts`) — cron-only.
+- Claim ONE pending job: `select ... where status='pending' order by created_at asc limit 1`.
+- If none → return `{drained: 0}`.
+- Flip claimed job to `status='processing'`, `attempts++`.
+- Call `generateForUser(supa, anth, job.user_id, undefined, "full")` — Sonnet + filler + clamp + upsert.
+- On success: mark `done`. On error: mark `failed` if `attempts >= 3`, else back to `pending` with `last_error`.
 
-Also add `fillPlanToTargets` to the existing import from `_shared/training-rules.ts` at the top of the file.
+**One job per tick (limit 1)** — keeps each drain well under wall-clock; 60 plans/hour is plenty at current scale. Raise later if throughput becomes a real bottleneck.
 
-## Ordering rationale
-Filler respects ceiling → clamp finds nothing to trim (belt-and-braces). Clamp-then-fill would oscillate; fill-then-clamp is monotonic.
+## Decisions locked in
+- In-function drain branch (not a new `drain-plan-queue` function) — reuses `generateForUser` in the same file, no second deploy target. Three modes in one handler (fan-out, single-user, drain), cleanly branched.
+- 3-attempt cap → `failed`. User is never stranded; the synchronous fallback floor is a complete filled+clamped plan.
+- Unique partial index prevents duplicate stacked jobs when a user regens twice quickly.
 
 ## Verification
-1. After deploy, regenerate for `1f83792a-5b77-4c6a-aafe-858f21380f14`.
-2. Wait ~3min for the B6.2b background Sonnet upgrade.
-3. Run the per-muscle adherence query.
 
-**PASS criteria**:
-- Muscles within ±2 of `target_sets` (or logged as ceiling/cap-blocked shortfall).
-- Zero ceiling breaches.
-- `total_sets` moves from ~44 toward ~90–110.
-- No single exercise exceeds its per-role cap (spot-check: no 6-set isolation lifts).
-- Edge logs show the `[generate-plan] filled …` line with the fill list.
+Baseline hash: `ec4dc7e9`.
+
+1. Dispatch `generate-plan` for `1f83792a-5b77-4c6a-aafe-858f21380f14`. Expect 202 `{status:"accepted", upgrade:"queued"}` in <5s. Confirm one `pending` row in `plan_generation_queue`.
+2. Wait ≤2 min. Query the queue row — expect `status='done'`.
+3. Query `weekly_plans`:
+   - `md5(plan_data::text)` differs from `ec4dc7e9`
+   - `plan_data->>'volume_gate_alert'` is a real readiness message (NOT "Safe fallback")
+   - Total sets summed across days ≈ 90–110
+4. Run the per-muscle adherence query — most muscles on target (filler proven on a real Sonnet plan).
+5. Edge logs show `[generate-plan] filled 1f83792a...` inside the drain invocation.
 
 ## Out of scope (deferred)
-- Compound-first session sequencing.
-- Onboarding delivery race fix.
+- Compound-first session sequencing (Nunes 2021).
+- Onboarding delivery — falls out for free once single-user path is 202+queue; wire onboarding to navigate immediately after the 202.
 - Phenotype priority-weight hooks.
 - B7 day-1 ring dispatch.
