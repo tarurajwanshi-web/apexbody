@@ -148,6 +148,11 @@ export function DashboardNav({ onLogged }: Props) {
         onClose={() => setWeightOpen(false)}
         onSaved={() => recalcMacros().finally(() => onLogged?.())}
       />
+      <CardioLogModal
+        open={cardioOpen}
+        onClose={() => setCardioOpen(false)}
+        onSaved={() => onLogged?.()}
+      />
     </>
   );
 }
