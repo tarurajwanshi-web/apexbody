@@ -592,12 +592,60 @@ Deno.serve(async (req) => {
   const supa = createClient(url, key);
 
   try {
-    let body: { user_id?: string } = {};
+    let body: { user_id?: string; drain?: boolean } = {};
     try { body = await req.json(); } catch { body = {}; }
 
     if (!anth) return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY missing" }), {
       status: 500, headers: { ...cors, "Content-Type": "application/json" },
     });
+
+    // Drain mode: cron ticks with { drain: true } + internal secret. Claims one
+    // pending job and runs the FULL Sonnet path inside this fresh invocation —
+    // full wall-clock budget, no background-task teardown.
+    if (body.drain === true) {
+      const authz = await requireInternalSecret(req, supa);
+      if (!authz.ok) return new Response(JSON.stringify({ error: authz.error }), {
+        status: authz.status, headers: { ...cors, "Content-Type": "application/json" },
+      });
+
+      const { data: jobs } = await supa
+        .from("plan_generation_queue")
+        .select("id, user_id, attempts")
+        .eq("status", "pending")
+        .order("created_at", { ascending: true })
+        .limit(1);
+      const job = (jobs as any[])?.[0];
+      if (!job) return new Response(JSON.stringify({ drained: 0 }), {
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+
+      const nextAttempts = Number(job.attempts ?? 0) + 1;
+      await supa.from("plan_generation_queue")
+        .update({ status: "processing", attempts: nextAttempts, updated_at: new Date().toISOString() })
+        .eq("id", job.id);
+
+      try {
+        await generateForUser(supa, anth!, job.user_id, undefined, "full");
+        await supa.from("plan_generation_queue")
+          .update({ status: "done", last_error: null, updated_at: new Date().toISOString() })
+          .eq("id", job.id);
+        return new Response(JSON.stringify({ drained: 1, user_id: job.user_id }), {
+          headers: { ...cors, "Content-Type": "application/json" },
+        });
+      } catch (e: any) {
+        const failed = nextAttempts >= 3;
+        await supa.from("plan_generation_queue")
+          .update({
+            status: failed ? "failed" : "pending",
+            last_error: String(e?.message ?? e),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", job.id);
+        return new Response(JSON.stringify({ drained: 0, error: String(e?.message ?? e) }), {
+          status: 500, headers: { ...cors, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     // Fan-out mode: no user_id + internal secret. Regenerates the UPCOMING
     // UTC-Monday week for every active-block user. Current week is immutable.
@@ -631,6 +679,7 @@ Deno.serve(async (req) => {
       });
     }
 
+
     // Single-user path (onboarding, manual regen). JWT or internal secret.
     const authz = await authorizeCaller(req, supa, body.user_id);
     if (!authz.ok) return new Response(JSON.stringify({ error: authz.error }), {
@@ -638,25 +687,23 @@ Deno.serve(async (req) => {
     });
 
     // Guaranteed floor: synchronously write a deterministic fallback plan so
-    // the user is NEVER left without a weekly_plans row, even if Sonnet + the
-    // background task both die. Fast (~one round-trip of reads + one upsert).
+    // the user is NEVER left without a weekly_plans row.
     const uid = body.user_id;
     const floor = await generateForUser(supa, anth!, uid, undefined, "fallback_only");
 
-    // Background upgrade: run the full Sonnet path and upsert over the same
-    // (user_id, week_start_date) row. If EdgeRuntime.waitUntil is unavailable
-    // (older runtime) we still fire-and-forget the promise; the fallback row
-    // remains as the safe floor either way.
-    const upgrade = (async () => {
-      try {
-        await generateForUser(supa, anth!, uid, undefined, "full");
-      } catch (e) {
-        console.error("[generate-plan][bg]", uid, e instanceof Error ? e.message : String(e));
-      }
-    })();
-    // deno-lint-ignore no-explicit-any
-    const rt = (globalThis as any).EdgeRuntime;
-    if (rt && typeof rt.waitUntil === "function") rt.waitUntil(upgrade);
+    // Enqueue the Sonnet upgrade — cron drain runs it in a fresh invocation.
+    // Unique partial index dedupes rapid re-dispatch (one active job per user).
+    try {
+      await supa.from("plan_generation_queue")
+        .upsert(
+          { user_id: uid, status: "pending", attempts: 0, last_error: null, updated_at: new Date().toISOString() },
+          { onConflict: "user_id" },
+        );
+    } catch (e) {
+      // Never block the 202 on the enqueue. If dedupe conflicts, the existing
+      // pending/processing row will still be drained.
+      console.warn("[generate-plan] enqueue soft-fail", uid, e instanceof Error ? e.message : String(e));
+    }
 
     return new Response(JSON.stringify({
       status: "accepted",
@@ -669,6 +716,7 @@ Deno.serve(async (req) => {
       status: 202,
       headers: { ...cors, "Content-Type": "application/json" },
     });
+
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e instanceof Error ? e.message : e) }), {
       status: 500, headers: { ...cors, "Content-Type": "application/json" },
