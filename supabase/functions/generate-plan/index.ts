@@ -97,6 +97,9 @@ async function callClaude(apiKey: string, prompt: string) {
   });
   if (!res.ok) throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
   const j = await res.json();
+  if (j?.stop_reason === "max_tokens") {
+    throw new Error(`Anthropic response truncated: stop_reason=max_tokens (raise max_tokens)`);
+  }
   const text = j?.content?.[0]?.text ?? "";
   return JSON.parse(stripFences(text));
 }
