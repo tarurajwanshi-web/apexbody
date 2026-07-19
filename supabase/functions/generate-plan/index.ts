@@ -7,6 +7,7 @@ import {
   validateGeneratedPlan,
   buildFallbackPlan,
   resolvePlanStartISO,
+  pickPatternsByGoal,
   MUSCLE_GROUPS,
   MOVEMENT_PATTERNS,
   EXERCISE_ROLES,
@@ -17,7 +18,10 @@ import {
   type Equipment,
   type Permission,
   type Confidence,
+  type SessionKind,
+  type CardioPlacementLite,
 } from "../_shared/training-rules.ts";
+import { resolveCardioPrescription, placeCardioAcrossWeek } from "../_shared/cardio-rules.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
