@@ -95,7 +95,11 @@ async function callClaude(apiKey: string, prompt: string) {
       messages: [{ role: "user", content: prompt }],
     }),
   });
-  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    const errBody = await res.text();
+    console.error(`[callClaude] Anthropic error status=${res.status} body=${errBody}`);
+    throw new Error(`Anthropic ${res.status}: ${errBody}`);
+  }
   const j = await res.json();
   const text = j?.content?.[0]?.text ?? "";
   return JSON.parse(stripFences(text));
@@ -440,8 +444,9 @@ async function generateForUser(
   let plan: any = null;
   let violations: string[] = [];
   let usedFallback = false;
+  const claudeErrors: string[] = [];
 
-  try { plan = await tryClaude(basePrompt); } catch { plan = null; }
+  try { plan = await tryClaude(basePrompt); } catch (e) { const msg = e instanceof Error ? e.message : String(e); console.error(`[generate-plan] tryClaude base failed: ${msg}`); claudeErrors.push(`base: ${msg}`); plan = null; }
   if (plan) {
     const v1 = validateGeneratedPlan(plan, envelope, planStartISO, restMask, cardioPlacements);
     if (!v1.ok) {
@@ -580,6 +585,7 @@ async function generateForUser(
     plan_timezone: timezone,
     used_fallback: usedFallback,
     violations: usedFallback ? violations : [],
+    claude_errors: claudeErrors,
     clamp_trims: clampTrims,
     block_context: plan.block_context,
     plan,
