@@ -434,19 +434,6 @@ async function generateForUser(
     return s;
   };
 
-  const findVolumeOffenders = (planObj: any): string[] => {
-    if (!hasLandmarks) return [];
-    const sums = sumSetsPerMuscle(planObj);
-    const bad: string[] = [];
-    for (const [mg, v] of Object.entries(landmarksByMuscle)) {
-      const cur = sums[mg] ?? 0;
-      if (Math.abs(cur - v.target_sets) > 2) {
-        bad.push(`${mg}: got ${cur} sets, target ${v.target_sets} (ceiling ${v.fuel_adjusted_mrv})`);
-      }
-    }
-    return bad;
-  };
-
   let plan: any = null;
   let violations: string[] = [];
   let usedFallback = false;
@@ -467,22 +454,6 @@ async function generateForUser(
     if (!v2.ok) { violations = v2.violations; plan = null; }
   }
 
-  // B6 A3 — soft retry on volume target mismatch (>±2 from target_sets on any muscle).
-  if (plan && hasLandmarks) {
-    const offenders = findVolumeOffenders(plan);
-    if (offenders.length > 0) {
-      const reprompt = basePrompt +
-        `\n\nPREVIOUS OUTPUT MISSED THESE PER-MUSCLE WEEKLY VOLUME TARGETS (must be within ±1 of target_sets, never above ceiling):\n- ` +
-        offenders.join("\n- ") +
-        `\nReturn corrected JSON only.`;
-      let retryPlan: any = null;
-      try { retryPlan = await tryClaude(reprompt); } catch { retryPlan = null; }
-      if (retryPlan) {
-        const v3 = validateGeneratedPlan(retryPlan, envelope, planStartISO, restMask, cardioPlacements);
-        if (v3.ok) plan = retryPlan;
-      }
-    }
-  }
 
   if (!plan) {
     plan = buildFallbackPlan(envelope, planStartISO, timezone, trainingDaysCount, restMask, cardioPlacements);
