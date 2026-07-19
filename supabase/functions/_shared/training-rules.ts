@@ -347,7 +347,13 @@ export interface ValidationResult {
   violations: string[];
 }
 
-export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartISO: string, restMask?: boolean[]): ValidationResult {
+export function validateGeneratedPlan(
+  plan: any,
+  envelope: Envelope,
+  planStartISO: string,
+  restMask?: boolean[],
+  cardioPlacements?: (CardioPlacementLite | null)[],
+): ValidationResult {
   const v: string[] = [];
   if (!plan || typeof plan !== "object") return { ok: false, violations: ["plan is not an object"] };
 
