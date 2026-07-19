@@ -121,6 +121,7 @@ async function generateForUser(
   anth: string,
   user_id: string,
   planStartOverrideISO?: string,
+  mode: "full" | "fallback_only" = "full",
 ) {
   const { data: p, error } = await supa
     .from("profiles")
