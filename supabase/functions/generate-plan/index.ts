@@ -694,11 +694,20 @@ Deno.serve(async (req) => {
     // Enqueue the Sonnet upgrade — cron drain runs it in a fresh invocation.
     // Unique partial index dedupes rapid re-dispatch (one active job per user).
     try {
-      await supa.from("plan_generation_queue")
-        .upsert(
-          { user_id: uid, status: "pending", attempts: 0, last_error: null, updated_at: new Date().toISOString() },
-          { onConflict: "user_id" },
-        );
+      // Partial unique index (WHERE status IN ('pending','processing')) can't
+      // back ON CONFLICT (user_id), so dedupe by pre-check + insert instead.
+      const { data: existing } = await supa
+        .from("plan_generation_queue")
+        .select("id")
+        .eq("user_id", uid)
+        .in("status", ["pending", "processing"])
+        .limit(1);
+      if (!existing || existing.length === 0) {
+        const { error: insErr } = await supa
+          .from("plan_generation_queue")
+          .insert({ user_id: uid, status: "pending", attempts: 0 });
+        if (insErr) console.warn("[generate-plan] enqueue insert failed", uid, insErr.message);
+      }
     } catch (e) {
       // Never block the 202 on the enqueue. If dedupe conflicts, the existing
       // pending/processing row will still be drained.
