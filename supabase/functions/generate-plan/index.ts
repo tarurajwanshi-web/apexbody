@@ -580,7 +580,7 @@ async function generateForUser(
     plan_timezone: timezone,
     used_fallback: usedFallback,
     violations: usedFallback ? violations : [],
-    claude_errors: claudeErrors,
+    
     clamp_trims: clampTrims,
     block_context: plan.block_context,
     plan,
