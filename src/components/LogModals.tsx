@@ -22,6 +22,7 @@ import {
   type DeviceUploadStatus,
   type ConfirmedMealItem,
   type EatingWindowValidation,
+  logCardio,
 } from "@/lib/shield.functions";
 
 
