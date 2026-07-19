@@ -14,6 +14,7 @@ import {
   resolvePlanStartISO,
   pickPatternsByGoal,
   clampPlanToCeilings,
+  fillPlanToTargets,
   MUSCLE_GROUPS,
   MOVEMENT_PATTERNS,
   EXERCISE_ROLES,
