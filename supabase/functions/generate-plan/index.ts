@@ -67,41 +67,48 @@ function utcMondayOf(iso: string): string {
 }
 
 async function callClaude(apiKey: string, prompt: string) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 16000,
-      system:
-        "You are an expert evidence-based strength & conditioning coach. " +
-        "Respond with ONLY a single JSON object, no prose, no markdown fences. " +
-        "Schema: { \"plan_data_version\": 2, \"plan_start_date\": string (YYYY-MM-DD), \"plan_timezone\": string, \"days\": [ { \"day\": 1-7, \"date\": string (YYYY-MM-DD), \"day_name\": string, \"session_name\": string|null, \"session_purpose\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string, \"movement_pattern\": string, \"exercise_role\": string, \"progression_note\": string, \"target_rir\": int } ], \"cardio\": {\"modality\": string, \"minutes\": int, \"intensity_note\": string, \"optional\": boolean} | null } ], \"volume_gate_alert\": string|null }. " +
-        "No other fields allowed. Do NOT emit session_note, notes, description, tempo, or any field outside this schema. " +
-        "Do NOT emit training_volume_summary, exercise_media_summary, or any summary / aggregate / count field — those are computed downstream. " +
-        `muscle_group MUST be one of: ${MUSCLE_GROUPS.join(", ")}. ` +
-        `movement_pattern MUST be one of: ${MOVEMENT_PATTERNS.join(", ")}. ` +
-        `exercise_role MUST be one of: ${EXERCISE_ROLES.join(", ")}. ` +
-        "All text fields (cue, progression_note, session_purpose) must be plain prose — no markdown, no asterisks, no bold syntax, no bullet lists, no backticks, no headings. " +
-        "progression_note is short (max ~10 words) — e.g. \"+2.5% from last week\", \"hold weight, RIR 2-3\", \"recovery — light technique only\", or \"new exercise — start moderate\". " +
-        "session_purpose is ONE plain-prose sentence (max ~20 words) describing what this session is training and why. On rest days session_purpose must be null. " +
-        "Always return exactly 7 days matching the provided calendar. Rest days have rest=true, session_name=null, session_purpose=null, exercises=[]. " +
-        "The 'cue' field is ONE sharp coaching correction — the single thing you'd shout mid-set to fix that exercise's most common failure point. " +
-        "Not a checklist. Not a description of correct form. One real spoken sentence, max ~18 words, second person, lead with the action.",
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
-  const j = await res.json();
-  if (j?.stop_reason === "max_tokens") {
-    throw new Error(`Anthropic response truncated: stop_reason=max_tokens (raise max_tokens)`);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 55000);
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 16000,
+        system:
+          "You are an expert evidence-based strength & conditioning coach. " +
+          "Respond with ONLY a single JSON object, no prose, no markdown fences. " +
+          "Schema: { \"plan_data_version\": 2, \"plan_start_date\": string (YYYY-MM-DD), \"plan_timezone\": string, \"days\": [ { \"day\": 1-7, \"date\": string (YYYY-MM-DD), \"day_name\": string, \"session_name\": string|null, \"session_purpose\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string, \"movement_pattern\": string, \"exercise_role\": string, \"progression_note\": string, \"target_rir\": int } ], \"cardio\": {\"modality\": string, \"minutes\": int, \"intensity_note\": string, \"optional\": boolean} | null } ], \"volume_gate_alert\": string|null }. " +
+          "No other fields allowed. Do NOT emit session_note, notes, description, tempo, or any field outside this schema. " +
+          "Do NOT emit training_volume_summary, exercise_media_summary, or any summary / aggregate / count field — those are computed downstream. " +
+          `muscle_group MUST be one of: ${MUSCLE_GROUPS.join(", ")}. ` +
+          `movement_pattern MUST be one of: ${MOVEMENT_PATTERNS.join(", ")}. ` +
+          `exercise_role MUST be one of: ${EXERCISE_ROLES.join(", ")}. ` +
+          "All text fields (cue, progression_note, session_purpose) must be plain prose — no markdown, no asterisks, no bold syntax, no bullet lists, no backticks, no headings. " +
+          "progression_note is short (max ~10 words) — e.g. \"+2.5% from last week\", \"hold weight, RIR 2-3\", \"recovery — light technique only\", or \"new exercise — start moderate\". " +
+          "session_purpose is ONE plain-prose sentence (max ~20 words) describing what this session is training and why. On rest days session_purpose must be null. " +
+          "Always return exactly 7 days matching the provided calendar. Rest days have rest=true, session_name=null, session_purpose=null, exercises=[]. " +
+          "The 'cue' field is ONE sharp coaching correction — the single thing you'd shout mid-set to fix that exercise's most common failure point. " +
+          "Not a checklist. Not a description of correct form. One real spoken sentence, max ~18 words, second person, lead with the action.",
+        messages: [{ role: "user", content: prompt }],
+      }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
+    const j = await res.json();
+    if (j?.stop_reason === "max_tokens") {
+      throw new Error(`Anthropic response truncated: stop_reason=max_tokens (raise max_tokens)`);
+    }
+    const text = j?.content?.[0]?.text ?? "";
+    return JSON.parse(stripFences(text));
+  } finally {
+    clearTimeout(timer);
   }
-  const text = j?.content?.[0]?.text ?? "";
-  return JSON.parse(stripFences(text));
 }
 
 // planStartOverrideISO: when provided (cron fan-out path), skip the
@@ -427,19 +434,6 @@ async function generateForUser(
     return s;
   };
 
-  const findVolumeOffenders = (planObj: any): string[] => {
-    if (!hasLandmarks) return [];
-    const sums = sumSetsPerMuscle(planObj);
-    const bad: string[] = [];
-    for (const [mg, v] of Object.entries(landmarksByMuscle)) {
-      const cur = sums[mg] ?? 0;
-      if (Math.abs(cur - v.target_sets) > 2) {
-        bad.push(`${mg}: got ${cur} sets, target ${v.target_sets} (ceiling ${v.fuel_adjusted_mrv})`);
-      }
-    }
-    return bad;
-  };
-
   let plan: any = null;
   let violations: string[] = [];
   let usedFallback = false;
@@ -460,22 +454,6 @@ async function generateForUser(
     if (!v2.ok) { violations = v2.violations; plan = null; }
   }
 
-  // B6 A3 — soft retry on volume target mismatch (>±2 from target_sets on any muscle).
-  if (plan && hasLandmarks) {
-    const offenders = findVolumeOffenders(plan);
-    if (offenders.length > 0) {
-      const reprompt = basePrompt +
-        `\n\nPREVIOUS OUTPUT MISSED THESE PER-MUSCLE WEEKLY VOLUME TARGETS (must be within ±1 of target_sets, never above ceiling):\n- ` +
-        offenders.join("\n- ") +
-        `\nReturn corrected JSON only.`;
-      let retryPlan: any = null;
-      try { retryPlan = await tryClaude(reprompt); } catch { retryPlan = null; }
-      if (retryPlan) {
-        const v3 = validateGeneratedPlan(retryPlan, envelope, planStartISO, restMask, cardioPlacements);
-        if (v3.ok) plan = retryPlan;
-      }
-    }
-  }
 
   if (!plan) {
     plan = buildFallbackPlan(envelope, planStartISO, timezone, trainingDaysCount, restMask, cardioPlacements);
