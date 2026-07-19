@@ -24,7 +24,8 @@ export const Route = createFileRoute("/workouts")({
 });
 
 type Exercise = { name: string; sets: number; reps: string; rest_seconds: number; cue?: string; muscle_group?: string; progression_note?: string };
-type DayPlan = { day: number; day_name: string; session_name: string | null; rest: boolean; exercises: Exercise[] };
+type CardioBlock = { modality: string; minutes: number; intensity_note: string; optional: boolean };
+type DayPlan = { day: number; day_name: string; session_name: string | null; rest: boolean; exercises: Exercise[]; cardio?: CardioBlock | null };
 type Plan = { days: DayPlan[] };
 type WeeklyPlan = { id: string; week_start_date: string; unlock_date: string; is_locked: boolean; plan_data: Plan };
 type SetLog = { id?: string; exercise_name: string; set_number: number; reps_completed: number | null; weight_kg: number | null; completed: boolean; entry_date?: string; rir?: number | null };
