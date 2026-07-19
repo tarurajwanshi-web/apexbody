@@ -7,6 +7,7 @@ import {
   MealLogModal,
   BodyMeasurementModal,
   WeightOnlyModal,
+  CardioLogModal,
 } from "@/components/LogModals";
 import { supabase } from "@/integrations/supabase/client";
 import { T } from "./tokens";
