@@ -394,6 +394,33 @@ export function validateGeneratedPlan(
     if (useMask && typeof d.rest === "boolean" && d.rest !== restMask![i]) {
       v.push(`day[${i}].rest must be ${restMask![i]} per user's chosen training days`);
     }
+    // Cardio echo — engine is authoritative. Check both rest and training days.
+    if (Array.isArray(cardioPlacements) && cardioPlacements.length === 7) {
+      const expected = cardioPlacements[i];
+      const got = d.cardio ?? null;
+      if (expected === null) {
+        if (got !== null && got !== undefined) {
+          v.push(`day[${i}].cardio must be null (engine did not place cardio here)`);
+        }
+      } else {
+        if (!got || typeof got !== "object") {
+          v.push(`day[${i}].cardio required — engine placed ${expected.minutes}min ${expected.modality}`);
+        } else {
+          for (const k of Object.keys(got)) if (!ALLOWED_CARDIO.has(k)) v.push(`day[${i}].cardio unknown field: ${k}`);
+          if (got.modality !== expected.modality) v.push(`day[${i}].cardio.modality must be ${expected.modality} (got ${got.modality})`);
+          if (Number(got.minutes) !== expected.minutes) v.push(`day[${i}].cardio.minutes must be ${expected.minutes} (got ${got.minutes})`);
+          if (Boolean(got.optional) !== expected.optional) v.push(`day[${i}].cardio.optional must be ${expected.optional} (got ${got.optional})`);
+          if (typeof got.intensity_note !== "string" || !got.intensity_note.trim()) {
+            v.push(`day[${i}].cardio.intensity_note required`);
+          } else if (MARKDOWN_RX.test(got.intensity_note)) {
+            v.push(`day[${i}].cardio.intensity_note contains markdown syntax — plain prose only`);
+          }
+        }
+      }
+    } else if (d.cardio !== undefined && d.cardio !== null) {
+      // No placements supplied (legacy path) — reject any cardio field.
+      v.push(`day[${i}].cardio present but engine did not provide placements`);
+    }
     if (d.rest === true) {
       if (d.session_name !== null) v.push(`day[${i}] is rest — session_name must be null`);
       if (d.session_purpose !== undefined && d.session_purpose !== null) {
