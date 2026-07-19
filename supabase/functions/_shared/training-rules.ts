@@ -617,7 +617,7 @@ function baseExercise(
   };
 }
 
-type SessionKind =
+export type SessionKind =
   | "push" | "pull" | "lower" | "full"
   | "upper" | "power" | "conditioning" | "recovery";
 
