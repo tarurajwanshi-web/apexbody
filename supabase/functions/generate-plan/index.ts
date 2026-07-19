@@ -97,23 +97,11 @@ async function callClaude(apiKey: string, prompt: string) {
   });
   if (!res.ok) throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
   const j = await res.json();
-  const text = j?.content?.[0]?.text ?? "";
-  const stripped = stripFences(text);
-  try {
-    return JSON.parse(stripped);
-  } catch (e) {
-    return {
-      __diagnostic_parse_error: true,
-      parse_error: e instanceof Error ? e.message : String(e),
-      raw_head: stripped.slice(0, 300),
-      raw_tail: stripped.slice(-300),
-      stop_reason: j?.stop_reason ?? null,
-    };
+  if (j?.stop_reason === "max_tokens") {
+    throw new Error(`Anthropic response truncated: stop_reason=max_tokens (raise max_tokens)`);
   }
-}
-
-function isParseDiagnostic(value: any): boolean {
-  return Boolean(value && typeof value === "object" && value.__diagnostic_parse_error === true);
+  const text = j?.content?.[0]?.text ?? "";
+  return JSON.parse(stripFences(text));
 }
 
 // planStartOverrideISO: when provided (cron fan-out path), skip the
@@ -454,106 +442,37 @@ async function generateForUser(
 
   let plan: any = null;
   let violations: string[] = [];
-  let firstAttemptViolations: string[] = [];
-  let retryViolations: string[] = [];
-  let parsedDaysLength: number | null = null;
-  let parseDiagnostic: any = null;
-  let volumeRetryTriggered = false;
-  let volumeOffenders: string[] = [];
-  let volumeRetrySucceeded = false;
-  let fallbackReason: "parse" | "schema_v1" | "schema_v2" | "volume_retry" | "none" = "none";
   let usedFallback = false;
 
   try { plan = await tryClaude(basePrompt); } catch { plan = null; }
-  if (isParseDiagnostic(plan)) {
-    parseDiagnostic = plan;
-    fallbackReason = "parse";
-    return {
-      ok: false,
-      user_id,
-      plan_start_date: planStartISO,
-      plan_timezone: timezone,
-      used_fallback: false,
-      fallbackReason,
-      diagnostics: {
-        hasLandmarks,
-        landmarksByMuscleKeyCount: Object.keys(landmarksByMuscle).length,
-        firstAttemptViolations,
-        retryViolations,
-        parsedDaysLength,
-        parseDiagnostic,
-        volumeRetryTriggered,
-        volumeOffenders,
-        volumeRetrySucceeded,
-      },
-    };
-  }
-  parsedDaysLength = Array.isArray(plan?.days) ? plan.days.length : null;
   if (plan) {
     const v1 = validateGeneratedPlan(plan, envelope, planStartISO, restMask, cardioPlacements);
-    firstAttemptViolations = v1.violations;
     if (!v1.ok) {
       violations = v1.violations;
-      fallbackReason = "schema_v1";
       const reprompt = basePrompt +
         `\n\nPREVIOUS OUTPUT WAS INVALID. Fix all of these violations and return corrected JSON only:\n- ` +
         violations.join("\n- ");
       try { plan = await tryClaude(reprompt); } catch { plan = null; }
-      if (isParseDiagnostic(plan)) {
-        parseDiagnostic = plan;
-        fallbackReason = "parse";
-        return {
-          ok: false,
-          user_id,
-          plan_start_date: planStartISO,
-          plan_timezone: timezone,
-          used_fallback: false,
-          fallbackReason,
-          diagnostics: {
-            hasLandmarks,
-            landmarksByMuscleKeyCount: Object.keys(landmarksByMuscle).length,
-            firstAttemptViolations,
-            retryViolations,
-            parsedDaysLength,
-            parseDiagnostic,
-            volumeRetryTriggered,
-            volumeOffenders,
-            volumeRetrySucceeded,
-          },
-        };
-      }
-      parsedDaysLength = Array.isArray(plan?.days) ? plan.days.length : parsedDaysLength;
     }
   }
   if (plan) {
     const v2 = validateGeneratedPlan(plan, envelope, planStartISO, restMask, cardioPlacements);
-    retryViolations = v2.violations;
-    if (!v2.ok) { violations = v2.violations; fallbackReason = "schema_v2"; plan = null; }
+    if (!v2.ok) { violations = v2.violations; plan = null; }
   }
 
   // B6 A3 — soft retry on volume target mismatch (>±2 from target_sets on any muscle).
   if (plan && hasLandmarks) {
     const offenders = findVolumeOffenders(plan);
     if (offenders.length > 0) {
-      volumeRetryTriggered = true;
-      volumeOffenders = offenders;
       const reprompt = basePrompt +
         `\n\nPREVIOUS OUTPUT MISSED THESE PER-MUSCLE WEEKLY VOLUME TARGETS (must be within ±1 of target_sets, never above ceiling):\n- ` +
         offenders.join("\n- ") +
         `\nReturn corrected JSON only.`;
       let retryPlan: any = null;
       try { retryPlan = await tryClaude(reprompt); } catch { retryPlan = null; }
-      if (isParseDiagnostic(retryPlan)) {
-        parseDiagnostic = retryPlan;
-      }
       if (retryPlan) {
         const v3 = validateGeneratedPlan(retryPlan, envelope, planStartISO, restMask, cardioPlacements);
-        if (v3.ok) {
-          plan = retryPlan;
-          volumeRetrySucceeded = true;
-        } else {
-          fallbackReason = "volume_retry";
-        }
+        if (v3.ok) plan = retryPlan;
       }
     }
   }
@@ -561,7 +480,6 @@ async function generateForUser(
   if (!plan) {
     plan = buildFallbackPlan(envelope, planStartISO, timezone, trainingDaysCount, restMask, cardioPlacements);
     usedFallback = true;
-    if (fallbackReason === "none") fallbackReason = "schema_v2";
   }
 
   plan.plan_start_date = planStartISO;
@@ -664,19 +582,7 @@ async function generateForUser(
     plan_start_date: planStartISO,
     plan_timezone: timezone,
     used_fallback: usedFallback,
-    fallbackReason: usedFallback ? fallbackReason : "none",
     violations: usedFallback ? violations : [],
-    diagnostics: {
-      hasLandmarks,
-      landmarksByMuscleKeyCount: Object.keys(landmarksByMuscle).length,
-      firstAttemptViolations,
-      retryViolations,
-      parsedDaysLength: Array.isArray(plan?.days) ? plan.days.length : parsedDaysLength,
-      parseDiagnostic,
-      volumeRetryTriggered,
-      volumeOffenders,
-      volumeRetrySucceeded,
-    },
     
     clamp_trims: clampTrims,
     block_context: plan.block_context,
