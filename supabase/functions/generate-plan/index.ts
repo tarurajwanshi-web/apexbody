@@ -76,7 +76,7 @@ async function callClaude(apiKey: string, prompt: string) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 3000,
+      max_tokens: 16000,
       system:
         "You are an expert evidence-based strength & conditioning coach. " +
         "Respond with ONLY a single JSON object, no prose, no markdown fences. " +
@@ -97,6 +97,9 @@ async function callClaude(apiKey: string, prompt: string) {
   });
   if (!res.ok) throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
   const j = await res.json();
+  if (j?.stop_reason === "max_tokens") {
+    throw new Error(`Anthropic response truncated: stop_reason=max_tokens (raise max_tokens)`);
+  }
   const text = j?.content?.[0]?.text ?? "";
   return JSON.parse(stripFences(text));
 }
