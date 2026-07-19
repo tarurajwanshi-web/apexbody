@@ -440,9 +440,8 @@ async function generateForUser(
   let plan: any = null;
   let violations: string[] = [];
   let usedFallback = false;
-  const claudeErrors: string[] = [];
 
-  try { plan = await tryClaude(basePrompt); } catch (e) { const msg = e instanceof Error ? e.message : String(e); console.error(`[generate-plan] tryClaude base failed: ${msg}`); claudeErrors.push(`base: ${msg}`); plan = null; }
+  try { plan = await tryClaude(basePrompt); } catch { plan = null; }
   if (plan) {
     const v1 = validateGeneratedPlan(plan, envelope, planStartISO, restMask, cardioPlacements);
     if (!v1.ok) {
