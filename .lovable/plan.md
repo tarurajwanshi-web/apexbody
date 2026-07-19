@@ -1,239 +1,125 @@
-# B5.5 — Cardio: Prescribed, Logged, Fatigue-Feeding (NEVER Calorie-Feeding)
+# B6 — Plan obeys the engine; regenerated every Monday
 
-## Governing principle (verified against code)
+Two parts. Part A makes `generate-plan` respect block state and per-muscle volume ceilings. Part B fans it out weekly so users actually see the new numbers.
 
-Cardio does exactly three things: **prescribed** (goal-dosed dose in the plan), **logged** (companion table), **fed into fatigue** (calculate-score strain input). It explicitly does **NOT** feed the calorie target. Verified at `macro-calculation.ts:228-236`: `new_observed_tdee = avg_daily_intake + |daily_delta_kcal|` — TDEE is computed **backward from weight trend**, so cardio burn is already inside the trend. Adding cardio kcal to macros would double-count and stall fat loss.
+Verified before planning:
 
-Envelope integration is verified at `training-rules.ts:181-185`: `conditioning` is already in `MOVEMENT_PATTERNS` and pushed onto `allowedPatterns` for fat_loss/athletic and stripped on reduce/recovery. B5.5 layers dose/placement on top; the envelope stays authoritative for allowed patterns.
+- `generate-plan/index.ts:353` already reads `mesocycle_state` (only `phase`) — widen this, don't add a second query.
+- `week_start_date` is already computed at line 508 (UTC-Monday of `planStartISO`) — reuse it.
+- Upsert key is `(user_id, week_start_date)` at line 526 — safe for weekly regen.
+- Auth is `authorizeCaller` + `x-internal-secret` — same pattern as `compute-volume-landmarks` and `advance-mesocycle`.
+- Only current caller is `onboarding.tsx:322` (single `user_id`). No weekly regen exists.
 
 ---
 
-## Part 1 — New file: `supabase/functions/_shared/cardio-rules.ts`
+## Part A — Plan obeys engine numbers
 
-Pure module. Exports:
+### A1. Load block state + landmarks (generate-plan/index.ts)
 
-```ts
-export type CardioModality = "zone2" | "liss" | "intervals" | "mixed";
+- Widen the meso select from `"phase"` to `"block_number, week_in_block, block_length_weeks, phase"`. Reuse the row for `cardioPhase`. Missing row → warn + defaults `{block:1, week:1, length:4, phase:'accumulation'}`.
+- Add ONE read of `weekly_volume_landmarks` for the already-computed `week_start_date`, selecting `muscle_group, target_sets, fuel_adjusted_mrv` into `landmarksByMuscle`. Empty → warn, `{}`, skip A2/A3 volume steps for this run (never crash).
 
-export interface CardioPrescription {
-  weekly_sessions: number;
-  minutes_per_session: number;
-  modality: CardioModality;
-  intensity_note: string;
-  placement_note: string;
-  rationale: string;
-  allow_interval_swap: boolean; // advanced fat_loss / athletic only
+### A2. Inject volume targets into Sonnet prompt
+
+When `landmarksByMuscle` non-empty, add a hard-constraint block sibling to `CARDIO_PLACEMENTS`:
+
+```
+BLOCK CONTEXT: week {week_in_block} of {block_length_weeks}, block {block_number}, phase {phase}
+  accumulation → "Building week, ramp position early|mid|peak"
+  deload       → "DELOAD week — volume low, movements crisp, higher target_rir, no failure"
+
+WEEKLY VOLUME TARGETS (hard, distribute across training days):
+  {muscle}: {target_sets} sets across the week (ceiling {fuel_adjusted_mrv})
+  - Per-muscle weekly sum must be within ±1 of target_sets
+  - NEVER exceed fuel_adjusted_mrv
+  - Muscles not listed: minimal or none
+```
+
+### A3. Validate + deterministically repair
+
+- Sum sets per `muscle_group` across non-rest days from `exercises[]`.
+- **Soft retry (once):** if any muscle off target by >±2, retry generation naming the offenders.
+- **Hard clamp — `clampPlanToCeilings` (pure fn):** for any muscle over `fuel_adjusted_mrv`, trim 1 set from the highest-volume exercise of the lowest-priority role (isolation → accessory → compound; never take a compound below 2 sets). Loop until within ceiling. Runs on the FINAL plan (post-Sonnet AND post-fallback), always when landmarks exist. Log every trim.
+- **Deload sanity:** if `phase==='deload'`, assert total sets ≤ Σ`target_sets`+3 and `target_rir` skews high. No "% of MAV" rule.
+- All existing validators (rest_mask, schema, enums, plain-prose, cardio echo) untouched.
+
+### A4. Stamp block context on plan_data (top level)
+
+```json
+"block_context": {
+  "block_number": int,
+  "week_in_block": int,
+  "block_length_weeks": int,
+  "phase": "accumulation" | "deload",
+  "phase_label": "Building — week 2 of 3" | "Deload — recover and consolidate"
 }
-
-export function resolveCardioPrescription(input: {
-  goal: Goal;
-  experience: Experience;
-  phase: "accumulation" | "deload";        // from mesocycle_state
-  weeklyReduce: boolean;                    // from envelope
-}): CardioPrescription
 ```
 
-Per-goal intermediate baseline (evidence-cited in a top-of-file comment referencing BBM 150 min/wk, concurrent-training reviews for LISS min-interference, HIIT small-dose):
+Frontend rendering is out of scope.
 
+### A5. Precedence comment (no daily gate)
 
-| goal                 | sessions | min | modality | notes                                    |
-| -------------------- | -------- | --- | -------- | ---------------------------------------- |
-| fat_loss             | 3        | 30  | zone2    | intervals swap allowed for advanced only |
-| muscle_gain          | 2        | 25  | zone2    | LISS min-interference range              |
-| recomposition        | 3        | 25  | zone2    | —                                        |
-| strength             | 2        | 20  | zone2    | steady-state only, never with intervals  |
-| athletic_performance | 3        | 25  | mixed    | 2 zone2 + 1 intervals                    |
-
-
-Experience scaling: `beginner` → sessions−1 (floor 1), minutes−5 (floor 15), all zone2 (no intervals). `advanced` → upper end + allow interval swap where listed.
-
-Deload / weeklyReduce: sessions−1 (floor 1), minutes−5 (floor 15), steady-state only, `allow_interval_swap=false`.
-
-Also export `cardioReadinessSoftening(permission)` returning `{ optional: boolean; minutes_delta: number; force_zone2: boolean }` — on `red_recover` / `orange_reduce`, cardio becomes optional and drops to a light zone2 floor.
-
-Top-of-file comment (required, literal): "Cardio intentionally does NOT feed the calorie target — adaptive TDEE (weight-trend-based, see macro-calculation.ts line 232) already captures cardio burn; adding it here would double-count and stall fat loss."
+Comment at injection site: `target_sets` is the aim; `fuel_adjusted_mrv` is the clamp-enforced ceiling; weekly readiness envelope may pull volume DOWN but never above ceiling; same-day red-day cut belongs to B7.
 
 ---
 
-## Part 2 — plan_data schema extension (`generate-plan/index.ts`)
+## Part B — Weekly fan-out (make it live)
 
-Add an OPTIONAL `cardio` field on each day. NOT inside `exercises[]`.
+### B1. Fan-out mode on `generate-plan`
 
-```
-day.cardio = {
-  modality: "zone2" | "liss" | "intervals" | "mixed",
-  minutes: number,
-  intensity_note: string,
-  optional: boolean
-} | null
-```
+Copy the `compute-volume-landmarks` pattern exactly. If body has no `user_id` (cron posts `{}`), select all active profiles and loop per-user with the existing pipeline. If `user_id` present, behave as today. Auth: cron path uses `x-internal-secret`; onboarding unchanged.
 
-**Deterministic placement engine** (pre-Sonnet, in `generate-plan/index.ts`):
+### B2. Regenerate UPCOMING week only
 
-1. Call `resolveCardioPrescription` using `goal`, `experience_level`, mesocycle `phase`, `envelope.weeklyReduce`.
-2. Distribute `weekly_sessions` across the 7-day calendar with priority order:
-  - Prefer `rest_flag=true` days.
-  - Otherwise a non-heavy-leg training day (heuristic: session_name doesn't contain "leg"/"lower"/"squat"/"deadlift" — the plan hasn't been generated yet, so use the training-day slot index; simplest deterministic rule: avoid the day immediately preceding a training day whose slot the engine will typically assign to lower).
-  - Never the calendar day immediately before another training day for `strength` goal.
-3. Apply `cardioReadinessSoftening(latestTrainingPermission)` to each assigned day; set `optional=true` and shrink minutes on softened days.
-4. Emit a `cardio_placements: { [dayIndex]: cardioObj }` structure and pass it to Sonnet as a **fixed input** (same category as `restMask`).
+For the cron path, compute `planStartISO` = upcoming UTC Monday so the already-existing line 508 logic yields NEXT week's `week_start_date`. The `(user_id, week_start_date)` upsert therefore writes a NEW row and can NEVER overwrite the in-progress week's plan or completed sets. Document invariant in-file: "regen only writes the upcoming week; current week immutable once started; block clock advances on completed UTC-Monday weeks".
 
-**Prompt changes**:
+### B3. Schedule cron
 
-- Extend the schema in the system prompt: `day.cardio` is optional, one of the shape above or `null`.
-- Add hard constraint: "cardio field is authoritative from the engine; echo the provided cardio_placements exactly. Do NOT invent, add, remove, or move cardio."
-- Include `CARDIO_PLACEMENTS (hard)` block in the user prompt, analogous to `REST_MASK`.
-
-**Validator** (`validateGeneratedPlan` in `training-rules.ts`): reject plans where `day.cardio` diverges from the engine's `cardio_placements` on any day (missing, extra, or moved).
-
-**Fallback plan** (`buildFallbackPlan`): apply the same `cardio_placements` deterministically. Fallback is the ground truth if Sonnet fails validation.
-
----
-
-## Part 3 — DB migration: `cardio_logs`
-
-```sql
-CREATE TABLE public.cardio_logs (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  entry_date date NOT NULL,
-  modality text NOT NULL,
-  minutes smallint NOT NULL,
-  intensity text,
-  perceived_effort smallint,
-  source text NOT NULL DEFAULT 'manual',
-  created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT cardio_minutes_check CHECK (minutes >= 0 AND minutes <= 600),
-  CONSTRAINT cardio_rpe_check CHECK (perceived_effort IS NULL OR (perceived_effort BETWEEN 1 AND 10)),
-  CONSTRAINT cardio_intensity_check CHECK (intensity IS NULL OR intensity IN ('zone2','liss','intervals','mixed')),
-  CONSTRAINT cardio_source_check CHECK (source IN ('manual','wearable'))
-);
-CREATE INDEX cardio_logs_user_date ON public.cardio_logs (user_id, entry_date DESC);
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.cardio_logs TO authenticated;
-GRANT ALL ON public.cardio_logs TO service_role;
-ALTER TABLE public.cardio_logs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "own rows all" ON public.cardio_logs FOR ALL TO authenticated
-  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-```
-
-Plus a Shield dispatch trigger mirroring `workout_set_logs_score_dispatch`: on insert/update, call `shield_dispatch_calculate_score(user_id, entry_date)` so a cardio log immediately re-triggers readiness for that day.
-
----
-
-## Part 4 — Cardio feeds fatigue in `calculate-score`
-
-In `calculate-score/index.ts`, in the training-strain pillar input for the entry date:
-
-1. Query `cardio_logs` for `(user_id, entry_date)`.
-2. Compute a modest cardio-strain contribution using published coefficients (document them in-code):
-  - `zone2`/`liss`: `minutes * 0.35`
-  - `mixed`: `minutes * 0.55`
-  - `intervals`: `minutes * 0.9`
-3. Cap the per-day cardio contribution at ~30 strain-equivalent points so a big cardio day cannot dominate the training pillar (lifting still leads).
-4. Add to the existing strain sum used for `load_carryover.systemic_load` so next-day readiness reflects the load via the existing decay map.
-
-No changes to weights, formulas, or thresholds — only the strain-input aggregation gains a cardio term.
-
----
-
-## Part 5 — Guardrails against double-counting
-
-Explicit **negatives** enforced by this batch (verification #8 is the moat check):
-
-- No import of `cardio-rules.ts` or `cardio_logs` in `macro-calculation.ts`, `calculate-macros`, or `evaluate-fuelling`.
-- No new column on `daily_macro_targets`.
-- `advance-mesocycle` and `compute-volume-landmarks` unchanged.
-
-CI-style grep asserted in verification: `rg "cardio" supabase/functions/_shared/macro-calculation.ts supabase/functions/calculate-macros supabase/functions/evaluate-fuelling` must return nothing.
-
----
-
-## Part 6 — Client surface (minimal for this batch)
-
-- **Log path**: add a "Cardio" option to the existing `QuickActionSheet` / `LogModals` (mirrors `MealLogModal`) writing to `cardio_logs`. Modality dropdown, minutes numeric, optional RPE. Fires Shield recompute implicitly via trigger.
-- **Plan render**: `workouts.tsx` reads `day.cardio` from the resolved plan day and renders a small cardio card under the exercises list (title, minutes, intensity note, "optional" pill when true). Non-invasive — existing exercises rendering unchanged.
-
-Dashboard/nutrition/settings UI: unchanged this batch.
-
----
-
-## Verification (all must pass before B6)
-
-Seed fixtures against a scratch user; each check is a psql read + a screenshot where UI-visible:
-
-1. `fat_loss` intermediate → plan has 3 `cardio` days (30 min zone2), none directly before a heavy-leg day.
-2. `strength` intermediate → 2 cardio days (20 min zone2), never same day or day-before as heavy squat/DL.
-3. `muscle_gain` → 2 cardio days (25 min zone2).
-4. `beginner fat_loss` → 2 cardio days (25 min zone2), no intervals.
-5. Deload week (phase='deload') → cardio dose drops by 1 session and 5 min, steady-state only.
-6. Latest readiness = `red_recover` → today's cardio has `optional=true`, minutes softened.
-7. Insert a 45-min zone2 `cardio_logs` row → next `readiness_scores` row for that user shows a higher `load_carryover.systemic_load` than a control day with no cardio.
-8. **MOAT CHECK — after #7's cardio log, re-run `calculate-macros`; `daily_macro_targets.target_calories` is unchanged from before the cardio log. Grep confirms no cardio imports in macro modules.**
-9. Corrupt Sonnet output to move a cardio day → `validateGeneratedPlan` rejects it → fallback plan is used and preserves the engine's `cardio_placements` exactly.
-
-Do NOT proceed to B6 until 1–9 pass.
+`pg_cron` job `generate-plan-weekly` at `5 6 * * 1` (06:05 UTC Monday) — AFTER compute-volume-landmarks (05:40) and advance-mesocycle (05:45). Match the exact `net.http_post` + `x-internal-secret` shape used by `advance-mesocycle-weekly`.
 
 ---
 
 ## Files touched
 
-- NEW `supabase/functions/_shared/cardio-rules.ts`
-- EDIT `supabase/functions/_shared/training-rules.ts` — `validateGeneratedPlan` recognizes `day.cardio`; `buildFallbackPlan` accepts and echoes `cardio_placements`
-- EDIT `supabase/functions/generate-plan/index.ts` — resolve prescription, compute placements, extend Sonnet schema + prompt, pass placements to fallback, validate echo
-- EDIT `supabase/functions/calculate-score/index.ts` — fold `cardio_logs` into training-strain
-- NEW migration — `cardio_logs` table + Shield dispatch trigger
-- EDIT `src/components/QuickActionSheet.tsx` + `src/components/LogModals.tsx` — add `CardioLogModal`
-- EDIT `src/routes/workouts.tsx` — render `day.cardio` card
-- No edits to `macro-calculation.ts`, `calculate-macros`, `evaluate-fuelling`, nutrition/dashboard code
+- `supabase/functions/generate-plan/index.ts` — widen meso select, add landmarks read, prompt block, `clampPlanToCeilings`, one-retry loop, `block_context` stamp, fan-out mode, upcoming-week resolution for cron path.
+- New pg_cron entry (via `supabase--insert`) — `generate-plan-weekly` at 06:05 UTC Mon.
+- No schema migration. No client changes. No cardio/macro/TDEE changes.
+
+## Verification (all must pass)
+
+1. SQL sum per muscle_group vs `weekly_volume_landmarks`: week-1 accumulation within ±2 of `target_sets`.
+2. Deload user: total ≈ halved targets; higher `target_rir`; no failure programming.
+3. Under-fuelled user (`fuel_adjusted_mrv < mrv`): no muscle exceeds `fuel_adjusted_mrv` — the moat is visible in the plan.
+4. Force over-prescription in fallback: `clampPlanToCeilings` trims; stored plan within ceiling; trims logged.
+5. fat_loss regression: cardio placements from B5.5 still echoed correctly.
+6. `plan_data.block_context` present + plain-prose label.
+7. Missing-landmarks guard: delete landmark rows, regen → plan still generates, warn logged, no crash.
+8. Anti-generic proof: gen plan → advance meso + rerun compute-volume-landmarks for next week → regen → plans differ, volume ramps.
+9. Fan-out proof: POST `{}` with `x-internal-secret` → NEXT Monday's `weekly_plans` row created for a test user, CURRENT week untouched, `block_context.week_in_block` reflects advanced block.
+
+#3 + #4 are the moat. #8 proves the engine changes across the block. #9 proves it reaches the user.
 
 ## Out of scope
 
-- Wearable auto-import of cardio (source='wearable' reserved; no importer this batch).
-- VO2max, HR zones per user, endurance periodization — deliberately excluded.
-- Retroactive cardio backfill.
-- Any change to macro/TDEE math.
+Cardio/macro/TDEE changes; same-day red-cut gate; frontend rendering of `block_context`; `completed_sets` writes (stays 0). Day-1 dispatch fix (`upsertManualRecovery` → `calculate-score`) is B7.  
 
-&nbsp;
 
-# Approve, with one REQUIRED precision fix and one confirmation. Both verified against real code.
+## **Part A approved. Part B needs one fix before build.**
 
-REQUIRED — cardio strain MUST use the same 0-21 scale as lifting, and must ADD to (not overwrite) any existing strain for the day.
+Problem: `resolvePlanStartISO` (training-rules.ts:835) is not Monday-anchored — it returns today or tomorrow. So `week_start_date` can resolve to the current week when the cron fires Monday morning, overwriting the in-progress plan. The "can never overwrite" claim is not schema-guaranteed.
 
-Verified facts:
+Fix (Part B2): the cron/fan-out path must NOT call `resolvePlanStartISO`, and must NOT reuse `upcomingMondayUTC` (it returns today when today is Monday). Add a strictly-next-Monday helper for the cron path only:
 
-- Lifting already writes shield_training_logs.strain_value via maybeWriteTrainingSummary (workouts.tsx:941) on a 0-21 WHOOP-style scale: strain = min(21, (completedSets*0.6 + volume/1200)). A full session ≈ 12-18.
+```
+function nextMondayStrictUTC(d = new Date()): string {
+  const day = d.getUTCDay();
+  const delta = day === 1 ? 7 : ((8 - day) % 7) || 7;
+  const m = new Date(d);
+  m.setUTCDate(d.getUTCDate() + delta);
+  return m.toISOString().slice(0,10);
+}
+```
 
-- calculate-score normalizes strain as s*5 capped at 100 (line 216) and feeds the load_carryover decay.
+Set `planStartISO = nextMondayStrictUTC(now)` on the cron path, feed it through the existing line-508 logic. Onboarding path keeps `resolvePlanStartISO` unchanged. Document why both existing helpers are deliberately not reused here.
 
-- So cardio's strain contribution must be on the SAME 0-21 scale, or it will wildly over/under-penalize readiness.
-
-Cardio strain mapping (keep modest, same scale):
-
-  zone2/liss: ~0.10 strain per minute  -> 30 min = 3.0 strain (light, correct — an easy walk shouldn't tank readiness)
-
-  intervals/mixed: ~0.20 strain per minute -> 20 min = 4.0 strain (harder, higher)
-
-  Cap any single cardio session's contribution at ~8 (cardio alone shouldn't exceed a hard lifting session).
-
-CRITICAL — a day can have BOTH lifting and cardio. The strain writes must COMBINE, not overwrite:
-
-- If a shield_training_logs row already exists for (user, entry_date) from lifting, ADD the cardio strain to it: new_strain = min(21, existing_strain + cardio_strain). Do NOT overwrite the lifting strain with cardio strain (that would erase the lifting fatigue).
-
-- If no row exists (cardio-only day), create one with just the cardio strain.
-
-- Use an upsert that reads-then-adds, or a DB-side increment, to avoid a race between the lifting summary write (workouts.tsx:941) and the cardio write. Confirm the ordering: cardio log write should read current strain_value and add.
-
-CONFIRM before building:
-
-1. shield_training_logs unique constraint on (user_id, entry_date)? If yes, the combine-logic upserts cleanly. If not, cardio could create a DUPLICATE row and calculate-score would read only one. Verify the constraint; if missing, the combine must UPDATE the existing row, not insert.
-
-2. Cardio strain coefficients (0.10/0.20 per min) produce sane readiness impact: a 30-min zone2 day adds ~3 strain (s*5=15 normalized, minor), a heavy-lift + 30-min-cardio day combines to ~15-21 (meaningful but capped). Sanity-check these against a seeded readiness run before finalizing.
-
-Everything else approved:
-
-- cardio does NOT touch macros/TDEE (verified: TDEE is weight-trend-based, macro-calculation.ts:234 — cardio already captured, no double-count): correct, keep the comment.
-
-- cardio_logs table, goal-dosed prescription, plan cardio field echoed by Sonnet, deload/readiness softening: all correct.
-
-- The B5.5 verification #8 (calorie target unchanged after cardio log): keep as the moat-integrity check.
+Verification #9: for a test user who already has a current-week plan with completed sets, POST `{}` on a Monday and assert the current week's row is byte-identical afterward (plan_data + completed sets untouched) and a new next-Monday row was inserted. Two rows, current untouched.
