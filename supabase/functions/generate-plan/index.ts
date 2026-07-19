@@ -687,25 +687,23 @@ Deno.serve(async (req) => {
     });
 
     // Guaranteed floor: synchronously write a deterministic fallback plan so
-    // the user is NEVER left without a weekly_plans row, even if Sonnet + the
-    // background task both die. Fast (~one round-trip of reads + one upsert).
+    // the user is NEVER left without a weekly_plans row.
     const uid = body.user_id;
     const floor = await generateForUser(supa, anth!, uid, undefined, "fallback_only");
 
-    // Background upgrade: run the full Sonnet path and upsert over the same
-    // (user_id, week_start_date) row. If EdgeRuntime.waitUntil is unavailable
-    // (older runtime) we still fire-and-forget the promise; the fallback row
-    // remains as the safe floor either way.
-    const upgrade = (async () => {
-      try {
-        await generateForUser(supa, anth!, uid, undefined, "full");
-      } catch (e) {
-        console.error("[generate-plan][bg]", uid, e instanceof Error ? e.message : String(e));
-      }
-    })();
-    // deno-lint-ignore no-explicit-any
-    const rt = (globalThis as any).EdgeRuntime;
-    if (rt && typeof rt.waitUntil === "function") rt.waitUntil(upgrade);
+    // Enqueue the Sonnet upgrade — cron drain runs it in a fresh invocation.
+    // Unique partial index dedupes rapid re-dispatch (one active job per user).
+    try {
+      await supa.from("plan_generation_queue")
+        .upsert(
+          { user_id: uid, status: "pending", attempts: 0, last_error: null, updated_at: new Date().toISOString() },
+          { onConflict: "user_id" },
+        );
+    } catch (e) {
+      // Never block the 202 on the enqueue. If dedupe conflicts, the existing
+      // pending/processing row will still be drained.
+      console.warn("[generate-plan] enqueue soft-fail", uid, e instanceof Error ? e.message : String(e));
+    }
 
     return new Response(JSON.stringify({
       status: "accepted",
@@ -718,6 +716,7 @@ Deno.serve(async (req) => {
       status: 202,
       headers: { ...cors, "Content-Type": "application/json" },
     });
+
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e instanceof Error ? e.message : e) }), {
       status: 500, headers: { ...cors, "Content-Type": "application/json" },
