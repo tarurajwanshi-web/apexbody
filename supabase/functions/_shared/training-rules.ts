@@ -935,3 +935,109 @@ export function clampPlanToCeilings(
   return { plan, trims };
 }
 
+// -------- volume target filler (B6.3) --------
+// Grows per-muscle weekly set totals up toward target_sets by adding ONE set
+// at a time to the highest-priority exercise for the worst-under muscle.
+// Never breaches ceilingByMuscle. Respects per-role set caps so no single
+// lift becomes absurd. Symmetric mirror of clampPlanToCeilings. Mutates plan
+// in place.
+export function fillPlanToTargets(
+  plan: any,
+  targetByMuscle: Record<string, number>,
+  ceilingByMuscle: Record<string, number>,
+): { plan: any; fills: string[] } {
+  const fills: string[] = [];
+  if (!plan || !Array.isArray(plan.days)) return { plan, fills };
+
+  // Growth priority — inverse of clamp trim priority. Higher = grow first.
+  const growthPriority = (role: string): number => {
+    if (role === "primary" || role === "power") return 3;
+    if (role === "secondary") return 2;
+    if (role === "accessory") return 1;
+    return 0; // isolation, core, other
+  };
+  const maxSetsForRole = (role: string): number => {
+    if (role === "primary" || role === "power" || role === "secondary") return 6;
+    if (role === "accessory") return 5;
+    return 4; // isolation, core
+  };
+
+  const sumsByMuscle = (): Record<string, number> => {
+    const s: Record<string, number> = {};
+    for (const d of plan.days) {
+      if (!d || d.rest === true) continue;
+      for (const ex of d.exercises ?? []) {
+        const mg = typeof ex?.muscle_group === "string" ? ex.muscle_group : null;
+        const n = Number(ex?.sets);
+        if (!mg || !Number.isFinite(n) || n <= 0) continue;
+        s[mg] = (s[mg] ?? 0) + n;
+      }
+    }
+    return s;
+  };
+
+  // Muscles marked done for this run when no legal fill exists.
+  const doneMuscles = new Set<string>();
+
+  let guard = 200;
+  while (guard-- > 0) {
+    const sums = sumsByMuscle();
+    let worstMuscle: string | null = null;
+    let worstDeficit = 0;
+    for (const [mg, target] of Object.entries(targetByMuscle)) {
+      if (doneMuscles.has(mg)) continue;
+      const current = sums[mg] ?? 0;
+      // Tolerance: within 1 of target counts as "hit".
+      if (current >= target - 1) continue;
+      const deficit = target - current;
+      if (deficit > worstDeficit) { worstDeficit = deficit; worstMuscle = mg; }
+    }
+    if (!worstMuscle) break;
+
+    const ceiling = ceilingByMuscle[worstMuscle];
+    const currentSum = sums[worstMuscle] ?? 0;
+    // Adding one set would breach ceiling → done for this muscle.
+    if (Number.isFinite(ceiling) && currentSum + 1 > ceiling) {
+      fills.push(`${worstMuscle}: under target by ${worstDeficit}, ceiling reached`);
+      doneMuscles.add(worstMuscle);
+      continue;
+    }
+
+    // Find best exercise on this muscle to add ONE set to.
+    let best: { dayIdx: number; exIdx: number; sets: number; role: string } | null = null;
+    for (let di = 0; di < plan.days.length; di++) {
+      const d = plan.days[di];
+      if (!d || d.rest === true) continue;
+      const exs = d.exercises ?? [];
+      for (let xi = 0; xi < exs.length; xi++) {
+        const ex = exs[xi];
+        if (ex?.muscle_group !== worstMuscle) continue;
+        const sets = Number(ex?.sets);
+        if (!Number.isFinite(sets) || sets <= 0) continue;
+        const role = typeof ex?.exercise_role === "string" ? ex.exercise_role : "accessory";
+        if (sets >= maxSetsForRole(role)) continue; // at role cap
+        if (!best) { best = { dayIdx: di, exIdx: xi, sets, role }; continue; }
+        const curP = growthPriority(best.role);
+        const newP = growthPriority(role);
+        // Higher priority wins; on tie, lower current sets wins (spread load).
+        if (newP > curP || (newP === curP && sets < best.sets)) {
+          best = { dayIdx: di, exIdx: xi, sets, role };
+        }
+      }
+    }
+    if (!best) {
+      fills.push(`${worstMuscle}: under target by ${worstDeficit}, no legal fill (all exercises at role cap)`);
+      doneMuscles.add(worstMuscle);
+      continue;
+    }
+    const ex = plan.days[best.dayIdx].exercises[best.exIdx];
+    ex.sets = best.sets + 1;
+    fills.push(
+      `${worstMuscle}: +1 set to "${ex.name ?? "exercise"}" (${best.role}, day ${best.dayIdx + 1}) → ${ex.sets} sets`,
+    );
+  }
+
+  return { plan, fills };
+}
+
+
