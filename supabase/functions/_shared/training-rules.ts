@@ -854,3 +854,84 @@ export function resolvePlanStartISO(
   const planStartISO = startToday ? localToday : isoAddDays(localToday, 1);
   return { planStartISO, localToday };
 }
+
+// -------- volume ceiling clamp (B6) --------
+// Trims per-muscle weekly set totals to fuel_adjusted_mrv on the FINAL plan.
+// Mutates plan in place. Loops until every muscle is within ceiling or no
+// legal trim exists. Priority for trimming (lowest first): isolation →
+// accessory → secondary/core → primary/power/conditioning/mobility. Never
+// drops a compound (primary/power/secondary) below 2 sets, or any set below 1.
+export function clampPlanToCeilings(
+  plan: any,
+  ceilingByMuscle: Record<string, number>,
+): { plan: any; trims: string[] } {
+  const trims: string[] = [];
+  if (!plan || !Array.isArray(plan.days)) return { plan, trims };
+
+  const rolePriority = (role: string): number => {
+    if (role === "isolation") return 0;
+    if (role === "accessory") return 1;
+    if (role === "secondary" || role === "core") return 2;
+    return 3;
+  };
+  const minSetsForRole = (role: string): number =>
+    (role === "primary" || role === "power" || role === "secondary") ? 2 : 1;
+
+  const sumsByMuscle = (): Record<string, number> => {
+    const s: Record<string, number> = {};
+    for (const d of plan.days) {
+      if (!d || d.rest === true) continue;
+      for (const ex of d.exercises ?? []) {
+        const mg = typeof ex?.muscle_group === "string" ? ex.muscle_group : null;
+        const n = Number(ex?.sets);
+        if (!mg || !Number.isFinite(n) || n <= 0) continue;
+        s[mg] = (s[mg] ?? 0) + n;
+      }
+    }
+    return s;
+  };
+
+  let guard = 200;
+  while (guard-- > 0) {
+    const sums = sumsByMuscle();
+    let worstMuscle: string | null = null;
+    let worstDelta = 0;
+    for (const [mg, ceiling] of Object.entries(ceilingByMuscle)) {
+      const delta = (sums[mg] ?? 0) - ceiling;
+      if (delta > worstDelta) { worstDelta = delta; worstMuscle = mg; }
+    }
+    if (!worstMuscle) break;
+
+    let target: { dayIdx: number; exIdx: number; sets: number; role: string } | null = null;
+    for (let di = 0; di < plan.days.length; di++) {
+      const d = plan.days[di];
+      if (!d || d.rest === true) continue;
+      const exs = d.exercises ?? [];
+      for (let xi = 0; xi < exs.length; xi++) {
+        const ex = exs[xi];
+        if (ex?.muscle_group !== worstMuscle) continue;
+        const sets = Number(ex?.sets);
+        const role = typeof ex?.exercise_role === "string" ? ex.exercise_role : "accessory";
+        if (!Number.isFinite(sets) || sets <= minSetsForRole(role)) continue;
+        if (!target) { target = { dayIdx: di, exIdx: xi, sets, role }; continue; }
+        const curP = rolePriority(target.role);
+        const newP = rolePriority(role);
+        if (newP < curP || (newP === curP && sets > target.sets)) {
+          target = { dayIdx: di, exIdx: xi, sets, role };
+        }
+      }
+    }
+    if (!target) {
+      trims.push(`${worstMuscle}: over ceiling by ${worstDelta}, no legal trim available`);
+      break;
+    }
+    const ex = plan.days[target.dayIdx].exercises[target.exIdx];
+    ex.sets = target.sets - 1;
+    trims.push(
+      `${worstMuscle}: trimmed 1 set from "${ex.name ?? "exercise"}" (${target.role}, day ${target.dayIdx + 1}) → ${ex.sets} sets`,
+    );
+  }
+
+  return { plan, trims };
+}
+
