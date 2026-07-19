@@ -95,11 +95,7 @@ async function callClaude(apiKey: string, prompt: string) {
       messages: [{ role: "user", content: prompt }],
     }),
   });
-  if (!res.ok) {
-    const errBody = await res.text();
-    console.error(`[callClaude] Anthropic error status=${res.status} body=${errBody}`);
-    throw new Error(`Anthropic ${res.status}: ${errBody}`);
-  }
+  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
   const j = await res.json();
   const text = j?.content?.[0]?.text ?? "";
   return JSON.parse(stripFences(text));
