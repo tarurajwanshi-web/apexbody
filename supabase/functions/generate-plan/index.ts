@@ -439,20 +439,22 @@ async function generateForUser(
   let violations: string[] = [];
   let usedFallback = false;
 
-  try { plan = await tryClaude(basePrompt); } catch { plan = null; }
-  if (plan) {
-    const v1 = validateGeneratedPlan(plan, envelope, planStartISO, restMask, cardioPlacements);
-    if (!v1.ok) {
-      violations = v1.violations;
-      const reprompt = basePrompt +
-        `\n\nPREVIOUS OUTPUT WAS INVALID. Fix all of these violations and return corrected JSON only:\n- ` +
-        violations.join("\n- ");
-      try { plan = await tryClaude(reprompt); } catch { plan = null; }
+  if (mode === "full") {
+    try { plan = await tryClaude(basePrompt); } catch { plan = null; }
+    if (plan) {
+      const v1 = validateGeneratedPlan(plan, envelope, planStartISO, restMask, cardioPlacements);
+      if (!v1.ok) {
+        violations = v1.violations;
+        const reprompt = basePrompt +
+          `\n\nPREVIOUS OUTPUT WAS INVALID. Fix all of these violations and return corrected JSON only:\n- ` +
+          violations.join("\n- ");
+        try { plan = await tryClaude(reprompt); } catch { plan = null; }
+      }
     }
-  }
-  if (plan) {
-    const v2 = validateGeneratedPlan(plan, envelope, planStartISO, restMask, cardioPlacements);
-    if (!v2.ok) { violations = v2.violations; plan = null; }
+    if (plan) {
+      const v2 = validateGeneratedPlan(plan, envelope, planStartISO, restMask, cardioPlacements);
+      if (!v2.ok) { violations = v2.violations; plan = null; }
+    }
   }
 
 
