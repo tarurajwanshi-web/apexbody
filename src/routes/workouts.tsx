@@ -626,6 +626,20 @@ function DayCard({
         </ul>
       )}
 
+      {expanded && day.cardio && (
+        <div className="mt-3 rounded-xl p-3" style={{ background: "rgba(244,114,182,0.08)", border: "1px solid rgba(244,114,182,0.25)" }}>
+          <p className="text-[10px] uppercase tracking-wider" style={{ color: "#F472B6" }}>
+            Cardio{day.cardio.optional ? " · optional" : ""}
+          </p>
+          <p className="mt-1 text-[13px] text-white">
+            {day.cardio.minutes} min · {day.cardio.modality}
+          </p>
+          {day.cardio.intensity_note && (
+            <p className="mt-0.5 text-[11px] text-text-tertiary">{day.cardio.intensity_note}</p>
+          )}
+        </div>
+      )}
+
       {isToday && !day.rest && day.exercises?.length > 0 && (
         <div className="mt-4 pt-4 border-t border-white/5">
           <p className="text-[10px] uppercase tracking-wider text-text-tertiary mb-3">Log your sets</p>
