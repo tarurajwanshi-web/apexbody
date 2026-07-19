@@ -1521,6 +1521,10 @@ export type Database = {
         Args: { p_meal_id: string; p_user_id: string }
         Returns: undefined
       }
+      tmp_dispatch_generate_plan: {
+        Args: { p_user_id: string }
+        Returns: number
+      }
     }
     Enums: {
       [_ in never]: never
