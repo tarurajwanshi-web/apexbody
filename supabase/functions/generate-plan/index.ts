@@ -592,12 +592,60 @@ Deno.serve(async (req) => {
   const supa = createClient(url, key);
 
   try {
-    let body: { user_id?: string } = {};
+    let body: { user_id?: string; drain?: boolean } = {};
     try { body = await req.json(); } catch { body = {}; }
 
     if (!anth) return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY missing" }), {
       status: 500, headers: { ...cors, "Content-Type": "application/json" },
     });
+
+    // Drain mode: cron ticks with { drain: true } + internal secret. Claims one
+    // pending job and runs the FULL Sonnet path inside this fresh invocation —
+    // full wall-clock budget, no background-task teardown.
+    if (body.drain === true) {
+      const authz = await requireInternalSecret(req, supa);
+      if (!authz.ok) return new Response(JSON.stringify({ error: authz.error }), {
+        status: authz.status, headers: { ...cors, "Content-Type": "application/json" },
+      });
+
+      const { data: jobs } = await supa
+        .from("plan_generation_queue")
+        .select("id, user_id, attempts")
+        .eq("status", "pending")
+        .order("created_at", { ascending: true })
+        .limit(1);
+      const job = (jobs as any[])?.[0];
+      if (!job) return new Response(JSON.stringify({ drained: 0 }), {
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+
+      const nextAttempts = Number(job.attempts ?? 0) + 1;
+      await supa.from("plan_generation_queue")
+        .update({ status: "processing", attempts: nextAttempts, updated_at: new Date().toISOString() })
+        .eq("id", job.id);
+
+      try {
+        await generateForUser(supa, anth!, job.user_id, undefined, "full");
+        await supa.from("plan_generation_queue")
+          .update({ status: "done", last_error: null, updated_at: new Date().toISOString() })
+          .eq("id", job.id);
+        return new Response(JSON.stringify({ drained: 1, user_id: job.user_id }), {
+          headers: { ...cors, "Content-Type": "application/json" },
+        });
+      } catch (e: any) {
+        const failed = nextAttempts >= 3;
+        await supa.from("plan_generation_queue")
+          .update({
+            status: failed ? "failed" : "pending",
+            last_error: String(e?.message ?? e),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", job.id);
+        return new Response(JSON.stringify({ drained: 0, error: String(e?.message ?? e) }), {
+          status: 500, headers: { ...cors, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     // Fan-out mode: no user_id + internal secret. Regenerates the UPCOMING
     // UTC-Monday week for every active-block user. Current week is immutable.
@@ -630,6 +678,7 @@ Deno.serve(async (req) => {
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
+
 
     // Single-user path (onboarding, manual regen). JWT or internal secret.
     const authz = await authorizeCaller(req, supa, body.user_id);
