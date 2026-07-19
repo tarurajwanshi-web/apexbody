@@ -722,7 +722,7 @@ function recoverySession(envelope: Envelope): FallbackDayTemplate {
 }
 
 // Goal-aware pattern selection.
-function pickPatternsByGoal(goal: Goal, daysCount: number): SessionKind[] {
+export function pickPatternsByGoal(goal: Goal, daysCount: number): SessionKind[] {
   const n = clamp(daysCount, 2, 6);
   if (goal === "strength") {
     // Compound-heavy, no isolation/conditioning.
