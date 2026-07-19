@@ -625,8 +625,36 @@ Deno.serve(async (req) => {
       status: authz.status, headers: { ...cors, "Content-Type": "application/json" },
     });
 
-    const result = await generateForUser(supa, anth, body.user_id);
-    return new Response(JSON.stringify(result), {
+    // Guaranteed floor: synchronously write a deterministic fallback plan so
+    // the user is NEVER left without a weekly_plans row, even if Sonnet + the
+    // background task both die. Fast (~one round-trip of reads + one upsert).
+    const uid = body.user_id;
+    const floor = await generateForUser(supa, anth!, uid, undefined, "fallback_only");
+
+    // Background upgrade: run the full Sonnet path and upsert over the same
+    // (user_id, week_start_date) row. If EdgeRuntime.waitUntil is unavailable
+    // (older runtime) we still fire-and-forget the promise; the fallback row
+    // remains as the safe floor either way.
+    const upgrade = (async () => {
+      try {
+        await generateForUser(supa, anth!, uid, undefined, "full");
+      } catch (e) {
+        console.error("[generate-plan][bg]", uid, e instanceof Error ? e.message : String(e));
+      }
+    })();
+    // deno-lint-ignore no-explicit-any
+    const rt = (globalThis as any).EdgeRuntime;
+    if (rt && typeof rt.waitUntil === "function") rt.waitUntil(upgrade);
+
+    return new Response(JSON.stringify({
+      status: "accepted",
+      week_start_date: floor.week_start_date,
+      plan_start_date: floor.plan_start_date,
+      plan_timezone: floor.plan_timezone,
+      used_fallback: true,
+      upgrade: "queued",
+    }), {
+      status: 202,
       headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {
