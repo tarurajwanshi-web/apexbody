@@ -334,7 +334,9 @@ const ALLOWED_TOP = new Set([
   "plan_data_version","training_volume_summary","exercise_media_summary",
   "cue_version",
 ]);
-const ALLOWED_DAY = new Set(["day","date","day_name","rest","session_name","session_purpose","exercises"]);
+const ALLOWED_DAY = new Set(["day","date","day_name","rest","session_name","session_purpose","exercises","cardio"]);
+const ALLOWED_CARDIO = new Set(["modality","minutes","intensity_note","optional"]);
+const CARDIO_MODALITIES = new Set(["zone2","liss","intervals","mixed"]);
 const ALLOWED_EX = new Set([
   "name","sets","reps","rest_seconds","cue","muscle_group",
   "progression_note","target_rir","exercise_role","movement_pattern",
