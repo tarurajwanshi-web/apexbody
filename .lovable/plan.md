@@ -1,95 +1,93 @@
+## Corrected diagnosis (evidence from this turn, not last turn's claim)
 
-## B6.2 — Fix generate-plan timeout so a real Sonnet plan writes
+Last turn reported "Sonnet's real plan is now successfully writing". That claim was wrong. The row it inspected (`created_at 2026-07-19 11:20:10`, `total_sets 44`, non-fallback `vol_alert`) was written **before** the B6.2 code was deployed. Every run I dispatched **after** the fix behaves the same way:
 
-### Root cause (confirmed)
-`generate-plan/index.ts` makes up to 3 sequential Sonnet calls per invocation (initial → schema-fix retry → volume soft-retry). At `max_tokens: 16000`, each call is ~40–90s. The volume retry fires on nearly every run (±2 sets across all muscles is hard to hit), so typical runs = 2–3 sequential calls = 2–4 min, exceeding the edge wall-clock. Function dies before validate/clamp/write. Observed: ~75s boot→shutdown, no `weekly_plans` update, no HTTP body. Not a token/parse issue — 200s from Anthropic, `stop_reason` guard already in place.
+- boot → shutdown ≈ **3m20s** (edge wall-clock kill, not a clean return)
+- `weekly_plans` row unchanged (still the 11:20 row, still `plan_data_version: 2`, same md5)
+- `pg_net` returns void at 60s but the edge keeps running until the runtime kills it
+- no fallback write is reached — so the 55s AbortController either isn't firing on this path or the schema-fix retry is also running to ~55s, and even ~110s of Claude + subsequent work still doesn't complete before the runtime shuts us down
 
-### Scope — two edits, one file
-`supabase/functions/generate-plan/index.ts` only.
+Net: Change 1 (remove volume soft-retry) is correct and should stay. Change 2 (55s abort) is not sufficient on its own. Sequential Claude calls inside a synchronous request handler cannot reliably complete inside the platform's wall-clock. The B6.2 spec's second-outcome branch already predicted this: **generation must go async**.
 
-### Change 1 — Delete the volume soft-retry block
-Remove the `// B6 A3 — soft retry on volume target mismatch` block (~lines 463–478) that:
-- calls `findVolumeOffenders(plan)`
-- re-prompts Sonnet with an "increase these muscles" instruction
-- calls `tryClaude(reprompt)` a second/third time
-- re-runs `validateGeneratedPlan` on the retried plan
+## Plan — B6.2b: return-first, generate-in-background
 
-Rationale: `clampPlanToCeilings` (downstream, ~line 488) is deterministic and already GUARANTEES no muscle exceeds `fuel_adjusted_mrv`. That hard ceiling doesn't need an LLM retry. Sonnet still receives target volumes in the prompt (best-effort adherence); missing them is fine because the clamp enforces the invariant.
+One file: `supabase/functions/generate-plan/index.ts`. No schema, no other functions.
 
-Keep:
-- The schema-fix retry (~lines 448–461) — fires rarely, fixes broken JSON schema, worst case is now 2 calls.
-- `findVolumeOffenders` — leave defined (unused) or delete; harmless. Prefer delete for cleanliness.
-- `clampPlanToCeilings`, `block_context`, landmark read, volume-target prompt injection — all unchanged.
+### 1. Split `generateForUser` into "prep" + "produce+write"
 
-Worst case after this: 2 Sonnet calls. Typical case: 1.
+- Keep the current profile / readiness / history / envelope / calendar / landmark / prompt-build code as the **prep** step.
+- Move everything from `tryClaude(basePrompt)` through `weekly_plans.upsert` into a **produce** step that takes the prep output.
 
-### Change 2 — Add 55s AbortController to callClaude
-Wrap the Anthropic fetch in `callClaude` with an `AbortController` that aborts at 55000ms:
+Prep is fast (Supabase reads only). Produce is the slow part (1–2 Claude calls + validate + clamp + upsert).
 
-```ts
-async function callClaude(apiKey: string, prompt: string) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 55000);
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { /* unchanged */ },
-      body: JSON.stringify({ /* unchanged, max_tokens: 16000 */ }),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
-    const j = await res.json();
-    if (j?.stop_reason === "max_tokens") {
-      throw new Error("Anthropic response truncated: stop_reason=max_tokens");
-    }
-    // existing parse/diagnostic path unchanged
-    ...
-  } finally {
-    clearTimeout(timer);
-  }
-}
-```
+### 2. Single-user handler returns immediately, produce runs in the background
 
-On abort, `fetch` throws `AbortError` → caught by the existing `try { plan = await tryClaude(...) } catch { plan = null }` → clean fallback path runs, `clampPlanToCeilings` runs on fallback, `weekly_plans` is written, HTTP body returns. Function ALWAYS completes and writes something within edge limits.
+At the single-user branch of `Deno.serve` (`if (body.user_id)` path):
 
-### Leave unchanged
-- `max_tokens: 16000`
-- `model: claude-sonnet-4-6`
-- Clamp, `block_context` stamp, landmark read, volume-target prompt injection
-- Schema-fix retry
-- `generate-training-sync`, `generate-weekly-pattern`, all other functions
+- `await` the prep step so we can return `plan_start_date`, `week_start_date`, `plan_timezone`, `block_context.phase_label` in the HTTP response.
+- Kick the produce step with `EdgeRuntime.waitUntil(produce(...))` (Supabase Edge Functions expose this global; it lets a task outlive the response).
+- Return `202 Accepted` with `{ status: "accepted", week_start_date, plan_start_date, ... }` immediately.
 
-### Deploy + decisive test
-1. Deploy `generate-plan` only.
-2. Invoke for `1f83792a-5b77-4c6a-aafe-858f21380f14` via the internal-secret path (`tmp_dispatch_generate_plan`), since preview SDK returns 403.
-3. Confirm the function RETURNS (not 75s silent death) — response body within ~60s.
-4. Run this single query against `weekly_plans`:
+The response is now bounded by prep (a few DB reads), not by Sonnet. The Claude calls, validation, clamp, and upsert run in the background against the service-role client that already exists in scope. `pg_net` sees a fast 202 and stops timing out at 60s.
 
-```sql
-select
-  plan_data->>'volume_gate_alert' as vol_alert,
-  (select sum((ex->>'sets')::int)
-     from jsonb_array_elements(plan_data->'days') d,
-          jsonb_array_elements(d->'exercises') ex) as total_sets,
-  (select array_agg(distinct ex->>'muscle_group')
-     from jsonb_array_elements(plan_data->'days') d,
-          jsonb_array_elements(d->'exercises') ex) as muscles,
-  md5(plan_data::text) as plan_hash
-from weekly_plans
-where user_id='1f83792a-5b77-4c6a-aafe-858f21380f14'
-  and week_start_date=(select max(week_start_date) from weekly_plans
-                        where user_id='1f83792a-5b77-4c6a-aafe-858f21380f14');
-```
+### 3. Fan-out branch stays synchronous but bounded
 
-### Two outcomes — both decisive
-- **PASS**: `vol_alert` is NOT "Safe fallback plan generated" (null or a readiness message), `total_sets` ~90–110, `muscles` includes calves/forearms → real Sonnet plan wrote. B6.2 done; proceed to adherence measurement.
-- **FAIL**: `vol_alert` still "Safe fallback" BUT the function returned cleanly within ~60s → a single Sonnet call is aborting at 55s. Definitive signal that generation must go async/background (return immediately, write via `EdgeRuntime.waitUntil`) → open B6.2b.
+Fan-out (`!body.user_id`) processes many users in a loop. Do NOT `waitUntil` inside the loop — background tasks stack and the runtime still gets torn down. Instead:
 
-Either way, the 75s silent-death mode is eliminated.
+- Leave the current sequential `await generateForUser(...)` loop in place.
+- Rely on the pg_cron / weekly Monday job invoking fan-out; if fan-out itself is too slow for one edge invocation, that's a separate later batch (fan-out chunking).
 
-### Out of scope (deferred, in order)
-1. Onboarding delivery fix (blocking await + landmarks race in `onboarding.tsx:313–330`).
-2. Set-count filler + goal-aware sequencer (deterministic post-processors).
-3. Phenotype priority-weight hooks.
-4. B7 day-1 ring dispatch.
-5. Async/background generation — ONLY if the test above shows a single call aborts.
+Scope for B6.2b is only the single-user path — that's what onboarding and manual regen hit, and that's where the user is being blocked.
+
+### 4. Belt-and-braces on the produce step
+
+Inside the background `produce(...)`:
+
+- Keep the 55s `AbortController` on each Claude fetch. Sonnet occasionally hangs; the abort keeps a single call bounded.
+- Wrap the whole produce body in `try { ... } catch (e) { console.error("[generate-plan][bg]", user_id, e); }` so a failure logs but doesn't leave an unhandled rejection.
+- Always upsert **something**: on any thrown path, fall through to `buildFallbackPlan(...)`, clamp, and upsert with `used_fallback: true`. A user must never end up with no `weekly_plans` row after a dispatch.
+
+### 5. Client / caller expectations
+
+Nothing else changes. Callers of `generate-plan` (onboarding, manual regen from `dashboard`/`workouts`) already tolerate the write showing up asynchronously — they re-fetch `weekly_plans` on the next load. The response shape changes from `{ ok, week_start_date, used_fallback, plan }` to `{ status: "accepted", week_start_date, plan_start_date, plan_timezone }`. Anything that was reading `plan` off the response was already unreliable (fallback path). No route in `src/` today needs the full plan echoed back synchronously — verified during the split above; if any caller does depend on it, note it and adjust that caller in the same commit.
+
+## The decisive test after implementation
+
+Dispatch once for `1f83792a-5b77-4c6a-aafe-858f21380f14` and check:
+
+1. **Response returns in <5s** with `status: "accepted"` and `week_start_date`.
+2. Within ~2 minutes, `weekly_plans` for that user has a NEW row (or updated row) with `created_at > 13:49:30` and either a Sonnet plan (non-fallback `vol_alert`, ~90–110 total sets, calves + forearms present) or an explicitly `used_fallback: true` row. Either is acceptable — the invariant is "a row gets written every time".
+3. Edge logs show `booted` … `shutdown` with a normal duration (not a 200s wall-clock kill).
+
+If the row is still stale after 3 minutes, `EdgeRuntime.waitUntil` isn't extending the task on this project's runtime, and we fall back to a lightweight two-hop pattern (single-user endpoint enqueues a `plan_generation_queue` row + a follow-up cron drains it). That's the next branch, not this one.
+
+## Out of scope for this batch
+
+- Onboarding delivery blocking-await + landmarks race (`onboarding.tsx:313-330`).
+- Set-count filler and goal-aware sequencer.
+- Phenotype priority-weight hooks.
+- B7 day-1 ring dispatch.
+- Fan-out chunking (only relevant if the Monday cron itself times out).
+
+Here's the reply to send back to Lovable:
+
+---
+
+Approved with one required change before you build.
+
+Don't ship async without a synchronous fallback floor — `EdgeRuntime.waitUntil` is not guaranteed to survive to completion on Supabase (your own plan flags this in the "still stale after 3 minutes" branch). If the background task gets killed mid-Sonnet-call, the catch block never runs, nothing upserts, and the user is left with an **empty Train tab forever, silently** — worse than the current bug.
+
+Fix the sequence in the single-user path so a plan always exists:
+
+1. Prep (fast reads) — as planned.
+2. **Synchronously build + clamp + upsert the deterministic `buildFallbackPlan` first** (no Sonnet, ~50ms), with `used_fallback: true`.
+3. Return `202 { status: "accepted", week_start_date, ... }` immediately — the user now has a complete, clamped, periodized plan, never empty.
+4. `EdgeRuntime.waitUntil(produce())` runs Sonnet in the background and **upgrades the same row** (upsert on the same `(user_id, week_start_date)` key) when it completes.
+
+This makes async safe: the fallback is the guaranteed floor, Sonnet is the upgrade. If `waitUntil` dies, the user keeps the fallback (degraded, never stranded). If it succeeds, they get the better plan. No spinner — the return is instant.
+
+Keep everything else in your plan as written: prep/produce split, 55s AbortController on each Claude call, try/catch around produce, fan-out stays synchronous.
+
+Update the decisive test to check BOTH writes: (a) fallback row appears in <5s with `used_fallback: true`, and (b) it upgrades to a Sonnet plan (non-fallback `vol_alert`, ~90-110 sets, calves+forearms present) within ~2min. Two writes on the same row = both halves work.
+
+Do not touch onboarding, other functions, or schema. Build this.
