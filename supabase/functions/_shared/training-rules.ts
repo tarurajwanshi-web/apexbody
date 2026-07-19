@@ -347,6 +347,16 @@ export interface ValidationResult {
   violations: string[];
 }
 
+// Local mirror of CardioPlacement to avoid circular import; kept structurally
+// identical to CardioPlacement in _shared/cardio-rules.ts.
+export interface CardioPlacementLite {
+  modality: "zone2" | "liss" | "intervals" | "mixed";
+  minutes: number;
+  intensity_note: string;
+  optional: boolean;
+}
+
+
 export function validateGeneratedPlan(
   plan: any,
   envelope: Envelope,
