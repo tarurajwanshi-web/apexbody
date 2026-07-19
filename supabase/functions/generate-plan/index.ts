@@ -468,11 +468,22 @@ async function generateForUser(
   plan.plan_timezone = timezone;
   plan.plan_data_version = PLAN_DATA_VERSION;
 
-  // B6 A3 — hard clamp against fuel_adjusted_mrv. Runs on Sonnet AND fallback.
+  // B6.3 — deterministic fill toward target_sets, then B6 A3 hard clamp against
+  // fuel_adjusted_mrv. Fill respects ceiling → clamp is a safety-net no-op on
+  // correct fill. Runs on Sonnet AND fallback.
   let clampTrims: string[] = [];
   if (hasLandmarks) {
+    const targets: Record<string, number> = {};
     const ceilings: Record<string, number> = {};
-    for (const [m, v] of Object.entries(landmarksByMuscle)) ceilings[m] = v.fuel_adjusted_mrv;
+    for (const [m, v] of Object.entries(landmarksByMuscle)) {
+      targets[m] = v.target_sets;
+      ceilings[m] = v.fuel_adjusted_mrv;
+    }
+    const filled = fillPlanToTargets(plan, targets, ceilings);
+    plan = filled.plan;
+    if (filled.fills.length > 0) {
+      console.log(`[generate-plan] filled ${user_id}: ${filled.fills.length} add(s)`, filled.fills);
+    }
     const clamped = clampPlanToCeilings(plan, ceilings);
     plan = clamped.plan;
     clampTrims = clamped.trims;
