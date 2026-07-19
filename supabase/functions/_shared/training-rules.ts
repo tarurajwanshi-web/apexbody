@@ -334,7 +334,9 @@ const ALLOWED_TOP = new Set([
   "plan_data_version","training_volume_summary","exercise_media_summary",
   "cue_version",
 ]);
-const ALLOWED_DAY = new Set(["day","date","day_name","rest","session_name","session_purpose","exercises"]);
+const ALLOWED_DAY = new Set(["day","date","day_name","rest","session_name","session_purpose","exercises","cardio"]);
+const ALLOWED_CARDIO = new Set(["modality","minutes","intensity_note","optional"]);
+const CARDIO_MODALITIES = new Set(["zone2","liss","intervals","mixed"]);
 const ALLOWED_EX = new Set([
   "name","sets","reps","rest_seconds","cue","muscle_group",
   "progression_note","target_rir","exercise_role","movement_pattern",
@@ -345,7 +347,23 @@ export interface ValidationResult {
   violations: string[];
 }
 
-export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartISO: string, restMask?: boolean[]): ValidationResult {
+// Local mirror of CardioPlacement to avoid circular import; kept structurally
+// identical to CardioPlacement in _shared/cardio-rules.ts.
+export interface CardioPlacementLite {
+  modality: "zone2" | "liss" | "intervals" | "mixed";
+  minutes: number;
+  intensity_note: string;
+  optional: boolean;
+}
+
+
+export function validateGeneratedPlan(
+  plan: any,
+  envelope: Envelope,
+  planStartISO: string,
+  restMask?: boolean[],
+  cardioPlacements?: (CardioPlacementLite | null)[],
+): ValidationResult {
   const v: string[] = [];
   if (!plan || typeof plan !== "object") return { ok: false, violations: ["plan is not an object"] };
 
@@ -375,6 +393,33 @@ export function validateGeneratedPlan(plan: any, envelope: Envelope, planStartIS
     if (typeof d.rest !== "boolean") v.push(`day[${i}].rest must be boolean`);
     if (useMask && typeof d.rest === "boolean" && d.rest !== restMask![i]) {
       v.push(`day[${i}].rest must be ${restMask![i]} per user's chosen training days`);
+    }
+    // Cardio echo — engine is authoritative. Check both rest and training days.
+    if (Array.isArray(cardioPlacements) && cardioPlacements.length === 7) {
+      const expected = cardioPlacements[i];
+      const got = d.cardio ?? null;
+      if (expected === null) {
+        if (got !== null && got !== undefined) {
+          v.push(`day[${i}].cardio must be null (engine did not place cardio here)`);
+        }
+      } else {
+        if (!got || typeof got !== "object") {
+          v.push(`day[${i}].cardio required — engine placed ${expected.minutes}min ${expected.modality}`);
+        } else {
+          for (const k of Object.keys(got)) if (!ALLOWED_CARDIO.has(k)) v.push(`day[${i}].cardio unknown field: ${k}`);
+          if (got.modality !== expected.modality) v.push(`day[${i}].cardio.modality must be ${expected.modality} (got ${got.modality})`);
+          if (Number(got.minutes) !== expected.minutes) v.push(`day[${i}].cardio.minutes must be ${expected.minutes} (got ${got.minutes})`);
+          if (Boolean(got.optional) !== expected.optional) v.push(`day[${i}].cardio.optional must be ${expected.optional} (got ${got.optional})`);
+          if (typeof got.intensity_note !== "string" || !got.intensity_note.trim()) {
+            v.push(`day[${i}].cardio.intensity_note required`);
+          } else if (MARKDOWN_RX.test(got.intensity_note)) {
+            v.push(`day[${i}].cardio.intensity_note contains markdown syntax — plain prose only`);
+          }
+        }
+      }
+    } else if (d.cardio !== undefined && d.cardio !== null) {
+      // No placements supplied (legacy path) — reject any cardio field.
+      v.push(`day[${i}].cardio present but engine did not provide placements`);
     }
     if (d.rest === true) {
       if (d.session_name !== null) v.push(`day[${i}] is rest — session_name must be null`);
@@ -572,7 +617,7 @@ function baseExercise(
   };
 }
 
-type SessionKind =
+export type SessionKind =
   | "push" | "pull" | "lower" | "full"
   | "upper" | "power" | "conditioning" | "recovery";
 
@@ -677,7 +722,7 @@ function recoverySession(envelope: Envelope): FallbackDayTemplate {
 }
 
 // Goal-aware pattern selection.
-function pickPatternsByGoal(goal: Goal, daysCount: number): SessionKind[] {
+export function pickPatternsByGoal(goal: Goal, daysCount: number): SessionKind[] {
   const n = clamp(daysCount, 2, 6);
   if (goal === "strength") {
     // Compound-heavy, no isolation/conditioning.
@@ -717,13 +762,11 @@ export function buildFallbackPlan(
   planTimezone: string,
   trainingDaysPerWeek: number,
   restMask?: boolean[],
+  cardioPlacements?: (CardioPlacementLite | null)[],
 ): any {
   const daysCount = clamp(trainingDaysPerWeek || 3, 2, 6);
   const patterns: SessionKind[] = pickPatternsByGoal(envelope.input.goal, daysCount);
 
-  // Rest/train indices. If a caller-supplied restMask is valid, honour it
-  // exactly (deterministic pin from profile.training_day_codes). Otherwise
-  // fall back to the historical even-spread across the week.
   const useMask = Array.isArray(restMask)
     && restMask.length === 7
     && restMask.filter((r) => r === false).length > 0;
@@ -741,17 +784,20 @@ export function buildFallbackPlan(
     }
   }
 
-  // First non-rest gets recovery/reduce/modify treatment via envelope
   const days: any[] = [];
   let pIdx = 0;
   let firstNonRestApplied = false;
   for (let i = 0; i < 7; i++) {
     const date = isoAddDays(planStartISO, i);
     const day_name = isoWeekdayName(date);
+    const cardio = Array.isArray(cardioPlacements) && cardioPlacements.length === 7
+      ? cardioPlacements[i] ?? null
+      : null;
     if (!trainingIdx.has(i)) {
       days.push({
         day: i + 1, date, day_name, rest: true,
         session_name: null, session_purpose: null, exercises: [],
+        cardio,
       });
       continue;
     }
@@ -768,8 +814,10 @@ export function buildFallbackPlan(
       session_name: template.session_name,
       session_purpose: template.session_purpose,
       exercises: template.exercises,
+      cardio,
     });
   }
+
 
   return {
     plan_data_version: PLAN_DATA_VERSION,

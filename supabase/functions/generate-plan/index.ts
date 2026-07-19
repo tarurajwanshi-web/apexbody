@@ -7,6 +7,7 @@ import {
   validateGeneratedPlan,
   buildFallbackPlan,
   resolvePlanStartISO,
+  pickPatternsByGoal,
   MUSCLE_GROUPS,
   MOVEMENT_PATTERNS,
   EXERCISE_ROLES,
@@ -17,7 +18,10 @@ import {
   type Equipment,
   type Permission,
   type Confidence,
+  type SessionKind,
+  type CardioPlacementLite,
 } from "../_shared/training-rules.ts";
+import { resolveCardioPrescription, placeCardioAcrossWeek } from "../_shared/cardio-rules.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -59,7 +63,7 @@ async function callClaude(apiKey: string, prompt: string) {
       system:
         "You are an expert evidence-based strength & conditioning coach. " +
         "Respond with ONLY a single JSON object, no prose, no markdown fences. " +
-        "Schema: { \"plan_data_version\": 2, \"plan_start_date\": string (YYYY-MM-DD), \"plan_timezone\": string, \"days\": [ { \"day\": 1-7, \"date\": string (YYYY-MM-DD), \"day_name\": string, \"session_name\": string|null, \"session_purpose\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string, \"movement_pattern\": string, \"exercise_role\": string, \"progression_note\": string, \"target_rir\": int } ] } ], \"volume_gate_alert\": string|null }. " +
+        "Schema: { \"plan_data_version\": 2, \"plan_start_date\": string (YYYY-MM-DD), \"plan_timezone\": string, \"days\": [ { \"day\": 1-7, \"date\": string (YYYY-MM-DD), \"day_name\": string, \"session_name\": string|null, \"session_purpose\": string|null, \"rest\": boolean, \"exercises\": [ { \"name\": string, \"sets\": int, \"reps\": string, \"rest_seconds\": int, \"cue\": string, \"muscle_group\": string, \"movement_pattern\": string, \"exercise_role\": string, \"progression_note\": string, \"target_rir\": int } ], \"cardio\": {\"modality\": string, \"minutes\": int, \"intensity_note\": string, \"optional\": boolean} | null } ], \"volume_gate_alert\": string|null }. " +
         "No other fields allowed. Do NOT emit session_note, notes, description, tempo, or any field outside this schema. " +
         "Do NOT emit training_volume_summary, exercise_media_summary, or any summary / aggregate / count field — those are computed downstream. " +
         `muscle_group MUST be one of: ${MUSCLE_GROUPS.join(", ")}. ` +
@@ -341,17 +345,56 @@ Deno.serve(async (req) => {
       ? `\nREST_MASK (hard): the rest flag per day is fixed by the user's chosen training days. Do not move rest days. calendar[i].rest_flag is authoritative — each day.rest MUST equal calendar[i].rest_flag.`
       : "";
 
+    // B5.5 — Deterministic cardio placement. Engine is authoritative;
+    // Sonnet echoes exactly. Uses the fallback's own goal-pattern map to
+    // approximate which training slots are heavy-lower and steer cardio
+    // away from them.
+    const { data: mesoRow } = await supa
+      .from("mesocycle_state")
+      .select("phase")
+      .eq("user_id", user_id)
+      .maybeSingle();
+    const cardioPhase: "accumulation" | "deload" =
+      (mesoRow as any)?.phase === "deload" ? "deload" : "accumulation";
+
+    const cardioRx = resolveCardioPrescription({
+      goal, experience, phase: cardioPhase, weeklyReduce,
+    });
+    const patternsForPlacement: SessionKind[] = pickPatternsByGoal(goal, trainingDaysCount);
+    const sessionKinds: (string | null)[] = new Array(7).fill(null);
+    if (restMask) {
+      let pIdx = 0;
+      for (let i = 0; i < 7; i++) {
+        if (restMask[i] === false) {
+          sessionKinds[i] = patternsForPlacement[pIdx % patternsForPlacement.length] ?? null;
+          pIdx++;
+        }
+      }
+    }
+    const cardioPlacements: (CardioPlacementLite | null)[] = placeCardioAcrossWeek(
+      cardioRx,
+      restMask,
+      goal,
+      latestTrainingPermission as Permission,
+      sessionKinds,
+    );
+    const cardioPlacementsBlock =
+      `\nCARDIO_PLACEMENTS (hard): each day's cardio field is authoritative from the engine. ` +
+      `Echo the value at index i exactly into day[i].cardio — do NOT invent, add, remove, or move cardio. ` +
+      `A null value MUST be echoed as null. Placements by day index: ` +
+      JSON.stringify(cardioPlacements);
+
     const promptSchemaNote =
       `Return ONLY a JSON object of shape: { "plan_data_version": ${PLAN_DATA_VERSION}, "plan_start_date": "${planStartISO}", "plan_timezone": "${timezone}", "days": [7 items], "volume_gate_alert": string|null }. ` +
-      `Each day: { "day": 1-7, "date": string (YYYY-MM-DD, use the calendar below), "day_name": string, "rest": boolean, "session_name": string|null, "session_purpose": string|null, "exercises": [] }. ` +
+      `Each day: { "day": 1-7, "date": string (YYYY-MM-DD, use the calendar below), "day_name": string, "rest": boolean, "session_name": string|null, "session_purpose": string|null, "exercises": [], "cardio": {"modality": "zone2"|"liss"|"intervals"|"mixed", "minutes": int, "intensity_note": string, "optional": boolean} | null }. ` +
       `Each exercise: { "name": string, "sets": int, "reps": string, "rest_seconds": int, "cue": string, "muscle_group": one of [${MUSCLE_GROUPS.join("|")}], "movement_pattern": one of [${MOVEMENT_PATTERNS.join("|")}], "exercise_role": one of [${EXERCISE_ROLES.join("|")}], "progression_note": string, "target_rir": int }. ` +
       `No other top-level or exercise fields. Do NOT emit session_note, notes, description, tempo, training_volume_summary, exercise_media_summary, or anything not in this schema. ` +
-      `All text (cue, progression_note, session_purpose) is plain prose — no markdown/asterisks/bullets/backticks.`;
+      `All text (cue, progression_note, session_purpose, cardio.intensity_note) is plain prose — no markdown/asterisks/bullets/backticks.`;
 
     const basePrompt =
       `Build a rolling 7-day workout plan starting ${planStartISO} (user timezone ${timezone}).\n` +
       `Use exactly this calendar (day/date/day_name${restMask ? "/rest_flag" : ""}):\n${JSON.stringify(calendar)}\n` +
-      `${envelopeBlock}${restMaskBlock}\n` +
+      `${envelopeBlock}${restMaskBlock}${cardioPlacementsBlock}\n` +
       `${shieldContext}\n` +
       `${(underFuelled || shieldFuellingCaution) ? `\nFUELLING CAUTION${underFuelled && targetCalories ? ` (avg intake ${Math.round(avgIntake!)} kcal vs ${Math.round(targetCalories!)} kcal target)` : ""}${latestNutritionModifier ? ` — Shield nutrition_modifier=${latestNutritionModifier}` : ""}. Do not programme to failure.` : ""}` +
       historyNote + "\n" +
@@ -374,7 +417,7 @@ Deno.serve(async (req) => {
       plan = null;
     }
     if (plan) {
-      const v1 = validateGeneratedPlan(plan, envelope, planStartISO, restMask);
+      const v1 = validateGeneratedPlan(plan, envelope, planStartISO, restMask, cardioPlacements);
       if (!v1.ok) {
         violations = v1.violations;
         const reprompt = basePrompt +
@@ -388,16 +431,18 @@ Deno.serve(async (req) => {
       }
     }
     if (plan) {
-      const v2 = validateGeneratedPlan(plan, envelope, planStartISO, restMask);
+      const v2 = validateGeneratedPlan(plan, envelope, planStartISO, restMask, cardioPlacements);
       if (!v2.ok) {
         violations = v2.violations;
         plan = null;
       }
     }
     if (!plan) {
-      plan = buildFallbackPlan(envelope, planStartISO, timezone, trainingDaysCount, restMask);
+      plan = buildFallbackPlan(envelope, planStartISO, timezone, trainingDaysCount, restMask, cardioPlacements);
       usedFallback = true;
     }
+
+
 
     // Ensure top-level plan_start_date / plan_timezone / plan_data_version are set
     plan.plan_start_date = planStartISO;

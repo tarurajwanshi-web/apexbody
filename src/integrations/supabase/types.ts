@@ -86,6 +86,42 @@ export type Database = {
         }
         Relationships: []
       }
+      cardio_logs: {
+        Row: {
+          created_at: string
+          entry_date: string
+          id: string
+          intensity: string | null
+          minutes: number
+          modality: string
+          perceived_effort: number | null
+          source: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          entry_date: string
+          id?: string
+          intensity?: string | null
+          minutes: number
+          modality: string
+          perceived_effort?: number | null
+          source?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          entry_date?: string
+          id?: string
+          intensity?: string | null
+          minutes?: number
+          modality?: string
+          perceived_effort?: number | null
+          source?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       daily_ai_insights: {
         Row: {
           content: string
@@ -1461,6 +1497,10 @@ export type Database = {
       }
       get_dispatch_secret: { Args: never; Returns: string }
       increment_hydration: { Args: { p_amount_ml: number }; Returns: number }
+      recompute_daily_training_strain: {
+        Args: { _entry_date: string; _user_id: string }
+        Returns: undefined
+      }
       restore_meal: {
         Args: { p_meal_id: string; p_user_id: string }
         Returns: undefined

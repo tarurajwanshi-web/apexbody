@@ -119,6 +119,40 @@ export const logHydration = createServerFn({ method: "POST" })
     return { total_ml: Number(total ?? 0) };
   });
 
+/** B5.5 — Log a cardio session. Feeds fatigue via a DB trigger that combines
+ *  cardio strain with lifting strain in shield_training_logs (0-21 scale).
+ *  Intentionally does NOT touch macros/TDEE — cardio burn is already
+ *  captured by the weight-trend-based TDEE in macro-calculation.ts. */
+export const logCardio = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      modality: z.string().min(1).max(40),
+      minutes: z.number().int().min(1).max(600),
+      intensity: z.enum(["zone2", "liss", "intervals", "mixed"]).nullable().optional(),
+      perceived_effort: z.number().int().min(1).max(10).nullable().optional(),
+      client_timezone: z.string().optional(),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ id: string; entry_date: string }> => {
+    const entry_date = await userTodayWithHint(context.supabase, context.userId, data.client_timezone);
+    const { data: row, error } = await context.supabase
+      .from("cardio_logs")
+      .insert({
+        user_id: context.userId,
+        entry_date,
+        modality: data.modality,
+        minutes: data.minutes,
+        intensity: data.intensity ?? null,
+        perceived_effort: data.perceived_effort ?? null,
+        source: "manual",
+      })
+      .select("id, entry_date")
+      .single();
+    if (error) throw new Error(error.message);
+    return { id: row.id as string, entry_date: row.entry_date as string };
+  });
+
 export type HydrationSummary = {
   consumed_ml: number;
   target_ml: number | null;

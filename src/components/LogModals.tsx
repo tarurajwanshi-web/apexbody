@@ -22,6 +22,7 @@ import {
   type DeviceUploadStatus,
   type ConfirmedMealItem,
   type EatingWindowValidation,
+  logCardio,
 } from "@/lib/shield.functions";
 
 
@@ -1576,6 +1577,90 @@ export function WeightOnlyModal({ open, onClose, onSaved }: Props) {
     </Sheet>
   );
 }
+
+type CardioIntensity = "zone2" | "liss" | "intervals" | "mixed";
+export function CardioLogModal({ open, onClose, onSaved }: Props) {
+  const log = useServerFn(logCardio);
+  const [minutes, setMinutes] = useState("");
+  const [intensity, setIntensity] = useState<CardioIntensity>("zone2");
+  const [rpe, setRpe] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) { setMinutes(""); setIntensity("zone2"); setRpe(""); setErr(null); setBusy(false); }
+  }, [open]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const m = Number(minutes);
+    if (!Number.isFinite(m) || m <= 0 || m > 600) { setErr("Enter minutes between 1 and 600."); return; }
+    const r = rpe.trim() === "" ? null : Number(rpe);
+    if (r !== null && (!Number.isFinite(r) || r < 1 || r > 10)) { setErr("Effort must be 1-10."); return; }
+    setBusy(true); setErr(null);
+    try {
+      await log({
+        data: {
+          modality: intensity,
+          minutes: Math.round(m),
+          intensity,
+          perceived_effort: r,
+          client_timezone: getBrowserTimezone(),
+        },
+      });
+      onSaved?.();
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not log cardio.");
+    } finally { setBusy(false); }
+  };
+
+  const modes: Array<{ key: CardioIntensity; label: string; sub: string }> = [
+    { key: "zone2",     label: "Zone 2",    sub: "Easy, conversational" },
+    { key: "liss",      label: "LISS",      sub: "Steady, low intensity" },
+    { key: "intervals", label: "Intervals", sub: "Short hard efforts" },
+    { key: "mixed",     label: "Mixed",     sub: "Combo session" },
+  ];
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Log cardio">
+      <form onSubmit={submit} className="space-y-5">
+        <p className="text-[12px] text-text-tertiary">
+          Feeds fatigue and readiness. Cardio burn is already priced into your macros — this won't change your calorie target.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {modes.map((m) => {
+            const active = intensity === m.key;
+            return (
+              <button
+                type="button"
+                key={m.key}
+                onClick={() => setIntensity(m.key)}
+                className="rounded-2xl p-3 text-left active:scale-[0.99] transition"
+                style={{
+                  background: active ? "rgba(244,114,182,0.15)" : "#0A0E1A",
+                  border: `1px solid ${active ? "rgba(244,114,182,0.6)" : "rgba(255,255,255,0.08)"}`,
+                }}
+              >
+                <p className="text-[13px] font-semibold text-white">{m.label}</p>
+                <p className="text-[11px] text-text-tertiary mt-0.5">{m.sub}</p>
+              </button>
+            );
+          })}
+        </div>
+        <Row label="Minutes">
+          <NumField value={minutes} onChange={setMinutes} suffix="min" ariaLabel="Minutes" />
+        </Row>
+        <Row label="Effort (optional)">
+          <NumField value={rpe} onChange={setRpe} suffix="/10" ariaLabel="RPE" />
+        </Row>
+        {err && <p className="text-[12px] text-red-400">{err}</p>}
+        <SubmitBtn busy={busy} label="Log cardio" disabled={!minutes} />
+      </form>
+    </Sheet>
+  );
+}
+
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (

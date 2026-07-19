@@ -24,7 +24,8 @@ export const Route = createFileRoute("/workouts")({
 });
 
 type Exercise = { name: string; sets: number; reps: string; rest_seconds: number; cue?: string; muscle_group?: string; progression_note?: string };
-type DayPlan = { day: number; day_name: string; session_name: string | null; rest: boolean; exercises: Exercise[] };
+type CardioBlock = { modality: string; minutes: number; intensity_note: string; optional: boolean };
+type DayPlan = { day: number; day_name: string; session_name: string | null; rest: boolean; exercises: Exercise[]; cardio?: CardioBlock | null };
 type Plan = { days: DayPlan[] };
 type WeeklyPlan = { id: string; week_start_date: string; unlock_date: string; is_locked: boolean; plan_data: Plan };
 type SetLog = { id?: string; exercise_name: string; set_number: number; reps_completed: number | null; weight_kg: number | null; completed: boolean; entry_date?: string; rir?: number | null };
@@ -623,6 +624,20 @@ function DayCard({
             </li>
           ))}
         </ul>
+      )}
+
+      {expanded && day.cardio && (
+        <div className="mt-3 rounded-xl p-3" style={{ background: "rgba(244,114,182,0.08)", border: "1px solid rgba(244,114,182,0.25)" }}>
+          <p className="text-[10px] uppercase tracking-wider" style={{ color: "#F472B6" }}>
+            Cardio{day.cardio.optional ? " · optional" : ""}
+          </p>
+          <p className="mt-1 text-[13px] text-white">
+            {day.cardio.minutes} min · {day.cardio.modality}
+          </p>
+          {day.cardio.intensity_note && (
+            <p className="mt-0.5 text-[11px] text-text-tertiary">{day.cardio.intensity_note}</p>
+          )}
+        </div>
       )}
 
       {isToday && !day.rest && day.exercises?.length > 0 && (

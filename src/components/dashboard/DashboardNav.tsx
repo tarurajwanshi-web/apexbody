@@ -7,6 +7,7 @@ import {
   MealLogModal,
   BodyMeasurementModal,
   WeightOnlyModal,
+  CardioLogModal,
 } from "@/components/LogModals";
 import { supabase } from "@/integrations/supabase/client";
 import { T } from "./tokens";
@@ -41,6 +42,7 @@ export function DashboardNav({ onLogged }: Props) {
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [bodyOpen, setBodyOpen] = useState(false);
   const [weightOpen, setWeightOpen] = useState(false);
+  const [cardioOpen, setCardioOpen] = useState(false);
 
   const isActive = (to: string) => pathname === to || pathname.startsWith(to + "/");
 
@@ -49,6 +51,7 @@ export function DashboardNav({ onLogged }: Props) {
     else if (a === "recovery") setRecoveryOpen(true);
     else if (a === "body") setBodyOpen(true);
     else if (a === "weight") setWeightOpen(true);
+    else if (a === "cardio") setCardioOpen(true);
   };
 
   const renderTab = (t: { to: string; icon: typeof Home; label: string }) => {
@@ -144,6 +147,11 @@ export function DashboardNav({ onLogged }: Props) {
         open={weightOpen}
         onClose={() => setWeightOpen(false)}
         onSaved={() => recalcMacros().finally(() => onLogged?.())}
+      />
+      <CardioLogModal
+        open={cardioOpen}
+        onClose={() => setCardioOpen(false)}
+        onSaved={() => onLogged?.()}
       />
     </>
   );
