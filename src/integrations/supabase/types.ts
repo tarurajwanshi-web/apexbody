@@ -694,6 +694,7 @@ export type Database = {
           profile_completed_at: string | null
           reached_target_at: string | null
           soft_reset_at: string | null
+          target_kcal_delta: number | null
           target_rate_pct: number | null
           target_weight_kg: number | null
           timezone: string | null
@@ -728,6 +729,7 @@ export type Database = {
           profile_completed_at?: string | null
           reached_target_at?: string | null
           soft_reset_at?: string | null
+          target_kcal_delta?: number | null
           target_rate_pct?: number | null
           target_weight_kg?: number | null
           timezone?: string | null
@@ -762,6 +764,7 @@ export type Database = {
           profile_completed_at?: string | null
           reached_target_at?: string | null
           soft_reset_at?: string | null
+          target_kcal_delta?: number | null
           target_rate_pct?: number | null
           target_weight_kg?: number | null
           timezone?: string | null
