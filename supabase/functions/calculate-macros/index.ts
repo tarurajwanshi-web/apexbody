@@ -62,24 +62,41 @@ Deno.serve(async (req) => {
       return err(422, { error: String(e instanceof Error ? e.message : e) });
     }
 
-    // ── Direction-specific validation ───────────────────────────────────
-    if (direction !== "maintain") {
-      if (p.target_weight_kg == null || p.target_rate_pct == null) {
-        return err(422, {
-          error: "Cannot calculate macros — target weight and rate required for this goal",
-          missing_fields: [
-            ...(p.target_weight_kg == null ? ["target_weight_kg"] : []),
-            ...(p.target_rate_pct == null ? ["target_rate_pct"] : []),
-          ],
-        });
-      }
-      const targetKg = Number(p.target_weight_kg);
-      if (direction === "lose" && targetKg >= weight_kg) return err(422, { error: "target_weight_kg must be below current weight for this goal" });
-      if (direction === "gain" && targetKg <= weight_kg) return err(422, { error: "target_weight_kg must be above current weight for this goal" });
+    const goal = p.goal as string;
+
+    // ── Goal-based validation ───────────────────────────────────────────
+    const checkBmi = (targetKg: number, dir: "lose" | "gain") => {
+      if (dir === "lose" && targetKg >= weight_kg) return "target_weight_kg must be below current weight for this goal";
+      if (dir === "gain" && targetKg <= weight_kg) return "target_weight_kg must be above current weight for this goal";
       const bmiAtTarget = targetKg / ((height_cm / 100) ** 2);
-      if (direction === "lose" && bmiAtTarget < 18.5) return err(422, { error: "target_weight_kg implies an unsafe BMI (under 18.5)" });
-      if (direction === "gain" && bmiAtTarget >= 35) return err(422, { error: "target_weight_kg implies an unsafe BMI (35 or above)" });
+      if (dir === "lose" && bmiAtTarget < 18.5) return "target_weight_kg implies an unsafe BMI (under 18.5)";
+      if (dir === "gain" && bmiAtTarget >= 35) return "target_weight_kg implies an unsafe BMI (35 or above)";
+      return null;
+    };
+
+    if (goal === "fat_loss") {
+      if (p.target_rate_pct == null || Number(p.target_rate_pct) <= 0) {
+        return err(422, { error: "Cannot calculate macros — positive target_rate_pct required for fat_loss", missing_fields: ["target_rate_pct"] });
+      }
+      if (p.target_weight_kg == null) {
+        return err(422, { error: "Cannot calculate macros — target_weight_kg required for fat_loss", missing_fields: ["target_weight_kg"] });
+      }
+      const msg = checkBmi(Number(p.target_weight_kg), "lose");
+      if (msg) return err(422, { error: msg });
+    } else if (goal === "muscle_gain" || goal === "strength") {
+      if (p.target_kcal_delta == null || Number(p.target_kcal_delta) <= 0) {
+        return err(422, { error: "Cannot calculate macros — positive target_kcal_delta required for this goal", missing_fields: ["target_kcal_delta"] });
+      }
+      if (p.target_weight_kg != null) {
+        const msg = checkBmi(Number(p.target_weight_kg), "gain");
+        if (msg) return err(422, { error: msg });
+      }
+    } else if (goal === "recomposition") {
+      if (p.target_kcal_delta == null || Number(p.target_kcal_delta) >= 0) {
+        return err(422, { error: "Cannot calculate macros — negative target_kcal_delta required for recomposition", missing_fields: ["target_kcal_delta"] });
+      }
     }
+    // athletic_performance: maintenance, no gate
 
     // ── BMR ──────────────────────────────────────────────────────────────
     let bmr: number;
@@ -94,14 +111,16 @@ Deno.serve(async (req) => {
       formula_used = "mifflin_st_jeor";
     }
 
-    // ── TDEE + rate-based deficit/surplus (MacroFactor-aligned) ─────────
+    // ── TDEE + goal-based deficit/surplus ────────────────────────────────
     const tdee = bmr * activityMult(p.training_days_per_week);
     let deltaKcal = 0;
-    if (direction !== "maintain") {
-      const ceiling = rateCeilingFor(p.goal)!;
+    if (goal === "fat_loss") {
+      const ceiling = rateCeilingFor(goal)!;
       const clampedRate = Math.min(Number(p.target_rate_pct), ceiling);
       const magnitude = (clampedRate / 100) * weight_kg * 7700 / 7;
-      deltaKcal = direction === "lose" ? -magnitude : magnitude;
+      deltaKcal = -magnitude;
+    } else if (goal === "muscle_gain" || goal === "strength" || goal === "recomposition") {
+      deltaKcal = Number(p.target_kcal_delta);
     }
     const target_calories = Math.max(1200, tdee + deltaKcal);
 
