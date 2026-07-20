@@ -248,8 +248,10 @@ function ProfileSetup() {
       const userId = userRes.user.id;
 
       const trainingDaysCount = draft.trainingDays.length;
-      const targetRatePct = computeTargetRatePct(draft);
+      const { target_rate_pct, target_kcal_delta } = computeNutritionTargets(draft);
       const equipmentDb = draft.equipment ? EQUIPMENT_UI_TO_DB[draft.equipment] : null;
+      const twNum = Number(draft.targetWeightKg);
+      const targetWeightKg = Number.isFinite(twNum) && twNum > 0 ? twNum : null;
 
       const commonBody = {
         experience_level: draft.experienceLevel,
@@ -261,8 +263,9 @@ function ProfileSetup() {
         body_data_type: "measurements" as const,
         measurement_weight_kg: Number(draft.weightKg),
         measurement_height_cm: Number(draft.heightCm),
-        target_weight_kg: Number(draft.targetWeightKg),
-        target_rate_pct: targetRatePct,
+        target_weight_kg: targetWeightKg,
+        target_rate_pct,
+        target_kcal_delta,
       };
 
       let payload: Record<string, unknown>;
