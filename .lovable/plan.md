@@ -1,39 +1,80 @@
-# Fix onboarding edge-function dispatch ordering
+# Fix: macro delta collapses to zero for every non-maintenance goal
 
-**File:** `src/routes/_authenticated/onboarding.tsx` (only). Lines ~313–330 in the profile-submit handler.
+## Root cause (confirmed)
 
-## Current bugs
+- `onboarding.tsx` `computeTargetRatePct` returns `sign × (pct/100)` — a signed fraction (e.g. `-0.005`).
+- `calculate-macros/index.ts` treats `target_rate_pct` as a raw percent: it re-applies the sign via `direction` and divides by 100 again (`clampedRate / 100`). Net effect: sign cancels, magnitude divided by 100 → ~0 kcal delta → maintenance.
+- Recomposition is worse: `direction === "maintain"` skips the delta block entirely, so its kcal-based deficit never lands.
 
-1. `calculate-macros`, `generate-plan`, and `compute-volume-landmarks` fire in parallel via `Promise.allSettled`. `generate-plan` reads `weekly_volume_landmarks` for volume targets and `compute-volume-landmarks` reads fuel data from `calculate-macros` — so on first onboarding the plan is generated before landmarks exist.
-2. Navigation `await`s the entire `allSettled`, but `generate-plan` returns 202 immediately after writing a fallback and queuing the Sonnet upgrade — so waiting on it serves no purpose and any slow response stalls the onboarding→dashboard transition.
-3. Failures are swallowed with `console.warn`; a failed macro or landmark step silently produces a degraded plan.
+## Fix — two files only
 
-## Change
+### File 1 — `src/routes/_authenticated/onboarding.tsx`
 
-Replace the current dispatch block with a strict sequential chain, then fire-and-forget the plan:
+Replace `computeTargetRatePct` (~L108–124) with:
 
-```text
-await advance-mesocycle  { user_id, mode: "init" }
-await calculate-macros   { user_id }
-await compute-volume-landmarks { user_id }
-// fire-and-forget — do NOT await
-supabase.functions.invoke("generate-plan", { body: { user_id } })
-navigate({ to: "/dashboard" })
+```ts
+function computeNutritionTargets(draft: Draft): {
+  target_rate_pct: number | null;
+  target_kcal_delta: number | null;
+}
 ```
 
-Rules:
+Per-goal returns:
 
-- Each of the three awaited invokes: check both the thrown error path AND the `{ error }` returned in the invoke result. On failure, call the existing `toast.error(...)` with a specific message (e.g. `"Could not initialize training block"`, `"Could not calculate macros"`, `"Could not compute volume targets"`) and `return` — do not proceed, do not navigate, do not swallow with `console.warn`.
-- `generate-plan` is dispatched without `await`. Attach a `.catch(err => console.warn("generate-plan dispatch failed", err))` purely so an unhandled rejection doesn't surface — the server writes the fallback plan synchronously and cron drains the Sonnet upgrade, so the UI does not need to wait or report.
-- Preserve every dispatch body verbatim: `{ user_id: userId }` for macros/landmarks/plan, `{ user_id: userId, mode: "init" }` for mesocycle.
-- Remove the now-obsolete comment about "must land BEFORE compute-volume-landmarks" and replace with a one-line comment noting the strict sequential dependency chain.
 
-## Not touched
+| Goal                       | `target_rate_pct`                                                | `target_kcal_delta`                                                                       |
+| -------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `fat_loss`                 | raw positive `item.pct` from `PACES_FAT_LOSS` (no sign, no /100) | `null`                                                                                    |
+| `muscle_gain` / `strength` | `null`                                                           | by `experienceLevel`: beginner 350, intermediate 250, advanced 150; null → 250 (positive) |
+| `recomposition`            | `null`                                                           | `-item.kcalDelta` from `PACES_RECOMP` (mild 100 / moderate 250 / focused 400 → negative)  |
+| `athletic_performance`     | `null`                                                           | `null`                                                                                    |
 
-- No other files.
-- No changes to the edge functions themselves, their bodies, or the outer try/catch that already funnels errors through `toast.error`.
-- No changes to the loading/submitting state variable — it remains held until navigate, which now happens right after the landmarks step resolves and the plan is dispatched.
+
+Pace tables (`PACES_FAT_LOSS`, `PACES_MUSCLE_GAIN`, `PACES_STRENGTH`, `PACES_RECOMP`) stay as-is — muscle_gain/strength pace picks continue to drive UI copy but no longer feed the macro delta directly.
+
+In submit (~L246–260): call `computeNutritionTargets(draft)` once; write both `target_rate_pct` and `target_kcal_delta` into `commonBody`.
+
+### File 2 — `supabase/functions/calculate-macros/index.ts`
+
+Replace direction-based validation (~L66–82) with goal-based:
+
+- `fat_loss` → require `target_rate_pct != null && > 0`, else 422. Keep target_weight + BMI-below-18.5 checks.
+- `muscle_gain` / `strength` → require `target_kcal_delta != null && > 0`, else 422. Target-weight + BMI-≥35 checks apply **only if** `target_weight_kg` is present (not hard-required).
+- `recomposition` → require `target_kcal_delta != null && < 0`, else 422. No target_weight gate.
+- `athletic_performance` → maintenance, no gate.
+
+Replace delta block (~L99–105) with:
+
+```ts
+let deltaKcal = 0;
+if (goal === "fat_loss") {
+  const ceiling = rateCeilingFor(goal)!;
+  const clampedRate = Math.min(Number(p.target_rate_pct), ceiling);
+  const magnitude = (clampedRate / 100) * weight_kg * 7700 / 7;
+  deltaKcal = -magnitude;
+} else if (goal === "muscle_gain" || goal === "strength" || goal === "recomposition") {
+  deltaKcal = Number(p.target_kcal_delta);
+}
+```
+
+Drive branching off `p.goal` (string), not `direction`, so recomposition receives its negative delta despite being `maintain`.
+
+## Unchanged
+
+BMR (Mifflin / Katch-McArdle), TDEE, activity multiplier, protein per kg, fat floor, carb remainder, `apply_onboarding_macros` RPC, `weight_trend_state` seeding, `Math.max(1200, …)` floor.
+
+## Notes
+
+- `profiles.target_kcal_delta` must already be a writable column for this to persist. If it isn't in the schema, this plan needs a migration added before Build — flagging so you can confirm before I execute.
+- No changes to weekly reconciliation (`calculate-macros-weekly`) in this batch; it operates on stored targets and is unaffected by the onboarding fix.
 
 &nbsp;
 
-**on every failure path that `return`s early, call `setSubmitting(false)` before the `toast.error` and `return**`, matching the existing outer catch. Everything else ships as written.
+Approved — build it as planned. One prerequisite is already handled: the `[profiles.target](http://profiles.target)_kcal_delta` column exists, so the writes in File 1 will persist.
+
+Proceed with both files exactly as specced. Confirm on completion:
+
+- File 1: `computeNutritionTargets` returns the per-goal rate/delta per the table, and submit writes both `target_rate_pct` and `target_kcal_delta` into `commonBody`.
+- File 2: validation is goal-based (fat_loss requires rate > 0; muscle_gain/strength require delta > 0; recomposition requires delta < 0 with no target_weight gate), and the delta block branches off `p.goal`, not `direction`, so recomposition receives its negative delta.
+
+Everything under "Unchanged" stays untouched.
