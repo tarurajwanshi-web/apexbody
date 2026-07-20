@@ -55,9 +55,8 @@ Deno.serve(async (req) => {
     const height_cm = Number(p.measurement_height_cm);
     if (weight_kg <= 0 || height_cm <= 0) return err(422, { error: "weight/height must be positive" });
 
-    let direction: "lose" | "gain" | "maintain";
     try {
-      direction = goalDirection(p.goal);
+      goalDirection(p.goal); // validate recognized goal
     } catch (e) {
       return err(422, { error: String(e instanceof Error ? e.message : e) });
     }
