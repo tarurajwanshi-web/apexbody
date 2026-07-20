@@ -105,22 +105,27 @@ const GOAL_DIRECTION: Record<Goal, "lose" | "gain" | "maintain"> = {
   recomposition: "maintain", athletic_performance: "maintain",
 };
 
-function computeTargetRatePct(draft: Draft): number | null {
+function computeNutritionTargets(draft: Draft): {
+  target_rate_pct: number | null;
+  target_kcal_delta: number | null;
+} {
   const g = draft.goal;
-  if (!g) return null;
-  if (g === "athletic_performance") return null;
+  if (!g) return { target_rate_pct: null, target_kcal_delta: null };
+  if (g === "athletic_performance") return { target_rate_pct: null, target_kcal_delta: null };
+  if (g === "fat_loss") {
+    const item = PACES_FAT_LOSS.find((p) => p.id === draft.pace) ?? PACES_FAT_LOSS[1];
+    return { target_rate_pct: item.pct, target_kcal_delta: null };
+  }
+  if (g === "muscle_gain" || g === "strength") {
+    const byExp: Record<string, number> = { beginner: 350, intermediate: 250, advanced: 150 };
+    const delta = draft.experienceLevel ? (byExp[draft.experienceLevel] ?? 250) : 250;
+    return { target_rate_pct: null, target_kcal_delta: delta };
+  }
   if (g === "recomposition") {
     const item = PACES_RECOMP.find((p) => p.id === draft.pace) ?? PACES_RECOMP[1];
-    const cw = Number(draft.weightKg);
-    if (!(cw > 0)) return -0.001;
-    const weeklyKg = (item.kcalDelta * 7) / 7700;
-    return -(weeklyKg / cw);
+    return { target_rate_pct: null, target_kcal_delta: -item.kcalDelta };
   }
-  const table = ratePacesFor(g);
-  if (!table) return null;
-  const item = table.find((p) => p.id === draft.pace) ?? table[1];
-  const sign = GOAL_DIRECTION[g] === "lose" ? -1 : 1;
-  return sign * (item.pct / 100);
+  return { target_rate_pct: null, target_kcal_delta: null };
 }
 
 
