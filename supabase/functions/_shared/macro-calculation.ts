@@ -213,6 +213,7 @@ export async function calculateMacrosForUser(
   // ── EMA weight trend, replacing the old few-point average ──────────
   const haveTrendData = weigh_in_count >= 2 && days_logged >= 1;
   let trend_delta_kg = 0;
+  let flagReasonSwing: string | null = null;
   if (haveTrendData) {
     const { data: trendRow } = await supa
       .from("weight_trend_state").select("trend_kg, last_computed_date")
