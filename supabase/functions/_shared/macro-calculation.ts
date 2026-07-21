@@ -17,6 +17,9 @@ export type Profile = {
   target_rate_pct: number | null;
   target_kcal_delta: number | null;
   reached_target_at: string | null;
+  nutrition_phase: string | null;
+  phase_started_at: string | null;
+  resume_goal_json: any;
 };
 
 export type NutritionModifier =
