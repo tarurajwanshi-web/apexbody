@@ -114,6 +114,7 @@ function Nutrition() {
   const [applyingReview, setApplyingReview] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [phase, setPhase] = useState<string | null>(null);
   const [ptrDelta, setPtrDelta] = useState(0);
   // Undo snackbar state — populated when a meal is soft-deleted.
   const [pendingUndo, setPendingUndo] = useState<{ id: string } | null>(null);
@@ -171,6 +172,19 @@ function Nutrition() {
         : Promise.resolve(setHydration(null)),
       fetchHydrationEvents(dateArg).then(setHydrationEvents).catch(() => setHydrationEvents([])),
       fetchWeekly(weeklyArg).then(setWeekly).catch(() => setWeekly(null)),
+      (async () => {
+        try {
+          const { data: u } = await supabase.auth.getUser();
+          const uid = u.user?.id;
+          if (!uid) { setPhase(null); return; }
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("nutrition_phase, reached_target_at")
+            .eq("user_id", uid)
+            .maybeSingle();
+          setPhase((prof?.nutrition_phase as string | null) ?? null);
+        } catch { setPhase(null); }
+      })(),
       (async () => {
         try {
           const { data: u } = await supabase.auth.getUser();
@@ -313,7 +327,7 @@ function Nutrition() {
       if (uid) {
         const { data } = await supabase
           .from("profiles")
-          .select("id, user_id, timezone")
+          .select("id, user_id, timezone, nutrition_phase, reached_target_at")
           .eq("user_id", uid)
           .maybeSingle();
         profileRow = data ?? null;
@@ -503,9 +517,11 @@ function Nutrition() {
 
       {/* Goal-based framing line */}
       <p className="mx-5 mt-5 text-[12px] text-text-secondary leading-snug">
-        {goalText
-          ? <>Based on your <span className="text-text-primary font-medium">{goalText}</span> goal and your stats, here's your daily target.</>
-          : <>Finish onboarding to calculate your personalized daily target.</>}
+        {phase === "maintain"
+          ? <>You've reached your goal weight. Holding at <span className="text-text-primary font-medium">maintenance</span> to lock in your result — your next phase options are coming soon.</>
+          : goalText
+            ? <>Based on your <span className="text-text-primary font-medium">{goalText}</span> goal and your stats, here's your daily target.</>
+            : <>Finish onboarding to calculate your personalized daily target.</>}
       </p>
 
       <section className="mx-5 mt-3 rounded-2xl bg-bg-2 border border-white/5 p-4">
