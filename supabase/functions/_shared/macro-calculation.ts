@@ -389,11 +389,38 @@ export async function calculateMacrosForUser(
   );
   if (refeedCandidate && !flagReason) flagReason = "refeed_candidate";
 
-  // ── Goal-reached detection (new) ─────────────────────────────────────
-  if (direction !== "maintain" && p.reached_target_at == null && p.target_weight_kg != null) {
-    const distanceToTarget = Math.abs(current_weight_kg - Number(p.target_weight_kg));
-    if (distanceToTarget <= 1.0) {
+  // ── Goal-weight brake / goal-reached detection ──────────────────────
+  const crossedGoal = direction !== "maintain" && p.target_weight_kg != null &&
+    Math.abs(current_weight_kg - Number(p.target_weight_kg)) <= 1.0;
+  if (p.nutrition_phase === "active_goal" && crossedGoal) {
+    try {
+      await supa.from("nutrition_phase_history").insert({
+        user_id, phase: "maintain", reason: "goal_reached",
+        entry_date: week_start_date, entry_weight_kg: current_weight_kg,
+        entry_target_calories: Math.ceil(blended_tdee),
+        notes: `Reached target ${p.target_weight_kg}kg.`,
+      });
+      await supa.from("nutrition_phase_history")
+        .update({ exit_date: week_start_date, exit_weight_kg: current_weight_kg })
+        .eq("user_id", user_id).eq("phase", "active_goal").is("exit_date", null);
+    } catch (_) { /* history non-critical, never block macro write */ }
+    await supa.from("profiles").update({
+      nutrition_phase: "maintain", phase_started_at: week_start_date,
+      resume_goal_json: {
+        goal: p.goal, target_rate_pct: p.target_rate_pct,
+        target_kcal_delta: p.target_kcal_delta, target_weight_kg: p.target_weight_kg,
+      },
+      reached_target_at: new Date().toISOString(),
+    }).eq("user_id", user_id);
+    direction = "maintain";
+    flagReason = flagReason ?? "target_reached";
+  } else if (direction !== "maintain" && p.reached_target_at == null && p.target_weight_kg != null) {
+    // Legacy path: users without nutrition_phase="active_goal" still get their reached_target_at stamp.
+    if (Math.abs(current_weight_kg - Number(p.target_weight_kg)) <= 1.0) {
       await supa.from("profiles").update({ reached_target_at: new Date().toISOString() }).eq("user_id", user_id);
+      if (!flagReason) flagReason = "target_reached";
+    }
+  }
       if (!flagReason) flagReason = "target_reached";
     }
   }
