@@ -364,7 +364,17 @@ export async function calculateMacrosForUser(
     decision = "hold"; flagReason = "low_adherence_muscle_gain"; new_target_calories = old_target_calories;
   }
 
-  // consecutiveDeficitWeeks computed above the goal branch (hoisted).
+  // Count consecutive prior weeks with a negative kcal adjustment (deficit weeks).
+  const { data: priorDeficitRows } = await supa
+    .from("nutrition_weekly_reviews").select("id, adjustment_kcal")
+    .eq("user_id", user_id).lt("week_start_date", week_start_date)
+    .order("week_start_date", { ascending: false }).limit(8);
+  let consecutiveDeficitWeeks = 0;
+  for (const row of priorDeficitRows ?? []) {
+    if (Number(row.adjustment_kcal ?? 0) < 0) consecutiveDeficitWeeks++;
+    else break;
+  }
+
 
   const refeedCandidate = direction === "lose" && (
     (consecutiveDeficitWeeks >= 8 && atCalorieFloor) ||
