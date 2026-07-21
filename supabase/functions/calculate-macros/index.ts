@@ -124,12 +124,20 @@ Deno.serve(async (req) => {
     const target_calories = Math.max(1200, tdee + deltaKcal);
 
     // ── Protein / fat / carbs ────────────────────────────────────────────
-    const target_protein_g = weight_kg * proteinPerKg(p.goal);
+    const bmi25_ref_kg = 25 * Math.pow((Number(height_cm ?? 0) / 100), 2);
+    const protein_anchor_kg = bmi25_ref_kg > 0 ? Math.min(weight_kg, bmi25_ref_kg) : weight_kg;
+    let target_protein_g = protein_anchor_kg * proteinPerKg(p.goal);
     const fatFloorFromKg = weight_kg * 0.4;
     const fatFromPct = (target_calories * 0.25) / 9;
-    const target_fat_g = Math.max(fatFloorFromKg, fatFromPct);
-    const remaining = target_calories - target_protein_g * 4 - target_fat_g * 9;
-    const target_carbs_g = Math.max(0, remaining / 4);
+    let target_fat_g = Math.max(fatFloorFromKg, fatFromPct);
+    if (target_protein_g * 4 + target_fat_g * 9 > target_calories) {
+      const fat_floor_hard = weight_kg * 0.35;
+      target_fat_g = Math.max(fat_floor_hard, (target_calories - target_protein_g * 4) / 9);
+      if (target_protein_g * 4 + target_fat_g * 9 > target_calories) {
+        target_protein_g = Math.max(0, (target_calories - target_fat_g * 9) / 4);
+      }
+    }
+    const target_carbs_g = Math.max(0, (target_calories - target_protein_g * 4 - target_fat_g * 9) / 4);
 
     const today = new Date().toISOString().slice(0, 10);
     const row = {
