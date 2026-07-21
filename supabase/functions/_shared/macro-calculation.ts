@@ -208,6 +208,10 @@ export async function calculateMacrosForUser(
 
   if (avgReadiness < 45 && trainingLoadIndex > 1.0) trainingLoadIndex = Math.max(0.85, trainingLoadIndex * 0.85);
   trainingLoadIndex = Math.max(0.7, Math.min(1.3, trainingLoadIndex));
+  if (direction === "lose" || goal === "recomposition") {
+    // Cutting goals: don't let training load re-inflate expenditure and cancel the deficit.
+    trainingLoadIndex = Math.min(trainingLoadIndex, 1.0);
+  }
   const weeklySetAvg = totalSets / 7;
 
   // ── EMA weight trend, replacing the old few-point average ──────────
