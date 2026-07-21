@@ -314,7 +314,7 @@ export async function calculateMacrosForUser(
     const floor = direction === "lose" ? Math.max(weight_floor, sex_floor) : blended_tdee * 0.95;
     const ceiling = direction === "gain" ? blended_tdee * 1.2 : direction === "maintain" ? blended_tdee * 1.05 : blended_tdee * 0.95;
 
-    if (raw_target_calories < floor) { new_target_calories = Math.ceil(floor); decision = "capped"; flagReason = "deficit_capped_for_safety"; }
+    if (raw_target_calories < floor) { new_target_calories = Math.ceil(floor); decision = "capped"; flagReason = direction === "lose" ? "at_safe_minimum_not_deficit" : "deficit_capped_for_safety"; }
     else if (raw_target_calories > ceiling) { new_target_calories = Math.ceil(ceiling); decision = "capped"; }
     else { new_target_calories = Math.ceil(raw_target_calories); }
   }
