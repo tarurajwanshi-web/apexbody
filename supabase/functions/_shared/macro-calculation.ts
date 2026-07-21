@@ -223,6 +223,12 @@ export async function calculateMacrosForUser(
     const sortedDates = [...dailyWeights.keys()].sort();
     for (const d of sortedDates) trend = trend + alpha * (dailyWeights.get(d)! - trend);
     trend_delta_kg = trend - startTrend;
+    const implied_weekly_kg = Math.abs(trend_delta_kg);
+    if (implied_weekly_kg > 1.2) {
+      // physiologically implausible in one week → treat as water/noise, damp the observation
+      trend_delta_kg = trend_delta_kg * 0.15;
+      flagReasonSwing = "abnormal_weight_swing";
+    }
     await supa.from("weight_trend_state").upsert(
       { user_id, trend_kg: trend, last_computed_date: sortedDates[sortedDates.length - 1] },
       { onConflict: "user_id" },
