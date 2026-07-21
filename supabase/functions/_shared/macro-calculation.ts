@@ -289,8 +289,12 @@ export async function calculateMacrosForUser(
   }
 
   const expenditure = blended_tdee * trainingLoadIndex;
+  const phaseForcesMaintain = p.nutrition_phase === "maintain";
+  if (phaseForcesMaintain) direction = "maintain";
   let raw_target_calories: number;
-  if (goal === "fat_loss") {
+  if (phaseForcesMaintain) {
+    raw_target_calories = expenditure; // maintenance phase locked in after goal reached
+  } else if (goal === "fat_loss") {
     const rate = Math.min(2.0, Math.max(0, Number(p.target_rate_pct ?? 0)));
     if (rate <= 0) {
       raw_target_calories = expenditure; // no rate on file → hold at maintenance, never fake a deficit
