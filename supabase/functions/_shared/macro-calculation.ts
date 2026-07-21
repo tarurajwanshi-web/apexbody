@@ -421,9 +421,6 @@ export async function calculateMacrosForUser(
       if (!flagReason) flagReason = "target_reached";
     }
   }
-      if (!flagReason) flagReason = "target_reached";
-    }
-  }
 
   const adjustment_kcal = new_target_calories - (old_target_calories || blended_tdee);
   const shouldApply = decision !== "hold" && confidenceTier !== "low" && !abnormal;
