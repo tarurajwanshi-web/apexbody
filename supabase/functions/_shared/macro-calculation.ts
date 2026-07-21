@@ -40,13 +40,30 @@ function proteinPerKg(goal: string | null | undefined): number {
   return goal === "fat_loss" ? 2.2 : 1.8;
 }
 
-function recomputeMacros(targetCalories: number, weightKg: number, goal: string | null) {
-  const target_protein_g = weightKg * proteinPerKg(goal);
+function recomputeMacros(
+  targetCalories: number,
+  weightKg: number,
+  goal: string | null,
+  heightCm: number | null | undefined,
+) {
+  const bmi25_ref_kg = 25 * Math.pow((Number(heightCm ?? 0) / 100), 2);
+  const protein_anchor_kg = bmi25_ref_kg > 0 ? Math.min(weightKg, bmi25_ref_kg) : weightKg;
+  let target_protein_g = protein_anchor_kg * proteinPerKg(goal);
   const fatFloorFromKg = weightKg * 0.4;
   const fatFromPct = (targetCalories * 0.25) / 9;
-  const target_fat_g = Math.max(fatFloorFromKg, fatFromPct);
-  const remaining = targetCalories - target_protein_g * 4 - target_fat_g * 9;
-  const target_carbs_g = Math.max(0, remaining / 4);
+  let target_fat_g = Math.max(fatFloorFromKg, fatFromPct);
+  // Guard: protein*4 + fat*9 must fit inside targetCalories.
+  if (target_protein_g * 4 + target_fat_g * 9 > targetCalories) {
+    const fat_floor_hard = weightKg * 0.35;
+    target_fat_g = Math.max(
+      fat_floor_hard,
+      (targetCalories - target_protein_g * 4) / 9,
+    );
+    if (target_protein_g * 4 + target_fat_g * 9 > targetCalories) {
+      target_protein_g = Math.max(0, (targetCalories - target_fat_g * 9) / 4);
+    }
+  }
+  const target_carbs_g = Math.max(0, (targetCalories - target_protein_g * 4 - target_fat_g * 9) / 4);
   return {
     target_protein_g: Math.round(target_protein_g),
     target_carbs_g: Math.round(target_carbs_g),
