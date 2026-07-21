@@ -176,6 +176,19 @@ function Nutrition() {
         try {
           const { data: u } = await supabase.auth.getUser();
           const uid = u.user?.id;
+          if (!uid) { setPhase(null); return; }
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("nutrition_phase, reached_target_at")
+            .eq("user_id", uid)
+            .maybeSingle();
+          setPhase((prof?.nutrition_phase as string | null) ?? null);
+        } catch { setPhase(null); }
+      })(),
+      (async () => {
+        try {
+          const { data: u } = await supabase.auth.getUser();
+          const uid = u.user?.id;
           if (!uid) { setWeeklyReview(null); setDaysLoggedThisWeek(0); return; }
           const { data: review } = await supabase
             .from("nutrition_weekly_reviews")
