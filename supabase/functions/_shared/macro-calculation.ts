@@ -285,19 +285,6 @@ export async function calculateMacrosForUser(
     flagReason = atCalorieFloor ? "floor_aware_low_adherence" : "low_adherence";
   }
 
-  // Count consecutive prior weeks with a negative kcal adjustment (deficit weeks).
-  // Hoisted above the goal branch so recomp phasing can read it. `refeedCandidate`
-  // below still consumes the same value.
-  const { data: priorDeficitRows } = await supa
-    .from("nutrition_weekly_reviews").select("id, adjustment_kcal")
-    .eq("user_id", user_id).lt("week_start_date", week_start_date)
-    .order("week_start_date", { ascending: false }).limit(8);
-  let consecutiveDeficitWeeks = 0;
-  for (const row of priorDeficitRows ?? []) {
-    if (Number(row.adjustment_kcal ?? 0) < 0) consecutiveDeficitWeeks++;
-    else break;
-  }
-
   const expenditure = blended_tdee * trainingLoadIndex;
   let raw_target_calories: number;
   if (goal === "fat_loss") {
@@ -309,18 +296,11 @@ export async function calculateMacrosForUser(
       raw_target_calories = expenditure - weekly_deficit_kcal;
     }
   } else if (goal === "muscle_gain" || goal === "strength" || goal === "recomposition") {
-    if (goal === "recomposition") {
-      // Phase the deficit: 10 weeks on, 4 weeks maintenance, to stay net weight-neutral.
-      const cyclePos = consecutiveDeficitWeeks % 14;
-      const inMaintenancePhase = cyclePos >= 10;
-      raw_target_calories = inMaintenancePhase ? expenditure : expenditure + Number(p.target_kcal_delta ?? 0);
-      if (inMaintenancePhase) flagReason = flagReason ?? "recomp_maintenance_phase";
-    } else {
-      raw_target_calories = expenditure + Number(p.target_kcal_delta ?? 0);
-    }
+    raw_target_calories = expenditure + Number(p.target_kcal_delta ?? 0);
   } else {
     raw_target_calories = expenditure; // athletic_performance, maintenance, unmatched → maintenance
   }
+
 
   let new_target_calories = old_target_calories;
 
