@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
 
   // Fetch profile.
   const select =
-    "user_id, timezone, goal, biological_sex, age, measurement_height_cm, measurement_weight_kg, body_data_type, dexa_lean_mass_kg, user_marked_abnormal_week_start";
+    "user_id, timezone, goal, biological_sex, age, measurement_height_cm, measurement_weight_kg, body_data_type, dexa_lean_mass_kg, user_marked_abnormal_week_start, target_weight_kg, target_rate_pct, target_kcal_delta";
   const { data: profile, error: profileError } = await supa
     .from("profiles")
     .select(select)
