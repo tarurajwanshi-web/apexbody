@@ -114,6 +114,7 @@ function Nutrition() {
   const [applyingReview, setApplyingReview] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [phase, setPhase] = useState<string | null>(null);
   const [ptrDelta, setPtrDelta] = useState(0);
   // Undo snackbar state — populated when a meal is soft-deleted.
   const [pendingUndo, setPendingUndo] = useState<{ id: string } | null>(null);
