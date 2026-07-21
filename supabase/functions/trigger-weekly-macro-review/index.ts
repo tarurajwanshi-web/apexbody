@@ -1,4 +1,4 @@
-// redeploy: rebundle _shared/macro-calculation.ts (V3 recomp phasing) 2026-07-21c
+// redeploy: rebundle _shared/macro-calculation.ts (revert recomp phasing → standing delta) 2026-07-21d
 // trigger-weekly-macro-review — JWT-gated client trigger.
 //
 // Called from the Fuel page on Monday morning (user-local) so the weekly
