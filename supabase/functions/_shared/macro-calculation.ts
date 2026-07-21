@@ -269,11 +269,10 @@ export async function calculateMacrosForUser(
     flagReason = atCalorieFloor ? "floor_aware_low_adherence" : "low_adherence";
   }
 
-  const goal = p.goal || "recomposition";
   const expenditure = blended_tdee * trainingLoadIndex;
   let raw_target_calories: number;
   if (goal === "fat_loss") {
-    const rate = Number(p.target_rate_pct ?? 0);
+    const rate = Math.min(2.0, Math.max(0, Number(p.target_rate_pct ?? 0)));
     if (rate <= 0) {
       raw_target_calories = expenditure; // no rate on file → hold at maintenance, never fake a deficit
     } else {
