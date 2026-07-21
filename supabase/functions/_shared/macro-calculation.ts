@@ -160,6 +160,7 @@ export async function calculateMacrosForUser(
   const adherence_pct = (days_logged / 7) * 100;
 
   let current_weight_kg: number | null = null;
+  let used_profile_weight_fallback = false;
   if (dailyWeights.size > 0) {
     const latestDate = [...dailyWeights.keys()].sort().pop()!;
     current_weight_kg = dailyWeights.get(latestDate)!;
