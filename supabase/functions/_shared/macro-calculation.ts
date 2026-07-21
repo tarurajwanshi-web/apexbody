@@ -15,6 +15,7 @@ export type Profile = {
   user_marked_abnormal_week_start: string | null;
   target_weight_kg: number | null;
   target_rate_pct: number | null;
+  target_kcal_delta: number | null;
   reached_target_at: string | null;
 };
 
