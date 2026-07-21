@@ -1,44 +1,69 @@
-## E4 fix — onboarding protein ceiling + lean anchor
+## V3 recomp phasing — stop the indefinite slow-cut
 
-Single file: `supabase/functions/calculate-macros/index.ts`. Replace the macro-split block at L127–132 with the lean-anchored version + hard guard so onboarding matches the shared `recomputeMacros` helper in `_shared/macro-calculation.ts`.
+Product call: recomposition cycles 10 weeks at `target_kcal_delta` (negative) then 4 weeks at maintenance (delta 0), looping. Uses the already-computed `consecutiveDeficitWeeks`. No new state, no new columns.
 
-### Diff
+### File 1: `supabase/functions/_shared/macro-calculation.ts`
 
-`supabase/functions/calculate-macros/index.ts` L126–132:
+**Step A — Hoist `consecutiveDeficitWeeks` computation above the F1 goal branch.**
 
+Move lines 365–373 (the `priorDeficitRows` query + counting loop) to sit immediately before line 288 (`const expenditure = blended_tdee * trainingLoadIndex;`). Delete the original block at 365–373. The `refeedCandidate` block at 374–378 stays in place — it still reads `consecutiveDeficitWeeks` fine from the hoisted declaration.
+
+Confirmed: `consecutiveDeficitWeeks` will be declared exactly once, above L288. `refeedCandidate` and the recomp branch both read it.
+
+**Step B — Phase the recomp deficit in the F1 goal branch (L298–299).**
+
+Replace:
 ```ts
-// ── Protein / fat / carbs ────────────────────────────────────────────
-const bmi25_ref_kg = 25 * Math.pow((Number(height_cm ?? 0) / 100), 2);
-const protein_anchor_kg = bmi25_ref_kg > 0 ? Math.min(weight_kg, bmi25_ref_kg) : weight_kg;
-let target_protein_g = protein_anchor_kg * proteinPerKg(p.goal);
-const fatFloorFromKg = weight_kg * 0.4;
-const fatFromPct = (target_calories * 0.25) / 9;
-let target_fat_g = Math.max(fatFloorFromKg, fatFromPct);
-if (target_protein_g * 4 + target_fat_g * 9 > target_calories) {
-  const fat_floor_hard = weight_kg * 0.35;
-  target_fat_g = Math.max(fat_floor_hard, (target_calories - target_protein_g * 4) / 9);
-  if (target_protein_g * 4 + target_fat_g * 9 > target_calories) {
-    target_protein_g = Math.max(0, (target_calories - target_fat_g * 9) / 4);
-  }
+} else if (goal === "muscle_gain" || goal === "strength" || goal === "recomposition") {
+  raw_target_calories = expenditure + Number(p.target_kcal_delta ?? 0);
 }
-const target_carbs_g = Math.max(0, (target_calories - target_protein_g * 4 - target_fat_g * 9) / 4);
 ```
 
-The three `Math.round(...)` calls in the `row = {...}` block (L140–142) already round `target_protein_g`, `target_carbs_g`, `target_fat_g` — kept unchanged. `let` (not `const`) because the guard may reassign protein/fat.
+With:
+```ts
+} else if (goal === "muscle_gain" || goal === "strength" || goal === "recomposition") {
+  if (goal === "recomposition") {
+    // Phase the deficit: 10 weeks on, 4 weeks maintenance, to stay net weight-neutral.
+    const cyclePos = consecutiveDeficitWeeks % 14;
+    const inMaintenancePhase = cyclePos >= 10;
+    raw_target_calories = inMaintenancePhase ? expenditure : expenditure + Number(p.target_kcal_delta ?? 0);
+    if (inMaintenancePhase) flagReason = flagReason ?? "recomp_maintenance_phase";
+  } else {
+    raw_target_calories = expenditure + Number(p.target_kcal_delta ?? 0);
+  }
+}
+```
 
-### Scope confirmations
+Note on the prompt's `!flagReasonSwing` guard: `flagReasonSwing` is only assigned inside the EMA block earlier and would already be captured by the merge at L393 (`flagReason ?? flagReasonSwing`). Using `flagReason ?? "recomp_maintenance_phase"` here preserves precedence — a more specific flag (abnormal_week, low_adherence, etc.) still wins, and the deferred swing flag still surfaces via the final merge if nothing more specific set flagReason.
 
-- `height_cm` in scope from L55.
-- `weight_kg` in scope from L54.
-- `proteinPerKg` imported/defined at L19.
-- No other logic touched — BMR, TDEE, deltaKcal, `target_calories`, RPC call, weight_trend seed all unchanged.
+No other logic changes. Decision logic, floor/ceiling caps, protein/fat/carb split, modifier overrides, RPC — all untouched.
+
+### File 2: new migration — expand CHECK constraint
+
+Add `'recomp_maintenance_phase'` to `nutrition_weekly_reviews_flag_chk`. Same drop-and-recreate pattern as the last flag migration. Full existing allow-list preserved:
+
+```sql
+ALTER TABLE public.nutrition_weekly_reviews DROP CONSTRAINT IF EXISTS nutrition_weekly_reviews_flag_chk;
+ALTER TABLE public.nutrition_weekly_reviews ADD CONSTRAINT nutrition_weekly_reviews_flag_chk
+  CHECK (flag_reason IS NULL OR flag_reason = ANY (ARRAY[
+    'insufficient_data','abnormal_week','deficit_capped_for_safety','missing_required_profile_data',
+    'low_adherence_muscle_gain','refeed_candidate','floor_aware_low_adherence','low_adherence',
+    'at_safe_minimum_not_deficit','abnormal_weight_swing','stale_weight_used',
+    'deficit_caution_override','fuel_more_override','target_reached','invalid_goal_value',
+    'missing_target_rate','recomp_maintenance_phase'
+  ]));
+```
+
+(I'll confirm the exact current allow-list from the previous migration before submitting, and include every value already present — the list above is my current best read; the migration will mirror the DB's current constraint exactly plus the one new value.)
 
 ### Deploy
 
-Redeploy `calculate-macros` only. Confirm fresh deploy timestamp.
+Redeploy `calculate-macros-weekly` and `trigger-weekly-macro-review` (bump the redeploy comment date in each). Do NOT redeploy `calculate-macros` — onboarding runs before any weekly review exists, so `consecutiveDeficitWeeks` is always 0 and the recomp phasing is a no-op there anyway.
 
 ### Verification
 
-- Obese user (e.g. 140kg @ 170cm, fat_loss): protein anchored to BMI-25 ref (~72kg × 2.2 = ~159g) not 140×2.2=308g; carbs ≥ 0.
-- Normal-BMI user unchanged (protein_anchor_kg = weight_kg when bodyweight ≤ BMI-25 ref).
-- Tight-deficit case where protein+fat would exceed calories: fat drops to 0.35×kg floor, then protein reduces, carbs floor at 0 (never negative).
+- Recomp user with `consecutiveDeficitWeeks` in [0..9] → `raw_target_calories = expenditure + target_kcal_delta` (deficit applied), no `recomp_maintenance_phase` flag.
+- Recomp user with `consecutiveDeficitWeeks` in [10..13] → `raw_target_calories = expenditure` (maintenance), flag set (unless a higher-priority flag already set).
+- Recomp user at week 14 → `cyclePos = 0`, back into deficit.
+- `muscle_gain` / `strength` → unchanged, always adds delta.
+- `fat_loss`, `maintain`, other → unchanged.
