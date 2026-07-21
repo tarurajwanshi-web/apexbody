@@ -1564,6 +1564,9 @@ const FLAG_LABELS: Record<string, string> = {
   refeed_candidate: "Refeed candidate — consider a recovery week",
   deficit_capped_for_safety: "Capped for safety",
   abnormal_week: "Abnormal week — held",
+  at_safe_minimum_not_deficit: "Holding at safe minimum, not cutting further",
+  abnormal_weight_swing: "Weight swing looks like water — trend damped",
+  stale_weight_used: "No weigh-in this week — using last known weight",
 };
 
 function WeeklyReviewCard({
