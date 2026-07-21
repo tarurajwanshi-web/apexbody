@@ -327,7 +327,7 @@ function Nutrition() {
       if (uid) {
         const { data } = await supabase
           .from("profiles")
-          .select("id, user_id, timezone")
+          .select("id, user_id, timezone, nutrition_phase, reached_target_at")
           .eq("user_id", uid)
           .maybeSingle();
         profileRow = data ?? null;
@@ -517,9 +517,11 @@ function Nutrition() {
 
       {/* Goal-based framing line */}
       <p className="mx-5 mt-5 text-[12px] text-text-secondary leading-snug">
-        {goalText
-          ? <>Based on your <span className="text-text-primary font-medium">{goalText}</span> goal and your stats, here's your daily target.</>
-          : <>Finish onboarding to calculate your personalized daily target.</>}
+        {phase === "maintain"
+          ? <>You've reached your goal weight. Holding at <span className="text-text-primary font-medium">maintenance</span> to lock in your result — your next phase options are coming soon.</>
+          : goalText
+            ? <>Based on your <span className="text-text-primary font-medium">{goalText}</span> goal and your stats, here's your daily target.</>
+            : <>Finish onboarding to calculate your personalized daily target.</>}
       </p>
 
       <section className="mx-5 mt-3 rounded-2xl bg-bg-2 border border-white/5 p-4">
