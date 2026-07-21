@@ -171,7 +171,10 @@ export async function calculateMacrosForUser(
       .limit(1).maybeSingle();
     if (anyW?.weight_kg != null) current_weight_kg = Number(anyW.weight_kg);
   }
-  if (current_weight_kg == null && p.measurement_weight_kg != null) current_weight_kg = Number(p.measurement_weight_kg);
+  if (current_weight_kg == null && p.measurement_weight_kg != null) {
+    current_weight_kg = Number(p.measurement_weight_kg);
+    used_profile_weight_fallback = true;
+  }
   if (current_weight_kg == null || current_weight_kg <= 0) return insertHold("missing_required_profile_data", false, false);
 
   // ── Training load metrics (unchanged) ───────────────────────────────
