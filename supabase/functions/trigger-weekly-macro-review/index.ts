@@ -1,4 +1,4 @@
-// redeploy: rebundle _shared/macro-calculation.ts (F1 goal-deficit) 2026-07-21
+// redeploy: rebundle _shared/macro-calculation.ts (E1–E7 hardening) 2026-07-21b
 // trigger-weekly-macro-review — JWT-gated client trigger.
 //
 // Called from the Fuel page on Monday morning (user-local) so the weekly

@@ -40,13 +40,30 @@ function proteinPerKg(goal: string | null | undefined): number {
   return goal === "fat_loss" ? 2.2 : 1.8;
 }
 
-function recomputeMacros(targetCalories: number, weightKg: number, goal: string | null) {
-  const target_protein_g = weightKg * proteinPerKg(goal);
+function recomputeMacros(
+  targetCalories: number,
+  weightKg: number,
+  goal: string | null,
+  heightCm: number | null | undefined,
+) {
+  const bmi25_ref_kg = 25 * Math.pow((Number(heightCm ?? 0) / 100), 2);
+  const protein_anchor_kg = bmi25_ref_kg > 0 ? Math.min(weightKg, bmi25_ref_kg) : weightKg;
+  let target_protein_g = protein_anchor_kg * proteinPerKg(goal);
   const fatFloorFromKg = weightKg * 0.4;
   const fatFromPct = (targetCalories * 0.25) / 9;
-  const target_fat_g = Math.max(fatFloorFromKg, fatFromPct);
-  const remaining = targetCalories - target_protein_g * 4 - target_fat_g * 9;
-  const target_carbs_g = Math.max(0, remaining / 4);
+  let target_fat_g = Math.max(fatFloorFromKg, fatFromPct);
+  // Guard: protein*4 + fat*9 must fit inside targetCalories.
+  if (target_protein_g * 4 + target_fat_g * 9 > targetCalories) {
+    const fat_floor_hard = weightKg * 0.35;
+    target_fat_g = Math.max(
+      fat_floor_hard,
+      (targetCalories - target_protein_g * 4) / 9,
+    );
+    if (target_protein_g * 4 + target_fat_g * 9 > targetCalories) {
+      target_protein_g = Math.max(0, (targetCalories - target_fat_g * 9) / 4);
+    }
+  }
+  const target_carbs_g = Math.max(0, (targetCalories - target_protein_g * 4 - target_fat_g * 9) / 4);
   return {
     target_protein_g: Math.round(target_protein_g),
     target_carbs_g: Math.round(target_carbs_g),
@@ -94,6 +111,7 @@ export async function calculateMacrosForUser(
   } catch {
     return insertHold("invalid_goal_value", false, false);
   }
+  const goal = p.goal || "recomposition";
 
   if (direction !== "maintain" && p.target_rate_pct == null) {
     return insertHold("missing_target_rate", false, false);
@@ -142,6 +160,7 @@ export async function calculateMacrosForUser(
   const adherence_pct = (days_logged / 7) * 100;
 
   let current_weight_kg: number | null = null;
+  let used_profile_weight_fallback = false;
   if (dailyWeights.size > 0) {
     const latestDate = [...dailyWeights.keys()].sort().pop()!;
     current_weight_kg = dailyWeights.get(latestDate)!;
@@ -154,7 +173,10 @@ export async function calculateMacrosForUser(
       .limit(1).maybeSingle();
     if (anyW?.weight_kg != null) current_weight_kg = Number(anyW.weight_kg);
   }
-  if (current_weight_kg == null && p.measurement_weight_kg != null) current_weight_kg = Number(p.measurement_weight_kg);
+  if (current_weight_kg == null && p.measurement_weight_kg != null) {
+    current_weight_kg = Number(p.measurement_weight_kg);
+    used_profile_weight_fallback = true;
+  }
   if (current_weight_kg == null || current_weight_kg <= 0) return insertHold("missing_required_profile_data", false, false);
 
   // ── Training load metrics (unchanged) ───────────────────────────────
@@ -191,11 +213,16 @@ export async function calculateMacrosForUser(
 
   if (avgReadiness < 45 && trainingLoadIndex > 1.0) trainingLoadIndex = Math.max(0.85, trainingLoadIndex * 0.85);
   trainingLoadIndex = Math.max(0.7, Math.min(1.3, trainingLoadIndex));
+  if (direction === "lose" || goal === "recomposition") {
+    // Cutting goals: don't let training load re-inflate expenditure and cancel the deficit.
+    trainingLoadIndex = Math.min(trainingLoadIndex, 1.0);
+  }
   const weeklySetAvg = totalSets / 7;
 
   // ── EMA weight trend, replacing the old few-point average ──────────
   const haveTrendData = weigh_in_count >= 2 && days_logged >= 1;
   let trend_delta_kg = 0;
+  let flagReasonSwing: string | null = null;
   if (haveTrendData) {
     const { data: trendRow } = await supa
       .from("weight_trend_state").select("trend_kg, last_computed_date")
@@ -206,6 +233,12 @@ export async function calculateMacrosForUser(
     const sortedDates = [...dailyWeights.keys()].sort();
     for (const d of sortedDates) trend = trend + alpha * (dailyWeights.get(d)! - trend);
     trend_delta_kg = trend - startTrend;
+    const implied_weekly_kg = Math.abs(trend_delta_kg);
+    if (implied_weekly_kg > 1.2) {
+      // physiologically implausible in one week → treat as water/noise, damp the observation
+      trend_delta_kg = trend_delta_kg * 0.15;
+      flagReasonSwing = "abnormal_weight_swing";
+    }
     await supa.from("weight_trend_state").upsert(
       { user_id, trend_kg: trend, last_computed_date: sortedDates[sortedDates.length - 1] },
       { onConflict: "user_id" },
@@ -252,11 +285,10 @@ export async function calculateMacrosForUser(
     flagReason = atCalorieFloor ? "floor_aware_low_adherence" : "low_adherence";
   }
 
-  const goal = p.goal || "recomposition";
   const expenditure = blended_tdee * trainingLoadIndex;
   let raw_target_calories: number;
   if (goal === "fat_loss") {
-    const rate = Number(p.target_rate_pct ?? 0);
+    const rate = Math.min(2.0, Math.max(0, Number(p.target_rate_pct ?? 0)));
     if (rate <= 0) {
       raw_target_calories = expenditure; // no rate on file → hold at maintenance, never fake a deficit
     } else {
@@ -297,7 +329,7 @@ export async function calculateMacrosForUser(
     const floor = direction === "lose" ? Math.max(weight_floor, sex_floor) : blended_tdee * 0.95;
     const ceiling = direction === "gain" ? blended_tdee * 1.2 : direction === "maintain" ? blended_tdee * 1.05 : blended_tdee * 0.95;
 
-    if (raw_target_calories < floor) { new_target_calories = Math.ceil(floor); decision = "capped"; flagReason = "deficit_capped_for_safety"; }
+    if (raw_target_calories < floor) { new_target_calories = Math.ceil(floor); decision = "capped"; flagReason = direction === "lose" ? "at_safe_minimum_not_deficit" : "deficit_capped_for_safety"; }
     else if (raw_target_calories > ceiling) { new_target_calories = Math.ceil(ceiling); decision = "capped"; }
     else { new_target_calories = Math.ceil(raw_target_calories); }
   }
@@ -357,8 +389,12 @@ export async function calculateMacrosForUser(
   const adjustment_kcal = new_target_calories - (old_target_calories || blended_tdee);
   const shouldApply = decision !== "hold" && confidenceTier !== "low" && !abnormal;
 
+  // Merge deferred flags so they surface when no more-specific reason preempted.
+  flagReason = flagReason ?? flagReasonSwing;
+  if (used_profile_weight_fallback) flagReason = flagReason ?? "stale_weight_used";
+
   const directInsertReview = async (overrideFlag?: string | null): Promise<string> => {
-    const { data, error } = await supa.from("nutrition_weekly_reviews").insert({
+    const { data, error } = await supa.from("nutrition_weekly_reviews").upsert({
       user_id, week_start_date, week_end_date, weigh_in_count, days_logged, adherence_pct,
       eligible: days_logged >= 3, confidence_tier: confidenceTier, abnormal_week: abnormal,
       old_target_calories: old_target_calories || null, old_observed_tdee, new_observed_tdee, blended_tdee,
@@ -367,7 +403,7 @@ export async function calculateMacrosForUser(
       flag_reason: overrideFlag ?? flagReason, applied_target_id: null, applied_at: null, timezone_used: tz,
       weight_trend_kg_per_week: trend_delta_kg, consecutive_deficit_weeks: consecutiveDeficitWeeks,
       applied_modifier: latestModifier, modifier_overrode_decision: modifierOverrode,
-    }).select("id").single();
+    }, { onConflict: "user_id,week_start_date" }).select("id").single();
     if (error || !data) throw new Error(`review_insert_failed: ${error?.message ?? "no row returned"}`);
     return data.id as string;
   };
