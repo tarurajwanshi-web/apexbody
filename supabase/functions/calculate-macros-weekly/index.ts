@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
 
   // Fetch active profiles (onboarding-complete).
   const select =
-    "user_id, timezone, goal, biological_sex, age, measurement_height_cm, measurement_weight_kg, body_data_type, dexa_lean_mass_kg, user_marked_abnormal_week_start, target_weight_kg, target_rate_pct, reached_target_at, target_kcal_delta";
+    "user_id, timezone, goal, biological_sex, age, measurement_height_cm, measurement_weight_kg, body_data_type, dexa_lean_mass_kg, user_marked_abnormal_week_start, target_weight_kg, target_rate_pct, reached_target_at, target_kcal_delta, nutrition_phase, phase_started_at, resume_goal_json";
 
   let profiles: Profile[] = [];
   try {
