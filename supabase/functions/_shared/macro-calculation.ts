@@ -253,7 +253,21 @@ export async function calculateMacrosForUser(
   }
 
   const goal = p.goal || "recomposition";
-  const raw_target_calories = blended_tdee * trainingLoadIndex; // direction math replaces the old goalMultiplier
+  const expenditure = blended_tdee * trainingLoadIndex;
+  let raw_target_calories: number;
+  if (goal === "fat_loss") {
+    const rate = Number(p.target_rate_pct ?? 0);
+    if (rate <= 0) {
+      raw_target_calories = expenditure; // no rate on file → hold at maintenance, never fake a deficit
+    } else {
+      const weekly_deficit_kcal = (rate / 100) * current_weight_kg * 7700 / 7;
+      raw_target_calories = expenditure - weekly_deficit_kcal;
+    }
+  } else if (goal === "muscle_gain" || goal === "strength" || goal === "recomposition") {
+    raw_target_calories = expenditure + Number(p.target_kcal_delta ?? 0);
+  } else {
+    raw_target_calories = expenditure; // athletic_performance, maintenance, unmatched → maintenance
+  }
   let new_target_calories = old_target_calories;
 
   if (abnormal) {
