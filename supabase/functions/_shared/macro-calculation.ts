@@ -256,6 +256,7 @@ export async function calculateMacrosForUser(
   type Decision = "reduce" | "increase" | "hold" | "capped";
   let decision: Decision = "hold";
   let flagReason: string | null = null;
+  let flagReasonSwing: string | null = null;
   let confidenceTier: "high" | "medium" | "low" = "low";
   if (days_logged >= 6 && weigh_in_count >= 3) confidenceTier = "high";
   else if (days_logged >= 4 && weigh_in_count >= 2) confidenceTier = "medium";
