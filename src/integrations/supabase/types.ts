@@ -451,6 +451,48 @@ export type Database = {
         }
         Relationships: []
       }
+      nutrition_phase_history: {
+        Row: {
+          created_at: string
+          entry_date: string
+          entry_target_calories: number | null
+          entry_weight_kg: number | null
+          exit_date: string | null
+          exit_weight_kg: number | null
+          id: string
+          notes: string | null
+          phase: string
+          reason: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          entry_date: string
+          entry_target_calories?: number | null
+          entry_weight_kg?: number | null
+          exit_date?: string | null
+          exit_weight_kg?: number | null
+          id?: string
+          notes?: string | null
+          phase: string
+          reason?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          entry_date?: string
+          entry_target_calories?: number | null
+          entry_weight_kg?: number | null
+          exit_date?: string | null
+          exit_weight_kg?: number | null
+          id?: string
+          notes?: string | null
+          phase?: string
+          reason?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       nutrition_weekly_reviews: {
         Row: {
           abnormal_week: boolean
@@ -690,9 +732,12 @@ export type Database = {
           measurement_waist_cm: number | null
           measurement_weight_kg: number | null
           name: string | null
+          nutrition_phase: string
+          phase_started_at: string | null
           plan_unlock_date: string | null
           profile_completed_at: string | null
           reached_target_at: string | null
+          resume_goal_json: Json | null
           soft_reset_at: string | null
           target_kcal_delta: number | null
           target_rate_pct: number | null
@@ -725,9 +770,12 @@ export type Database = {
           measurement_waist_cm?: number | null
           measurement_weight_kg?: number | null
           name?: string | null
+          nutrition_phase?: string
+          phase_started_at?: string | null
           plan_unlock_date?: string | null
           profile_completed_at?: string | null
           reached_target_at?: string | null
+          resume_goal_json?: Json | null
           soft_reset_at?: string | null
           target_kcal_delta?: number | null
           target_rate_pct?: number | null
@@ -760,9 +808,12 @@ export type Database = {
           measurement_waist_cm?: number | null
           measurement_weight_kg?: number | null
           name?: string | null
+          nutrition_phase?: string
+          phase_started_at?: string | null
           plan_unlock_date?: string | null
           profile_completed_at?: string | null
           reached_target_at?: string | null
+          resume_goal_json?: Json | null
           soft_reset_at?: string | null
           target_kcal_delta?: number | null
           target_rate_pct?: number | null
