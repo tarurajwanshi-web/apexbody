@@ -1,4 +1,4 @@
-// redeploy: rebundle _shared/macro-calculation.ts (F1 goal-deficit) 2026-07-21
+// redeploy: rebundle _shared/macro-calculation.ts (E1–E7 hardening) 2026-07-21b
 // calculate-macros-weekly — Adaptive Macro Engine (Module 5) — HTTP shell.
 //
 // Runs once per week (Mon 13:00 UTC via pg_cron) as a safety net. For each
