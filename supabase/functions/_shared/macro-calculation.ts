@@ -374,8 +374,12 @@ export async function calculateMacrosForUser(
   const adjustment_kcal = new_target_calories - (old_target_calories || blended_tdee);
   const shouldApply = decision !== "hold" && confidenceTier !== "low" && !abnormal;
 
+  // Merge deferred flags so they surface when no more-specific reason preempted.
+  flagReason = flagReason ?? flagReasonSwing;
+  if (used_profile_weight_fallback) flagReason = flagReason ?? "stale_weight_used";
+
   const directInsertReview = async (overrideFlag?: string | null): Promise<string> => {
-    const { data, error } = await supa.from("nutrition_weekly_reviews").insert({
+    const { data, error } = await supa.from("nutrition_weekly_reviews").upsert({
       user_id, week_start_date, week_end_date, weigh_in_count, days_logged, adherence_pct,
       eligible: days_logged >= 3, confidence_tier: confidenceTier, abnormal_week: abnormal,
       old_target_calories: old_target_calories || null, old_observed_tdee, new_observed_tdee, blended_tdee,
@@ -384,7 +388,7 @@ export async function calculateMacrosForUser(
       flag_reason: overrideFlag ?? flagReason, applied_target_id: null, applied_at: null, timezone_used: tz,
       weight_trend_kg_per_week: trend_delta_kg, consecutive_deficit_weeks: consecutiveDeficitWeeks,
       applied_modifier: latestModifier, modifier_overrode_decision: modifierOverrode,
-    }).select("id").single();
+    }, { onConflict: "user_id,week_start_date" }).select("id").single();
     if (error || !data) throw new Error(`review_insert_failed: ${error?.message ?? "no row returned"}`);
     return data.id as string;
   };
