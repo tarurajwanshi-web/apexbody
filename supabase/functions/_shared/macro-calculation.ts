@@ -111,6 +111,7 @@ export async function calculateMacrosForUser(
   } catch {
     return insertHold("invalid_goal_value", false, false);
   }
+  const goal = p.goal || "recomposition";
 
   if (direction !== "maintain" && p.target_rate_pct == null) {
     return insertHold("missing_target_rate", false, false);
