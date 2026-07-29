@@ -175,13 +175,14 @@ async function computeForUser(supa: any, userId: string) {
 
   // 4) READINESS factor.
   const readinessWindowStart = addDaysISO(today, -7);
-  const { data: readinessRows } = await supa
+  const { data: readinessRows, error: readinessErr } = await supa
     .from("readiness_scores")
     .select("final_score")
     .eq("user_id", userId)
-    .gte("entry_date", readinessWindowStart)
-    .lte("entry_date", today)
+    .gte("score_date", readinessWindowStart)
+    .lte("score_date", today)
     .not("final_score", "is", null);
+  if (readinessErr) console.error("[compute-volume-landmarks] readiness query failed", readinessErr.message);
   const scores = ((readinessRows as any[]) ?? [])
     .map((r) => Number(r.final_score))
     .filter((n) => Number.isFinite(n));
