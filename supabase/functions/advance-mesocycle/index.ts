@@ -224,12 +224,13 @@ async function doWeekly(supa: any, userId: string) {
   );
 
   const sevenDaysAgo = addDaysISO(todayIso, -7);
-  const { data: readiness } = await supa
+  const { data: readiness, error: readinessErr } = await supa
     .from("readiness_scores")
     .select("final_score, training_permission")
     .eq("user_id", userId)
-    .gte("entry_date", sevenDaysAgo)
-    .lte("entry_date", todayIso);
+    .gte("score_date", sevenDaysAgo)
+    .lte("score_date", todayIso);
+  if (readinessErr) console.error("[advance-mesocycle] readiness query failed", readinessErr.message);
 
   let systemic_breakdown = false;
   if ((readiness as any[])?.length >= 3) {
